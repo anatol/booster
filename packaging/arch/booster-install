@@ -1,0 +1,29 @@
+#!/bin/bash -e
+
+kernels=()
+all=0
+
+while read -r line; do
+    # line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
+    if [[ $line != */vmlinuz ]]; then
+        # triggers when it's a change to usr/lib/booster/*
+        all=1
+        break
+    fi
+
+    kernels+=("/${line%/vmlinuz}")
+done
+
+if (( all )); then
+    # change to use all kernels
+    kernels=$(ls -d /usr/lib/modules/*)
+fi
+
+for kernel in "${kernels[@]}"; do
+    if ! read -r pkgbase > /dev/null 2>&1 < "${kernel}/pkgbase"; then
+        # if the kernel has no pkgbase, we skip it
+        continue
+    fi
+
+    booster -force -output /boot/booster-${pkgbase}.img -kernelVersion ${kernel##/usr/lib/modules/}
+done

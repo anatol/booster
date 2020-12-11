@@ -1,0 +1,12 @@
+[Trigger]
+Type = File
+Operation = Install
+Operation = Upgrade
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/lib/booster/*
+
+[Action]
+Description = Updating linux booster initramfs
+When = PostTransaction
+Exec = /usr/share/libalpm/scripts/booster-install
+NeedsTargets
