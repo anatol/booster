@@ -121,6 +121,7 @@ type Opts struct {
 	prompt      string
 	enableTangd bool
 	useDhcp     bool
+	enableTpm2  bool
 	kernelArgs  []string
 	disk        string
 	disks       []vmtest.QemuDisk
@@ -145,13 +146,6 @@ func boosterTest(opts Opts) func(*testing.T) {
 			kernelArgs = append(kernelArgs, "booster.debug=1")
 		}
 
-		// TPM passthrough
-		// TODO: if the computer does not have a TPM chip then we need to setup an emulator:
-		//  sudo modprobe tpm_vtpm_proxy
-		//  mkdir state
-		//  sudo swtpm chardev --vtpm-proxy --tpm2 --log file=tpm.log --tpmstate dir=state --flags not-need-init
-		//params = append(params, "-tpmdev", "passthrough,id=tpm0", "-device", "tpm-tis,tpmdev=tpm0")
-
 		if opts.enableTangd {
 			tangd, err := NewTangServer("assets/tang/cache")
 			if err != nil {
@@ -163,6 +157,20 @@ func boosterTest(opts Opts) func(*testing.T) {
 			// guestfwd=tcp:10.0.2.100:5697-cmd:/usr/lib/tangd ./assets/tang/cache 2>/dev/null
 
 			params = append(params, "-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.port))
+		}
+
+		if opts.enableTpm2 {
+			cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
+			if testing.Verbose() {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer cmd.Process.Kill()
+
+			params = append(params, "-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0")
 		}
 
 		// to enable network dump
@@ -265,7 +273,17 @@ func createAssets() error {
 	if err := exec.Command("go", "build").Run(); err != nil {
 		return err
 	}
-	if err := exec.Command("./assets_generator").Run(); err != nil {
+
+	args := []string{}
+	if testing.Verbose() {
+		args = append(args, "-verbose")
+	}
+	generator := exec.Command("./assets_generator", args...)
+	if testing.Verbose() {
+		generator.Stdout = os.Stdout
+		generator.Stderr = os.Stderr
+	}
+	if err := generator.Run(); err != nil {
 		return err
 	}
 
@@ -341,14 +359,14 @@ func TestBooster(t *testing.T) {
 		kernelArgs:  []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 	}))
 
-	// Figure out how to provide TPM to the guest
-	/*	t.Run("LUKS1.Clevis.TPM2", boosterTest("assets/luks1.clevis.tpm2.img",
-		"", false,
-		"rd.luks.uuid=28c2e412-ab72-4416-b224-8abd116d6f2f",
-		"root=UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043"))
-		t.Run("LUKS2.Clevis.TPM2", boosterTest("assets/luks2.clevis.tpm2.img",
-		"", false,
-		"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f",
-		"root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"))
-	*/
+	t.Run("LUKS1.Clevis.Tpm2", boosterTest(Opts{
+		disk:       "assets/luks1.clevis.tpm2.img",
+		enableTpm2: true,
+		kernelArgs: []string{"rd.luks.uuid=28c2e412-ab72-4416-b224-8abd116d6f2f", "root=UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043"},
+	}))
+	t.Run("LUKS2.Clevis.Tpm2", boosterTest(Opts{
+		disk:       "assets/luks2.clevis.tpm2.img",
+		enableTpm2: true,
+		kernelArgs: []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
+	}))
 }

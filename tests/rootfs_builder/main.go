@@ -88,8 +88,25 @@ func run() error {
 			return fmt.Errorf("cryptsetup luksFormat: %v", err)
 		}
 
+		if *luksClevisPin == "tpm2" {
+			swtpmCmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=../assets/tpm2", "--tpm2", "--server", "type=tcp,port=2321", "--ctrl", "type=tcp,port=2322", "--flags", "not-need-init,startup-clear")
+			if *verbose {
+				swtpmCmd.Stdout = os.Stdout
+				swtpmCmd.Stderr = os.Stderr
+			}
+			if err := swtpmCmd.Start(); err != nil {
+				return err
+			}
+			defer swtpmCmd.Process.Kill()
+		}
+
 		if *luksClevisPin != "" {
 			clevisCmd := exec.Command("clevis", "luks", "bind", "-y", "-k", "-", "-d", output, *luksClevisPin, *luksClevisConfig)
+			if *luksClevisPin == "tpm2" || strings.Contains(*luksClevisConfig, "luks2") {
+				// custom TPM2TOOLS_TCTI does not work due to https://github.com/latchset/clevis/issues/244
+				clevisCmd.Env = append(os.Environ(), "TPM2TOOLS_TCTI=swtpm")
+			}
+
 			clevisCmd.Stdin = strings.NewReader(*luksPassword)
 			if *verbose {
 				clevisCmd.Stdout = os.Stdout

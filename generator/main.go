@@ -160,6 +160,7 @@ func appendModules(img *Image) error {
 		"kernel/drivers/input/keyboard/",
 		"kernel/drivers/net/ethernet/",
 		"kernel/drivers/md/",
+		"kernel/drivers/char/tpm/",
 		"kernel/drivers/usb/host/",
 		"kernel/drivers/hid/usbhid/",
 		"hid_generic",

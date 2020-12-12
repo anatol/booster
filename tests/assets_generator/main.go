@@ -20,6 +20,8 @@ import (
 var verbose = flag.Bool("verbose", false, "output debug info to console")
 
 const assetsDir = "../assets"
+const initBinaryPath = "init"
+const rootfsBuilderBinaryPath = "rootfs_builder"
 
 var imagesToBuild = map[string][]string{
 	"ext4": {"-fsUuid", "5c92fc66-7315-408b-b652-176dc554d370"},
@@ -27,14 +29,11 @@ var imagesToBuild = map[string][]string{
 	"luks1": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "-fsUuid", "ec09a1ea-d43c-4262-b701-bf2577a9ab27"},
 	"luks2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "639b8fdd-36ba-443e-be3e-e5b335935502", "-fsUuid", "7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
 
-	//"luks1.clevis.tpm2": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "28c2e412-ab72-4416-b224-8abd116d6f2f", "-fsUuid", "2996cec0-16fd-4f1d-8bf3-6606afa77043", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
+	"luks1.clevis.tpm2": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "28c2e412-ab72-4416-b224-8abd116d6f2f", "-fsUuid", "2996cec0-16fd-4f1d-8bf3-6606afa77043", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
 	"luks1.clevis.tang": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "-fsUuid", "c23aacf4-9e7e-4206-ba6c-af017934e6fa", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/cache/default.jws"}`},
-	//"luks2.clevis.tpm2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "-fsUuid", "c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
+	"luks2.clevis.tpm2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "-fsUuid", "c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
 	"luks2.clevis.tang": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "f2473f71-9a68-4b16-ae54-8f942b2daf50", "-fsUuid", "7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/cache/default.jws"}`},
 }
-
-const initBinaryPath = "init"
-const rootfsBuilderBinaryPath = "rootfs_builder"
 
 func assetsInit() error {
 	_ = os.Mkdir(assetsDir, 0755)
@@ -66,6 +65,12 @@ func assetsInit() error {
 	}
 	if err := tangCacheCmd.Run(); err != nil {
 		return fmt.Errorf("tangd-update: %v", err)
+	}
+
+	tpmStateDir := assetsDir + "/tpm2"
+	_ = os.Mkdir(tpmStateDir, 0755)
+	if err := exec.Command("swtpm_setup", "--tpm-state", tpmStateDir, "--tpm2", "--ecc", "--create-ek-cert", "--create-platform-cert", "--lock-nvram").Run(); err != nil {
+		return err
 	}
 
 	return nil
