@@ -227,13 +227,13 @@ func luksOpen(dev string, name string) error {
 
 		// in case of a (network) error retry it several times. or maybe retry logic needs to be inside the clevis itself?
 		var password []byte
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 40; i++ {
 			password, err = clevis.Decrypt(payload)
 			if err == nil {
 				break
 			} else {
 				fmt.Println(err)
-				time.Sleep(1 * time.Second)
+				time.Sleep(time.Second)
 			}
 		}
 
@@ -499,7 +499,7 @@ linkReadinessLoop:
 func runDhcp(ifname string) error {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 40; i++ {
 		var err error
 		conversation, err = dhcp.Exchange(ifname)
 		if err == nil {
