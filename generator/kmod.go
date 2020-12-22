@@ -107,7 +107,7 @@ func (k *Kmod) activateModules(filter bool, mods ...string) error {
 		} else {
 			if k.builtinModules[m] {
 				// this module is builtin, no need to add it to image
-				return nil
+				continue
 			}
 
 			if _, ok := k.nameToPathMapping.forward[m]; ok {
