@@ -1,7 +1,7 @@
 # Maintainer: Anatol Pomozov
 
 pkgname=booster-git
-pkgver=r1.58ee91b
+pkgver=0.1.r0.gc3a0905
 pkgrel=1
 pkgdesc='Fast and secure initramfs generator'
 arch=(x86_64)
@@ -11,12 +11,12 @@ depends=(bash)
 makedepends=(git go)
 #checkdepends=(qemu-headless linux)
 provides=(initramfs)
-source=(git+https://github.com/anatol/booster#branch=develop)
+source=(git+https://github.com/anatol/booster)
 sha512sums=('SKIP')
 
 pkgver() {
   cd booster
-  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
 }
 
 build() {
