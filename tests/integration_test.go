@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anatol/vmtest"
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
@@ -223,6 +224,52 @@ func boosterTest(opts Opts) func(*testing.T) {
 	}
 }
 
+func archLinuxTest(t *testing.T) {
+	initRamfs, err := generateInitRamfs(Opts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(initRamfs)
+
+	params := []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic", "-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
+	if os.Getenv("TEST_DISABLE_KVM") != "1" {
+		params = append(params, "-enable-kvm", "-cpu", "host")
+	}
+	opts := vmtest.QemuOptions{
+		OperatingSystem: vmtest.OS_LINUX,
+		Kernel:          filepath.Join(kernelsDir, kernelVersion, "vmlinuz"),
+		InitRamFs:       initRamfs,
+		Params:          params,
+		Disks:           []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
+		Append:          []string{"root=/dev/sda", "rw"},
+		Verbose:         testing.Verbose(),
+		Timeout:         50 * time.Second,
+	}
+	vm, err := vmtest.NewQemu(&opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ssh.ClientConfig{
+		User:            "root",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	conn, err := ssh.Dial("tcp", ":10022", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	sess, err := conn.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	vm.Shutdown()
+}
+
 func compileBinaries(dir string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -374,4 +421,7 @@ func TestBooster(t *testing.T) {
 		enableTpm2: true,
 		kernelArgs: []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
 	}))
+
+	// Verify generated initrd against Arch Linux userspace with systemd
+	t.Run("ArchLinux", archLinuxTest)
 }

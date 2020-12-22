@@ -76,11 +76,54 @@ func assetsInit() error {
 	return nil
 }
 
+func buildArchLinuxImage() error {
+	// based on instructions from https://github.com/anatol/vmtest/blob/master/docs/prepare_image.md
+	cmd := `
+raw=$(mktemp)
+dd if=/dev/zero of=$raw bs=1G count=1
+mkfs.ext4 $raw
+loopdev=$(losetup -fP --show $raw)
+mount=$(mktemp -d)
+mount $loopdev $mount
+pacstrap -c $mount base openssh
+
+echo "[Match]
+Name=enp0s3
+
+[Network]
+DHCP=yes" > $mount/etc/systemd/network/20-wired.network
+
+sed -i '/^root/ { s/:x:/::/ }' $mount/etc/passwd
+sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' $mount/etc/ssh/sshd_config
+sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords yes/' $mount/etc/ssh/sshd_config
+
+arch-chroot $mount systemctl enable sshd systemd-networkd
+umount $mount
+losetup -d $loopdev
+rm -r $mount
+
+#qemu-img convert -f raw -O qcow2 $raw ../assets/archlinux.qcow2
+mv $raw ../assets/archlinux.raw
+`
+
+	sh := exec.Command("sudo", "/bin/sh", "-s")
+	sh.Stdin = strings.NewReader(cmd)
+	if *verbose {
+		sh.Stdout = os.Stdout
+		sh.Stderr = os.Stderr
+	}
+	return sh.Run()
+}
+
 func assetsBuildLocal() error {
 	for id, params := range imagesToBuild {
 		if err := runBuilderLocal(id, params); err != nil {
 			return err
 		}
+	}
+
+	if err := buildArchLinuxImage(); err != nil {
+		return err
 	}
 
 	if err := chownCurrentUser(assetsDir); err != nil {
