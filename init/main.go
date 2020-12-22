@@ -294,7 +294,11 @@ func mountRootFs(dev string) error {
 		return err
 	}
 
-	if err := mount(dev, newRoot, fstype, syscall.MS_RDONLY|syscall.MS_NOATIME, ""); err != nil {
+	rootMountFlags := uintptr(syscall.MS_NOATIME)
+	if _, rw := cmdline["rw"]; !rw {
+		rootMountFlags |= syscall.MS_RDONLY
+	}
+	if err := mount(dev, newRoot, fstype, rootMountFlags, ""); err != nil {
 		return err
 	}
 
