@@ -70,6 +70,11 @@ func generateInitRamfs(opts Opts) (string, error) {
 		return "", fmt.Errorf("Cannot generate booster.img: %v", err)
 	}
 
+	// check generated image integrity
+	if err := exec.Command("/usr/bin/zstd", "--test", output).Run(); err != nil {
+		return "", fmt.Errorf("unable to verify integrity of the output image %s: %v", output, err)
+	}
+
 	return output, nil
 }
 
