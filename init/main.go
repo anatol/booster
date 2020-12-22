@@ -24,6 +24,7 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4/client4"
 	"github.com/s-urbaniak/uevent"
 	"github.com/vishvananda/netlink"
+	"github.com/yookoala/realpath"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
@@ -308,6 +309,14 @@ func mountRootFs(dev string) error {
 	return nil
 }
 
+func isSystemd(path string) (bool, error) {
+	myRealpath, err := realpath.Realpath(path)
+	if err != nil {
+		return false, err
+	}
+	return strings.HasSuffix(myRealpath, "/systemd"), nil
+}
+
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
 	if err := os.Chdir(newRoot); err != nil {
@@ -323,9 +332,31 @@ func switchRoot() error {
 		return fmt.Errorf("chdir: %v", err)
 	}
 
+	initArgs := []string{newInitBin}
+	isSystemdInit, err := isSystemd(newInitBin)
+	if err != nil {
+		return err
+	}
+	if isSystemdInit {
+		// pass serialized state to userspace, this way we can export for example initrd execution time
+		fd, err := unix.MemfdCreate("systemd-state", 0)
+		if err != nil {
+			return fmt.Errorf("memfd create: %v", err)
+		}
+		state := fmt.Sprintf("initrd-timestamp=%d %d\n", startRealtime, startMonotonic)
+		if _, err := unix.Write(fd, []byte(state)); err != nil {
+			return err
+		}
+		if _, err := unix.Seek(fd, 0, io.SeekStart); err != nil {
+			return err
+		}
+
+		initArgs = append(initArgs, "--switched-root", "--system", "--deserialize", strconv.Itoa(fd))
+	}
+
 	// Run the OS init
-	debug("Booster initialization took %v. Switching to the new userspace now. Да пабачэння!", time.Now().Sub(start))
-	if err := syscall.Exec(newInitBin, []string{newInitBin}, nil); err != nil {
+	debug("Switching to the new userspace now. Да пабачэння!")
+	if err := syscall.Exec(newInitBin, initArgs, nil); err != nil {
 		return fmt.Errorf("Can't run the rootfs init (%v): %v", newInitBin, err)
 	}
 	return nil // unreachable
@@ -769,10 +800,33 @@ func debug(format string, v ...interface{}) {
 	}
 }
 
-var start time.Time // booster start time
+// readClock returns value of the clock in usec units
+func readClock(clockId int32) (uint64, error) {
+	var t unix.Timespec
+	err := unix.ClockGettime(clockId, &t)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(t.Sec)*1000000 + uint64(t.Nsec)/1000, nil
+}
+
+var startRealtime, startMonotonic uint64
+
+func readStartTime() {
+	var err error
+	startRealtime, err = readClock(unix.CLOCK_REALTIME)
+	if err != nil {
+		fmt.Printf("read realtime clock: %v", err)
+	}
+	startMonotonic, err = readClock(unix.CLOCK_MONOTONIC)
+	if err != nil {
+		fmt.Printf("read monotonic clock: %v", err)
+	}
+}
 
 func main() {
-	start = time.Now()
+	readStartTime()
+
 	if os.Getpid() != 1 {
 		panic("Booster init binary does not run as PID 1")
 	}

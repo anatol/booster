@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,6 +267,15 @@ func archLinuxTest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sess.Close()
+
+	out, err := sess.CombinedOutput("systemd-analyze")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(out), "(initrd)") {
+		t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
+	}
 
 	vm.Shutdown()
 }
