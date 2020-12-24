@@ -111,6 +111,7 @@ var (
 //    - root=/dev/<name>
 //    - root=UUID=<uuid>
 //    - rootfstype=<fs>, e.g. rootfstype=ext4
+//    - rootflags=<mount options>
 //    - rd.vconsole.font=<font>
 func devAdd(syspath, devname string) error {
 	// Some devices might receive multiple udev add events
@@ -298,7 +299,8 @@ func mountRootFs(dev string) error {
 	if _, rw := cmdline["rw"]; !rw {
 		rootMountFlags |= syscall.MS_RDONLY
 	}
-	if err := mount(dev, newRoot, fstype, rootMountFlags, ""); err != nil {
+	options := cmdline["rootflags"]
+	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
 		return err
 	}
 

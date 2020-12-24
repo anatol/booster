@@ -314,7 +314,7 @@ func TestBooster(t *testing.T) {
 	// note that assets are generated using ./assets_generator tool
 	t.Run("Ext4", boosterTest(Opts{
 		disk:       "assets/ext4.img",
-		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
+		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
 	}))
 
 	t.Run("NonFormattedDrive", boosterTest(Opts{
