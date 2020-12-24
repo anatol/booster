@@ -92,7 +92,7 @@ Booster boot uses following kernel parameters:
  * `root=($PATH|UUID=$UUID)` root device
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID:$NAME` similar to `rd.luks.uuid` parameter but also specifies the name used for the LUKS device opening.
- * `fstype=type` booster will try to detect root filesystem type. But if the autodetection does not work then this kernel parameter is be useful.
+ * `rootfstype=type` booster will try to detect root filesystem type. But if the autodetection does not work then this kernel parameter is useful.
    Also please file a ticket so we can improve the code that detects filetypes.
 
 ### Build
