@@ -151,6 +151,7 @@ func appendModules(img *Image) error {
 	if err != nil {
 		return err
 	}
+	initConfig.Kernel = kmod.kernelVersion
 
 	modules := []string{
 		"kernel/fs/",

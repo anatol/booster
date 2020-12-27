@@ -21,7 +21,8 @@ type alias struct {
 }
 
 type Kmod struct {
-	universal         bool   // if false - include modules for current host only
+	universal         bool // if false - include modules for current host only
+	kernelVersion     string
 	dir               string // e.g. /usr/lib/modules/5.9.9-arch1-1
 	nameToPathMapping *Bimap // kernel module name to path (relative to modulesDir)
 	builtinModules    set
@@ -35,16 +36,16 @@ type Kmod struct {
 }
 
 func NewKmod(universal bool) (*Kmod, error) {
-	version := *kernelVersion
-	if version == "" {
+	kernel := *kernelVersion
+	if kernel == "" {
 		var err error
-		version, err = readKernelVersion()
+		kernel, err = readKernelVersion()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	modulesDir := path.Join("/usr/lib/modules", version)
+	modulesDir := path.Join("/usr/lib/modules", kernel)
 
 	nameToPathMapping, err := scanModulesDir(modulesDir)
 	if err != nil {
@@ -78,6 +79,7 @@ func NewKmod(universal bool) (*Kmod, error) {
 
 	kmod := &Kmod{
 		universal:         universal,
+		kernelVersion:     kernel,
 		dir:               modulesDir,
 		nameToPathMapping: nameToPathMapping,
 		builtinModules:    builtinModules,

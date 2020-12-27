@@ -674,6 +674,13 @@ func boost() error {
 	if err != nil {
 		return err
 	}
+
+	if kernelVersion != config.Kernel {
+		return fmt.Errorf("Linux kernel version mismatch. "+
+			"This initramfs image was built for version '%s' and it is incompatible with the currently running version '%s'. "+
+			"Please rebuild booster image for kernel '%s'.", config.Kernel, kernelVersion, kernelVersion)
+	}
+
 	modulesDir = path.Join("/usr/lib/modules", kernelVersion)
 
 	if err := readAliases(modulesDir); err != nil {

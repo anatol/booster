@@ -10,6 +10,7 @@ type InitConfig struct {
 
 	ModuleDependencies map[string][]string `yaml:",omitempty"`
 	ModulesForceLoad   []string            `yaml:",omitempty"`
+	Kernel             string              `yaml:",omitempty"` // kernel version this image was built for
 }
 
 const initConfigPath = "/etc/booster.init.yaml"
