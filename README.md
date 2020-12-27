@@ -88,13 +88,13 @@ of the specified modules will be added to the image as well.
 #### Kernel boot parameter
 Some parts of booster boot functionality can be modified with kernel boot parameters. These parameters are usually set through bootloader config.
 Booster boot uses following kernel parameters:
- * `booster.debug=1` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
- * `root=($PATH|UUID=$UUID)` root device
+ * `root=($PATH|UUID=$UUID|LABEL=$LABEL)` root device. It can be specified as a path to the block device (e.g. `root=/dev/sda`) or with filesystem UUID (e.g. `root=UUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665`, pay atenntion that it does *not* contain any quotes) or with filesystem label (e.g. `root=LABEL=rootlabel`, pay attention that label does not contain any quotes or whitespaces).
+ * `rootfstype=$TYPE` (e.g. `rootfstype=ext4`). By default booster tries to detect the root filesystem type. But if the autodetection does not work then this kernel parameter is useful.
+   Also please file a ticket so we can improve the code that detects filetypes.
+ * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. `rootflags=user_xattr,nobarrier`.
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID:$NAME` similar to `rd.luks.uuid` parameter but also specifies the name used for the LUKS device opening.
- * `rootfstype=type` booster will try to detect root filesystem type. But if the autodetection does not work then this kernel parameter is useful.
-   Also please file a ticket so we can improve the code that detects filetypes.
- * `rootflags=<options>` mount options for the root filesystem, e.g. `rootflags=user_xattr,nobarrier`.
+ * `booster.debug=1` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
 
 ### Build
 The project consists of 3 components:

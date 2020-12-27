@@ -130,7 +130,7 @@ func devAdd(syspath, devname string) error {
 	cmdroot := cmdline["root"]
 
 	devpath := path.Join("/dev", devname)
-	if !strings.HasPrefix(cmdroot, "UUID=") && devpath == cmdroot {
+	if devpath == cmdroot {
 		return mountRootFs(devpath)
 	}
 
@@ -161,13 +161,16 @@ func devAdd(syspath, devname string) error {
 		}
 	}
 
-	fstype, uuid, err := blkid(devpath)
+	info, err := readBlkInfo(devpath)
 	if err != nil {
 		return err
 	}
-	debug("blkid for %s: type=%s UUID='%s'", devpath, fstype, uuid)
+	debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", devpath, info.format, info.uuid, info.label)
 
-	if strings.HasPrefix(cmdroot, "UUID=") && uuid == strings.TrimPrefix(cmdroot, "UUID=") {
+	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
+		return mountRootFs(devpath)
+	}
+	if strings.HasPrefix(cmdroot, "LABEL=") && info.label == strings.TrimPrefix(cmdroot, "LABEL=") {
 		return mountRootFs(devpath)
 	}
 
@@ -176,12 +179,12 @@ func devAdd(syspath, devname string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("Invalid rd.luks.name kernel parameter. Got: %v   Expected: rd.luks.name=<UUID>=<Name>", cmdline["rd.luks.name"])
 		}
-		if parts[0] == uuid {
+		if parts[0] == info.uuid {
 			return luksOpen(devpath, parts[1])
 		}
 	}
-	if cmdline["rd.luks.uuid"] == uuid {
-		return luksOpen(devpath, "luks-"+uuid)
+	if cmdline["rd.luks.uuid"] == info.uuid {
+		return luksOpen(devpath, "luks-"+info.uuid)
 	}
 
 	return nil
@@ -284,11 +287,11 @@ func luksOpen(dev string, name string) error {
 func mountRootFs(dev string) error {
 	fstype := cmdline["rootfstype"]
 	if fstype == "" {
-		var err error
-		fstype, _, err = blkid(dev)
+		info, err := readBlkInfo(dev)
 		if err != nil {
 			return fmt.Errorf("%s: %v", dev, err)
 		}
+		fstype = info.format
 	}
 	debug("mounting %s (fstype=%s) to %s", dev, fstype, newRoot)
 

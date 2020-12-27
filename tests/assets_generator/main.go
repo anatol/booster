@@ -24,7 +24,7 @@ const initBinaryPath = "init"
 const rootfsBuilderBinaryPath = "rootfs_builder"
 
 var imagesToBuild = map[string][]string{
-	"ext4": {"-fsUuid", "5c92fc66-7315-408b-b652-176dc554d370"},
+	"ext4": {"-fsUuid", "5c92fc66-7315-408b-b652-176dc554d370", "-fsLabel", "atestlabel12"},
 
 	"luks1": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "-fsUuid", "ec09a1ea-d43c-4262-b701-bf2577a9ab27"},
 	"luks2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "639b8fdd-36ba-443e-be3e-e5b335935502", "-fsUuid", "7bbf9363-eb42-4476-8c1c-9f1f4d091385"},

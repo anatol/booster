@@ -21,6 +21,7 @@ var luksClevisPin = flag.String("luksClevisPin", "", "clevis pin used to bind th
 var luksClevisConfig = flag.String("luksClevisConfig", "", "clevis pin config")
 var luksUuid = flag.String("luksUuid", "", "UUID for LUKS partition")
 var fsUuid = flag.String("fsUuid", "", "UUID for filesystem partition")
+var fsLabel = flag.String("fsLabel", "", "Label for the filesystem")
 var verbose = flag.Bool("verbose", false, "output debug info to console")
 
 func copyFile(src, dest string) error {
@@ -134,6 +135,9 @@ func run() error {
 	mkfsParams := []string{fsDev}
 	if *fsUuid != "" {
 		mkfsParams = append(mkfsParams, "-U", *fsUuid)
+	}
+	if *fsLabel != "" {
+		mkfsParams = append(mkfsParams, "-L", *fsLabel)
 	}
 	mkfsCmd := exec.Command("mkfs.ext4", mkfsParams...)
 	if *verbose {
