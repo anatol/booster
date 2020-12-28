@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"debug/elf"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ type Image struct {
 	contains   map[string]bool // whether image contains the file
 }
 
-func NewImage(path string) (*Image, error) {
+func NewImage(path string, compression string) (*Image, error) {
 	file, err := renameio.TempFile("", path)
 	if err != nil {
 		return nil, fmt.Errorf("new image: %v", err)
@@ -32,7 +33,15 @@ func NewImage(path string) (*Image, error) {
 		return nil, err
 	}
 
-	compressor, err := zstd.NewWriter(file)
+	var compressor io.WriteCloser
+	switch compression {
+	case "zstd":
+		compressor, err = zstd.NewWriter(file)
+	case "gzip":
+		compressor = gzip.NewWriter(file)
+	default:
+		err = fmt.Errorf("Unknown compression format: %s", compression)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -86,9 +86,10 @@ type NetworkConfig struct {
 	Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
 }
 type GeneratorConfig struct {
-	Network   *NetworkConfig `yaml:",omitempty"`
-	Universal bool           `yaml:",omitempty"`
-	Modules   string         `yaml:",omitempty"`
+	Network     *NetworkConfig `yaml:",omitempty"`
+	Universal   bool           `yaml:",omitempty"`
+	Modules     string         `yaml:",omitempty"`
+	Compression string         `yaml:",omitempty"`
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -110,6 +111,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 		}
 	}
 	conf.Universal = true
+	conf.Compression = opts.compression
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -125,6 +127,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 }
 
 type Opts struct {
+	compression string
 	prompt      string
 	enableTangd bool
 	useDhcp     bool
@@ -370,12 +373,14 @@ func TestBooster(t *testing.T) {
 
 	// note that assets are generated using ./assets_generator tool
 	t.Run("Ext4.UUID", boosterTest(Opts{
-		disk:       "assets/ext4.img",
-		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
+		compression: "zstd",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
 	}))
 	t.Run("Ext4.Label", boosterTest(Opts{
-		disk:       "assets/ext4.img",
-		kernelArgs: []string{"root=LABEL=atestlabel12"},
+		compression: "gzip",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 	}))
 
 	t.Run("NonFormattedDrive", boosterTest(Opts{

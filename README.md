@@ -63,6 +63,7 @@ network:
   gateway: 10.0.2.255
 universal: false
 modules: nvidia,kernel/sound/usb/
+compression: zstd
 ```
 
 `network` node, if presents, initializes network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
@@ -78,11 +79,15 @@ to the modules dir (`/usr/lib/modules/$KERNEL_VERSION`). If the path ends with s
 and all modules from this directory needs to be added recursively. `booster` also takes modules dependencies into account, all dependencies
 of the specified modules will be added to the image as well.
 
+`compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd" and "gzip".
+If no option specified then "zstd" is used as a default compression.
+
 #### Command-line arguments
 `booster` accepts a list of arguments:
  * `-universal` generate a universal image
  * `-kernelVersion` use modules for the given kernel version. If the flag is not specified then the current kernel is used (as reported by `uname -r`).
  * `-output` output file, by default `booster.img` used
+ * `-compression` output file compression. Currently supported compression algorithms are "zstd" (default) and "gzip".
  * `-force` overwrite output file if it exists
 
 #### Kernel boot parameter

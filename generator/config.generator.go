@@ -7,8 +7,9 @@ type GeneratorConfig struct {
 		Ip      string `yaml:",omitempty"` // e.g. 10.0.2.15/24
 		Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
 	}
-	Universal bool   `yaml:",omitempty"`
-	Modules   string `yaml:",omitempty"` // comma separated list of extra modules to add to initramfs
+	Universal   bool   `yaml:",omitempty"`
+	Modules     string `yaml:",omitempty"` // comma separated list of extra modules to add to initramfs
+	Compression string `yaml:",omitempty"` // output file compression
 }
 
 const generatorConfigPath = "/etc/booster.yaml"
