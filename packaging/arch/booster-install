@@ -26,4 +26,5 @@ for kernel in "${kernels[@]}"; do
     fi
 
     booster -force -output /boot/booster-${pkgbase}.img -kernelVersion ${kernel##/usr/lib/modules/}
+    install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 done
