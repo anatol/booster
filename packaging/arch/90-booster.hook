@@ -4,6 +4,7 @@ Operation = Install
 Operation = Upgrade
 Target = usr/lib/modules/*/vmlinuz
 Target = usr/lib/booster/*
+Target = usr/bin/booster
 
 [Action]
 Description = Updating linux booster initramfs
