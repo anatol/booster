@@ -93,7 +93,7 @@ Booster boot uses following kernel parameters:
    Also please file a ticket so we can improve the code that detects filetypes.
  * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. `rootflags=user_xattr,nobarrier`.
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
- * `rd.luks.name=$UUID:$NAME` similar to `rd.luks.uuid` parameter but also specifies the name used for the LUKS device opening.
+ * `rd.luks.name=$UUID=$NAME` similar to `rd.luks.uuid` parameter but also specifies the name used for the LUKS device opening.
  * `booster.debug=1` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
 
 ### Build
