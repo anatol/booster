@@ -449,6 +449,10 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 					// some softdeps have really weird modnames e.g. kpc_i2c or kpc_nwl_dma, just ignore it
 					continue
 				}
+				if _, ok := k.builtinModules[d]; ok {
+					// skip builtin dependencies
+					continue
+				}
 				deps = append(deps, d)
 			}
 		}
@@ -607,7 +611,13 @@ func readHostModules() (map[string]bool, error) {
 }
 
 func (k *Kmod) addExtraDep(mod string, deps ...string) {
-	k.extraDep[mod] = append(k.extraDep[mod], deps...)
+	for _, d := range deps {
+		// skip builtin deps
+		if _, ok := k.builtinModules[d]; ok {
+			continue
+		}
+		k.extraDep[mod] = append(k.extraDep[mod], d)
+	}
 }
 
 func (k *Kmod) forceLoad(mods ...string) {
