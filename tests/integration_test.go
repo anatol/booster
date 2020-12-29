@@ -73,7 +73,22 @@ func generateInitRamfs(opts Opts) (string, error) {
 	}
 
 	// check generated image integrity
-	if err := exec.Command("/usr/bin/zstd", "--test", output).Run(); err != nil {
+	var verifyCmd *exec.Cmd
+	switch opts.compression {
+	case "none":
+		verifyCmd = exec.Command("/usr/bin/cpio", "-i", "--only-verify-crc", "--file", output)
+	case "zstd", "":
+		verifyCmd = exec.Command("/usr/bin/zstd", "--test", output)
+	case "gzip":
+		verifyCmd = exec.Command("/usr/bin/gzip", "--test", output)
+	default:
+		return "", fmt.Errorf("Unknown compression: %s", opts.compression)
+	}
+	if testing.Verbose() {
+		verifyCmd.Stdout = os.Stdout
+		verifyCmd.Stderr = os.Stderr
+	}
+	if err := verifyCmd.Run(); err != nil {
 		return "", fmt.Errorf("unable to verify integrity of the output image %s: %v", output, err)
 	}
 
@@ -384,6 +399,7 @@ func TestBooster(t *testing.T) {
 	}))
 
 	t.Run("NonFormattedDrive", boosterTest(Opts{
+		compression: "none",
 		disks: []vmtest.QemuDisk{
 			{ /* represents non-formatted drive */ "integration_test.go", "raw"},
 			{"assets/ext4.img", "raw"},

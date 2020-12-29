@@ -79,7 +79,7 @@ to the modules dir (`/usr/lib/modules/$KERNEL_VERSION`). If the path ends with s
 and all modules from this directory needs to be added recursively. `booster` also takes modules dependencies into account, all dependencies
 of the specified modules will be added to the image as well.
 
-`compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd" and "gzip".
+`compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "none".
 If no option specified then "zstd" is used as a default compression.
 
 #### Command-line arguments

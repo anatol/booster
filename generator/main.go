@@ -17,7 +17,7 @@ var (
 	outputFile         = flag.String("output", "booster.img", "Output initrd file")
 	forceOverwriteFile = flag.Bool("force", false, "Overwrite existing initrd file")
 	initBinary         = flag.String("initBinary", "/usr/lib/booster/init", "Booster 'init' binary location")
-	compression        = flag.String("compression", "", `Output file compression ("zstd", "gzip")`)
+	compression        = flag.String("compression", "", `Output file compression ("zstd", "gzip", "none")`)
 	kernelVersion      = flag.String("kernelVersion", "", "Linux kernel version to generate initramfs for")
 	configFile         = flag.String("config", "", "Configuration file path")
 	debugEnabled       = flag.Bool("debug", false, "Enable debug output")

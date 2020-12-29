@@ -39,6 +39,8 @@ func NewImage(path string, compression string) (*Image, error) {
 		compressor, err = zstd.NewWriter(file)
 	case "gzip":
 		compressor = gzip.NewWriter(file)
+	case "none":
+		compressor = file
 	default:
 		err = fmt.Errorf("Unknown compression format: %s", compression)
 	}
@@ -57,7 +59,9 @@ func NewImage(path string, compression string) (*Image, error) {
 
 func (img *Image) Cleanup() {
 	_ = img.out.Close()
-	_ = img.compressor.Close()
+	if img.compressor != img.file {
+		_ = img.compressor.Close()
+	}
 	_ = img.file.Cleanup()
 }
 
@@ -65,8 +69,10 @@ func (img *Image) Close() error {
 	if err := img.out.Close(); err != nil {
 		return err
 	}
-	if err := img.compressor.Close(); err != nil {
-		return err
+	if img.compressor != img.file {
+		if err := img.compressor.Close(); err != nil {
+			return err
+		}
 	}
 	return img.file.CloseAtomicallyReplace()
 }
