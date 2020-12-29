@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -8,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,28 +22,31 @@ import (
 const kernelsDir = "/usr/lib/modules"
 
 var (
-	kernelVersion string
-	binariesDir   string
+	binariesDir    string
+	kernelVersions map[string]string
 )
 
-func detectKernelVersion() (string, error) {
+func detectKernelVersion() (map[string]string, error) {
 	files, err := ioutil.ReadDir(kernelsDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	versions := make([]string, 0, len(files))
-	for _, v := range files {
-		versions = append(versions, v.Name())
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-	for _, v := range versions {
-		path := filepath.Join(kernelsDir, v, "vmlinuz")
-		_, err := os.Stat(path)
-		if err == nil {
-			return v, nil
+	kernels := make(map[string]string)
+	for _, f := range files {
+		ver := f.Name()
+		vmlinux := filepath.Join(kernelsDir, ver, "vmlinuz")
+		if _, err := os.Stat(vmlinux); err != nil {
+			continue
 		}
+		pkgbase, err := ioutil.ReadFile(filepath.Join(kernelsDir, ver, "pkgbase"))
+		if err != nil {
+			return nil, err
+		}
+		pkgbase = bytes.TrimSpace(pkgbase)
+
+		kernels[string(pkgbase)] = ver
 	}
-	return "", fmt.Errorf("No kernel found under %v", kernelsDir)
+	return kernels, nil
 }
 
 func generateInitRamfs(opts Opts) (string, error) {
@@ -62,7 +65,7 @@ func generateInitRamfs(opts Opts) (string, error) {
 	}
 	defer os.Remove(config)
 
-	cmd := exec.Command(binariesDir+"/generator", "-force", "-initBinary", binariesDir+"/init", "-kernelVersion", kernelVersion, "-output", output, "-config", config)
+	cmd := exec.Command(binariesDir+"/generator", "-force", "-initBinary", binariesDir+"/init", "-kernelVersion", opts.kernelVersion, "-output", output, "-config", config)
 	if testing.Verbose() {
 		log.Print("Create booster.img")
 		cmd.Stdout = os.Stdout
@@ -142,19 +145,27 @@ func generateBoosterConfig(opts Opts) (string, error) {
 }
 
 type Opts struct {
-	compression string
-	prompt      string
-	enableTangd bool
-	useDhcp     bool
-	enableTpm2  bool
-	kernelArgs  []string
-	disk        string
-	disks       []vmtest.QemuDisk
+	compression   string
+	prompt        string
+	enableTangd   bool
+	useDhcp       bool
+	enableTpm2    bool
+	kernelVersion string // kernel version
+	kernelArgs    []string
+	disk          string
+	disks         []vmtest.QemuDisk
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
 	return func(t *testing.T) {
 		// TODO: make this test run in parallel
+
+		if kernel, ok := kernelVersions["linux"]; ok {
+			opts.kernelVersion = kernel
+		} else {
+			t.Fatal("System does not have 'linux' package installed needed for the integration tests")
+		}
+
 		initRamfs, err := generateInitRamfs(opts)
 		if err != nil {
 			t.Fatal(err)
@@ -213,7 +224,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		options := vmtest.QemuOptions{
 			OperatingSystem: vmtest.OS_LINUX,
-			Kernel:          filepath.Join(kernelsDir, kernelVersion, "vmlinuz"),
+			Kernel:          filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz"),
 			InitRamFs:       initRamfs,
 			Params:          params,
 			Append:          kernelArgs,
@@ -243,59 +254,72 @@ func boosterTest(opts Opts) func(*testing.T) {
 	}
 }
 
-func archLinuxTest(t *testing.T) {
-	initRamfs, err := generateInitRamfs(Opts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(initRamfs)
+func archLinuxTest(opts Opts) func(*testing.T) {
+	return func(t *testing.T) {
+		initRamfs, err := generateInitRamfs(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(initRamfs)
 
-	params := []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic", "-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
-	if os.Getenv("TEST_DISABLE_KVM") != "1" {
-		params = append(params, "-enable-kvm", "-cpu", "host")
-	}
-	opts := vmtest.QemuOptions{
-		OperatingSystem: vmtest.OS_LINUX,
-		Kernel:          filepath.Join(kernelsDir, kernelVersion, "vmlinuz"),
-		InitRamFs:       initRamfs,
-		Params:          params,
-		Disks:           []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
-		Append:          []string{"root=/dev/sda", "rw"},
-		Verbose:         testing.Verbose(),
-		Timeout:         50 * time.Second,
-	}
-	vm, err := vmtest.NewQemu(&opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+		params := []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic", "-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
+		if os.Getenv("TEST_DISABLE_KVM") != "1" {
+			params = append(params, "-enable-kvm", "-cpu", "host")
+		}
+		kernelArgs := opts.kernelArgs
+		if testing.Verbose() {
+			kernelArgs = append(kernelArgs, "booster.debug=1")
+		}
+		options := vmtest.QemuOptions{
+			OperatingSystem: vmtest.OS_LINUX,
+			Kernel:          filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz"),
+			InitRamFs:       initRamfs,
+			Params:          params,
+			Disks:           []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
+			Append:          kernelArgs,
+			Verbose:         testing.Verbose(),
+			Timeout:         50 * time.Second,
+		}
+		vm, err := vmtest.NewQemu(&options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer vm.Shutdown()
 
-	config := &ssh.ClientConfig{
-		User:            "root",
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
+		config := &ssh.ClientConfig{
+			User:            "root",
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		}
 
-	conn, err := ssh.Dial("tcp", ":10022", config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
+		conn, err := ssh.Dial("tcp", ":10022", config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
 
-	sess, err := conn.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
+		sess, err := conn.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sess.Close()
 
-	out, err := sess.CombinedOutput("systemd-analyze")
-	if err != nil {
-		t.Fatal(err)
-	}
+		out, err := sess.CombinedOutput("systemd-analyze")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if !strings.Contains(string(out), "(initrd)") {
-		t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
-	}
+		if !strings.Contains(string(out), "(initrd)") {
+			t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
+		}
 
-	vm.Shutdown()
+		sess2, err := conn.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sess2.Close()
+		// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
+		_, _ = sess2.CombinedOutput("shutdown now")
+	}
 }
 
 func compileBinaries(dir string) error {
@@ -372,7 +396,7 @@ func createAssets() error {
 
 func TestBooster(t *testing.T) {
 	var err error
-	kernelVersion, err = detectKernelVersion()
+	kernelVersions, err = detectKernelVersion()
 	if err != nil {
 		t.Fatalf("unable to detect current Linux version: %v", err)
 	}
@@ -457,6 +481,16 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
 	}))
 
-	// Verify generated initrd against Arch Linux userspace with systemd
-	t.Run("ArchLinux", archLinuxTest)
+	// boot Arch userspace (with systemd) against all installed linux packages
+	for pkg, ver := range kernelVersions {
+		compression := "zstd"
+		if pkg == "linux-lts" {
+			compression = "gzip"
+		}
+		t.Run("ArchLinux."+pkg, archLinuxTest(Opts{
+			kernelVersion: ver,
+			compression:   compression,
+			kernelArgs:    []string{"root=/dev/sda", "rw"},
+		}))
+	}
 }
