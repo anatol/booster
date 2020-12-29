@@ -88,7 +88,7 @@ mount $loopdev $mount
 pacstrap -c $mount base openssh
 
 echo "[Match]
-Name=enp0s3
+Name=*
 
 [Network]
 DHCP=yes" > $mount/etc/systemd/network/20-wired.network
