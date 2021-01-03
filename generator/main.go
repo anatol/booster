@@ -173,7 +173,7 @@ func appendModules(img *Image) error {
 		"kernel/drivers/char/tpm/",
 		"kernel/drivers/usb/host/",
 		"kernel/drivers/hid/usbhid/",
-		"hid_generic", "sd_mod",
+		"hid_generic", "sd_mod", "ahci",
 		"virtio_pci", "virtio_blk", "virtio_scsi", "virtio_crypto",
 	}
 	if err := kmod.activateModules(true, modules...); err != nil {
