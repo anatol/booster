@@ -191,9 +191,8 @@ func devAdd(syspath, devname string) error {
 }
 
 func luksOpen(dev string, name string) error {
-	if err := loadModules("dm_crypt"); err != nil {
-		return err
-	}
+	wg := loadModules("dm_crypt")
+	wg.Wait()
 
 	d, err := luks.Open(dev)
 	if err != nil {
@@ -295,9 +294,8 @@ func mountRootFs(dev string) error {
 	}
 	debug("mounting %s (fstype=%s) to %s", dev, fstype, newRoot)
 
-	if err := loadModules(fstype); err != nil {
-		return err
-	}
+	wg := loadModules(fstype)
+	wg.Wait()
 
 	rootMountFlags := uintptr(syscall.MS_NOATIME)
 	if _, rw := cmdline["rw"]; !rw {
@@ -398,14 +396,14 @@ func skipDeviceMapper(dmCookie string) bool {
 func loadModalias(alias string) error {
 	mods, err := matchAlias(alias)
 	if err != nil {
-		debug("unable to match modalias %s", alias)
+		debug("unable to match modalias %s: %v", alias, err)
 		return nil
 	}
 	if len(mods) == 0 {
 		return fmt.Errorf("no match found for alias %s", alias)
 	}
-	// for topological module sorting use https://github.com/paultag/go-topsort
-	return loadModules(mods...)
+	_ = loadModules(mods...)
+	return nil
 }
 
 var udevReader io.ReadCloser
@@ -711,9 +709,7 @@ func boost() error {
 
 	go udevListener()
 
-	if err := loadModules(config.ModulesForceLoad...); err != nil {
-		return err
-	}
+	_ = loadModules(config.ModulesForceLoad...)
 
 	if err := filepath.Walk("/sys/devices", scanSysModaliases); err != nil {
 		return err
@@ -758,40 +754,78 @@ func readConfig() error {
 }
 
 var (
-	loadedModules      = make(map[string]bool)
-	loadedModulesMutex sync.Mutex
+	loadedModules  = make(map[string]bool)
+	loadingModules = make(map[string][]*sync.WaitGroup)
+	modulesMutex   sync.Mutex
 )
 
-// TODO: implement parallel/asynchronous modules load
-func loadModules(modules ...string) error {
-	for _, mod := range modules {
-		loadedModulesMutex.Lock()
-		if loadedModules[mod] {
-			loadedModulesMutex.Unlock()
+func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
+	for _, module := range modules {
+		if _, ok := loadedModules[module]; ok {
+			continue // the module is already loaded
+		}
+
+		_, alreadyLoading := loadingModules[module]
+		wg.Add(1)
+		loadingModules[module] = append(loadingModules[module], wg)
+
+		if alreadyLoading {
+			// we already incremented 'wg' counter
+			// now wait till the module is loaded
 			continue
 		}
-		loadedModules[mod] = true
-		loadedModulesMutex.Unlock()
 
-		if deps, ok := config.ModuleDependencies[mod]; ok {
-			if err := loadModules(deps...); err != nil {
-				return err
+		var depsWg sync.WaitGroup
+		if deps, ok := config.ModuleDependencies[module]; ok {
+			loadModuleUnlocked(&depsWg, deps...)
+		}
+
+		// pay attention that 'module' is a loop variable and cannot be passed to goroutine
+		// https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
+		mod := module
+		go func() {
+			depsWg.Wait()
+			debug("loading module %s", mod)
+			if err := finitModule(mod); err != nil {
+				fmt.Println(err)
+				return
 			}
-		}
 
-		debug("loading module %s", mod)
+			modulesMutex.Lock()
+			defer modulesMutex.Unlock()
 
-		f, err := os.Open(path.Join(modulesDir, mod+".ko"))
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		if err := unix.FinitModule(int(f.Fd()), "", 0); err != nil {
-			return fmt.Errorf("finit(%v): %v", mod, err)
-		}
+			for _, w := range loadingModules[mod] {
+				// signal waiters that the module is loaded
+				w.Done()
+			}
+			delete(loadingModules, mod)
+			loadedModules[mod] = true
+		}()
 	}
+}
+
+func finitModule(module string) error {
+	f, err := os.Open(path.Join(modulesDir, module+".ko"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if err := unix.FinitModule(int(f.Fd()), "", 0); err != nil {
+		return fmt.Errorf("finit(%v): %v", module, err)
+	}
+
 	return nil
+}
+
+func loadModules(modules ...string) *sync.WaitGroup {
+	var wg sync.WaitGroup
+
+	modulesMutex.Lock()
+	defer modulesMutex.Unlock()
+
+	loadModuleUnlocked(&wg, modules...)
+	return &wg
 }
 
 func mount(source, target, fstype string, flags uintptr, options string) error {
