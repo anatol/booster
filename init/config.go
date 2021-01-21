@@ -11,6 +11,7 @@ type InitConfig struct {
 	ModuleDependencies map[string][]string `yaml:",omitempty"`
 	ModulesForceLoad   []string            `yaml:",omitempty"`
 	Kernel             string              `yaml:",omitempty"` // kernel version this image was built for
+	MountTimeout       int                 `yaml:",omitempty"` // mount timeout in seconds
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

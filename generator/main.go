@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime/pprof"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -114,6 +115,17 @@ var (
 func appendInitConfig(img *Image) error {
 	// populate init config from /etc/booster.yaml
 	initConfig.Network = generatorConfig.Network
+
+	// configure mount timeout
+	timeout := defaultTimeout
+	var err error
+	if generatorConfig.MountTimeout != "" {
+		timeout, err = time.ParseDuration(generatorConfig.MountTimeout)
+		if err != nil {
+			return fmt.Errorf("Unable to parse mount timeout value: %v", err)
+		}
+	}
+	initConfig.MountTimeout = int(timeout.Seconds())
 
 	content, err := yaml.Marshal(initConfig)
 	if err != nil {

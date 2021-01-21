@@ -718,9 +718,34 @@ func boost() error {
 		return err
 	}
 
-	rootMounted.Wait()
+	if config.MountTimeout != 0 {
+		timeout := waitTimeout(&rootMounted, time.Duration(config.MountTimeout)*time.Second)
+		if timeout {
+			return fmt.Errorf("Timeout waiting for root filesystem")
+		}
+	} else {
+		// wait for mount forever
+		rootMounted.Wait()
+	}
+
 	cleanup()
 	return switchRoot()
+}
+
+// waitTimeout waits for the waitgroup for the specified max timeout.
+// Returns true if waiting timed out.
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		return false // completed normally
+	case <-time.After(timeout):
+		return true // timed out
+	}
 }
 
 var aliases []alias

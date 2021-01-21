@@ -104,10 +104,11 @@ type NetworkConfig struct {
 	Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
 }
 type GeneratorConfig struct {
-	Network     *NetworkConfig `yaml:",omitempty"`
-	Universal   bool           `yaml:",omitempty"`
-	Modules     string         `yaml:",omitempty"`
-	Compression string         `yaml:",omitempty"`
+	Network      *NetworkConfig `yaml:",omitempty"`
+	Universal    bool           `yaml:",omitempty"`
+	Modules      string         `yaml:",omitempty"`
+	Compression  string         `yaml:",omitempty"`
+	MountTimeout string         `yaml:"mount_timeout,omitempty"`
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -130,6 +131,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	}
 	conf.Universal = true
 	conf.Compression = opts.compression
+	conf.MountTimeout = strconv.Itoa(opts.mountTimeout) + "s"
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -154,9 +156,20 @@ type Opts struct {
 	kernelArgs    []string
 	disk          string
 	disks         []vmtest.QemuDisk
+	mountTimeout  int // in seconds
+	checkVmState  func(vm *vmtest.Qemu, t *testing.T)
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
+	if opts.checkVmState == nil {
+		// default simple check
+		opts.checkVmState = func(vm *vmtest.Qemu, t *testing.T) {
+			if err := vm.ConsoleExpect("Hello, booster!"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
 	return func(t *testing.T) {
 		// TODO: make this test run in parallel
 
@@ -247,10 +260,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 				t.Fatal(err)
 			}
 		}
-
-		if err := vm.ConsoleExpect("Hello, booster!"); err != nil {
-			t.Fatal(err)
-		}
+		opts.checkVmState(vm, t)
 	}
 }
 
@@ -429,6 +439,16 @@ func TestBooster(t *testing.T) {
 			{"assets/ext4.img", "raw"},
 		},
 		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
+	}))
+
+	t.Run("MountTimeout", boosterTest(Opts{
+		mountTimeout: 1,
+		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
+			if err := vm.ConsoleExpect("Timeout waiting for root filesystem"); err != nil {
+				t.Fatal(err)
+			}
+			vm.Kill()
+		},
 	}))
 
 	t.Run("LUKS1.WithName", boosterTest(Opts{
