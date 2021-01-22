@@ -147,6 +147,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 }
 
 type Opts struct {
+	params        []string
 	compression   string
 	prompt        string
 	enableTangd   bool
@@ -235,6 +236,8 @@ func boosterTest(opts Opts) func(*testing.T) {
 			disks = opts.disks
 		}
 
+		params = append(params, opts.params...)
+
 		options := vmtest.QemuOptions{
 			OperatingSystem: vmtest.OS_LINUX,
 			Kernel:          filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz"),
@@ -261,74 +264,6 @@ func boosterTest(opts Opts) func(*testing.T) {
 			}
 		}
 		opts.checkVmState(vm, t)
-	}
-}
-
-func archLinuxTest(opts Opts) func(*testing.T) {
-	return func(t *testing.T) {
-		initRamfs, err := generateInitRamfs(opts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(initRamfs)
-
-		params := []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic", "-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
-		if os.Getenv("TEST_DISABLE_KVM") != "1" {
-			params = append(params, "-enable-kvm", "-cpu", "host")
-		}
-		kernelArgs := opts.kernelArgs
-		if testing.Verbose() {
-			kernelArgs = append(kernelArgs, "booster.debug=1")
-		}
-		options := vmtest.QemuOptions{
-			OperatingSystem: vmtest.OS_LINUX,
-			Kernel:          filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz"),
-			InitRamFs:       initRamfs,
-			Params:          params,
-			Disks:           []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
-			Append:          kernelArgs,
-			Verbose:         testing.Verbose(),
-			Timeout:         50 * time.Second,
-		}
-		vm, err := vmtest.NewQemu(&options)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer vm.Shutdown()
-
-		config := &ssh.ClientConfig{
-			User:            "root",
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		}
-
-		conn, err := ssh.Dial("tcp", ":10022", config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Close()
-
-		sess, err := conn.NewSession()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sess.Close()
-
-		out, err := sess.CombinedOutput("systemd-analyze")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !strings.Contains(string(out), "(initrd)") {
-			t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
-		}
-
-		sess2, err := conn.NewSession()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sess2.Close()
-		// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-		_, _ = sess2.CombinedOutput("shutdown now")
 	}
 }
 
@@ -420,6 +355,9 @@ func TestBooster(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// TODO: add a test to verify the emergency shell functionality
+	// VmTest uses sockets for console and it seems does not like the shell we launch
+
 	// note that assets are generated using ./assets_generator tool
 	t.Run("Ext4.UUID", boosterTest(Opts{
 		compression: "zstd",
@@ -507,10 +445,47 @@ func TestBooster(t *testing.T) {
 		if pkg == "linux-lts" {
 			compression = "gzip"
 		}
-		t.Run("ArchLinux."+pkg, archLinuxTest(Opts{
+		t.Run("ArchLinux."+pkg, boosterTest(Opts{
 			kernelVersion: ver,
 			compression:   compression,
+			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:         []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
 			kernelArgs:    []string{"root=/dev/sda", "rw"},
+			checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
+				config := &ssh.ClientConfig{
+					User:            "root",
+					HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+				}
+
+				conn, err := ssh.Dial("tcp", ":10022", config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer conn.Close()
+
+				sess, err := conn.NewSession()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer sess.Close()
+
+				out, err := sess.CombinedOutput("systemd-analyze")
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if !strings.Contains(string(out), "(initrd)") {
+					t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
+				}
+
+				sess2, err := conn.NewSession()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer sess2.Close()
+				// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
+				_, _ = sess2.CombinedOutput("shutdown now")
+			},
 		}))
 	}
 }
