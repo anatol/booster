@@ -893,6 +893,14 @@ func readStartTime() {
 	}
 }
 
+func emergencyShell() {
+	if _, err := os.Stat("/usr/bin/busybox"); !os.IsNotExist(err) {
+		if err := syscall.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
+			fmt.Printf("Unable to start an emergency shell: %v\n", err)
+		}
+	}
+}
+
 func main() {
 	readStartTime()
 
@@ -903,7 +911,9 @@ func main() {
 	debug("Starting booster initramfs")
 
 	// function boost() should never return
-	err := boost()
-	// if it does that it indicates some problem. TODO: switch to emergency shell.
-	panic(err)
+	if err := boost(); err != nil {
+		// if it does then it indicates some problem
+		fmt.Println(err)
+	}
+	emergencyShell()
 }

@@ -90,6 +90,7 @@ To disable the timeout completely specify "0s".
 
 `extra_files` is a comma-separated list of extra files to add to the image. If an item starts with slash ("/")
 then it considered an absolute path. Otherwise it is a path relative to /usr/bin. If the item is a directory then its content is added recursively.
+A special case is `busybox`, adding it to the image enables emergency shell in case of a panic during the boot process.
 
 #### Command-line arguments
 `booster` accepts a list of arguments:
