@@ -13,6 +13,7 @@ type GeneratorConfig struct {
 	Modules      string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
 	Compression  string `yaml:",omitempty"`              // output file compression
 	MountTimeout string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
+	ExtraFiles   string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
 }
 
 const generatorConfigPath = "/etc/booster.yaml"

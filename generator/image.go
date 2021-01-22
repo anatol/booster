@@ -77,15 +77,16 @@ func (img *Image) Close() error {
 	return img.file.CloseAtomicallyReplace()
 }
 
-// AppendDir appends directory chain with its parents recursively
-func (img *Image) AppendDir(dir string) error {
+// AppendDirEntry appends directory entry to the image (and its parent if it is needed).
+// It does not add the directory content
+func (img *Image) AppendDirEntry(dir string) error {
 	if img.contains[dir] {
 		return nil
 	}
 
 	if dir != "/" {
 		parent := path.Dir(dir)
-		if err := img.AppendDir(parent); err != nil {
+		if err := img.AppendDirEntry(parent); err != nil {
 			return err
 		}
 	}
@@ -95,7 +96,7 @@ func (img *Image) AppendDir(dir string) error {
 		Mode: cpio.FileMode(0755) | cpio.ModeDir,
 	}
 	if err := img.out.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("AppendDir: %v", err)
+		return fmt.Errorf("AppendDirEntry: %v", err)
 	}
 	img.contains[dir] = true
 	return nil
@@ -107,7 +108,7 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 	}
 
 	// append parent dirs first
-	if err := img.AppendDir(path.Dir(dest)); err != nil {
+	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
 		return err
 	}
 
@@ -148,10 +149,14 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 }
 
 // AppendFile appends the file + its dependencies to the ramfs file
+// If input is a directory then content is added to the image recursively.
 func (img *Image) AppendFile(fn string) error {
 	fn = path.Clean(fn)
+	if img.contains[fn] {
+		return nil
+	}
 
-	if err := img.AppendDir(path.Dir(fn)); err != nil {
+	if err := img.AppendDirEntry(path.Dir(fn)); err != nil {
 		return err
 	}
 
@@ -180,12 +185,25 @@ func (img *Image) AppendFile(fn string) error {
 		img.contains[fn] = true
 
 		// now add the link target as well
-		linkTarget, err = filepath.Abs(linkTarget)
-		if err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+		if !filepath.IsAbs(linkTarget) {
+			linkTarget = path.Join(path.Dir(fn), linkTarget)
 		}
 		if err := img.AppendFile(linkTarget); err != nil {
 			return fmt.Errorf("AppendFile: %v", err)
+		}
+	} else if fi.IsDir() {
+		if err := img.AppendDirEntry(fn); err != nil {
+			return err
+		}
+
+		files, err := ioutil.ReadDir(fn)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if err := img.AppendFile(path.Join(fn, f.Name())); err != nil {
+				return err
+			}
 		}
 	} else {
 		// file

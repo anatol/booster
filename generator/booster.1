@@ -30,6 +30,7 @@ universal: false
 modules: nvidia,kernel/sound/usb/
 compression: zstd
 mount_timeout: 5m6s
+extra_files: vim,/usr/share/vim/vim82/
 .fi
 .IP "" 0
 .IP "\[ci]" 4
@@ -42,6 +43,8 @@ mount_timeout: 5m6s
 \fBcompression\fR is a flag that specifies compression for the output initramfs file\. Currently supported algorithms are "zstd", "gzip", "none"\. If no option specified then "zstd" is used as a default compression\.
 .IP "\[ci]" 4
 \fBmount_timeout\fR timeout for waiting for root filesystem to appear\. The field format is a decimal number and then unit number\. Valid units are "s", "m", "h"\. If no value specified then default timeout (3 minutes) is used\. To disable the timeout completely specify "0s"\.
+.IP "\[ci]" 4
+\fBextra_files\fR is a comma\-separated list of extra files to add to the image\. If an item starts with slash ("/") then it considered an absolute path\. Otherwise it is a path relative to /usr/bin\. If the item is a directory then its content is added recursively\.
 .IP "" 0
 .SH "OPTIONS"
 \fBbooster\fR command accepts following arguments:

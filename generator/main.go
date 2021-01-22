@@ -88,6 +88,10 @@ func generateInitRamfs() error {
 		return err
 	}
 
+	if err := appendExtraFiles(img); err != nil {
+		return err
+	}
+
 	if err := appendModules(img); err != nil {
 		return err
 	}
@@ -105,6 +109,25 @@ func appendInitBinary(img *Image) error {
 		return err
 	}
 	return img.AppendContent(content, 0755, "/init")
+}
+
+func appendExtraFiles(img *Image) error {
+	binaries := strings.Split(generatorConfig.ExtraFiles, ",")
+	for _, f := range binaries {
+		if f == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(f, "/") {
+			// simple names like "strace" are resolved as binaries under /usr/bin
+			f = "/usr/bin/" + f
+		}
+
+		if err := img.AppendFile(f); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var (

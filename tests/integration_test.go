@@ -109,6 +109,7 @@ type GeneratorConfig struct {
 	Modules      string         `yaml:",omitempty"`
 	Compression  string         `yaml:",omitempty"`
 	MountTimeout string         `yaml:"mount_timeout,omitempty"`
+	ExtraFiles   string         `yaml:"extra_files,omitempty"`
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -132,6 +133,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.Universal = true
 	conf.Compression = opts.compression
 	conf.MountTimeout = strconv.Itoa(opts.mountTimeout) + "s"
+	conf.ExtraFiles = opts.extraFiles
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -158,6 +160,7 @@ type Opts struct {
 	disk          string
 	disks         []vmtest.QemuDisk
 	mountTimeout  int // in seconds
+	extraFiles    string
 	checkVmState  func(vm *vmtest.Qemu, t *testing.T)
 }
 

@@ -65,6 +65,7 @@ universal: false
 modules: nvidia,kernel/sound/usb/
 compression: zstd
 mount_timeout: 5m6s
+extra_files: vim,/usr/share/vim/vim82/
 ```
 
 `network` node, if presents, initializes network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
@@ -86,6 +87,9 @@ If no option specified then "zstd" is used as a default compression.
 `mount_timeout` timeout for waiting for root filesystem to appear. The field format is a decimal number and then unit number.
 Valid units are "s", "m", "h". If no value specified then default timeout (3 minutes) is used.
 To disable the timeout completely specify "0s".
+
+`extra_files` is a comma-separated list of extra files to add to the image. If an item starts with slash ("/")
+then it considered an absolute path. Otherwise it is a path relative to /usr/bin. If the item is a directory then its content is added recursively.
 
 #### Command-line arguments
 `booster` accepts a list of arguments:
