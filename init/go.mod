@@ -3,17 +3,16 @@ module init
 go 1.15
 
 require (
-	github.com/anatol/clevis.go v0.0.0-20201216184917-7fbe18d9406f
-	github.com/anatol/luks.go v0.0.0-20201214200247-1ec7c4af97f2
-	github.com/insomniacslk/dhcp v0.0.0-20201112113307-4de412bc85d8
-	github.com/lestrrat-go/jwx v1.0.6 // indirect
+	github.com/anatol/clevis.go v0.0.0-20210126173729-9c73798d515b
+	github.com/anatol/luks.go v0.0.0-20210126180755-c1f196316e54
+	github.com/insomniacslk/dhcp v0.0.0-20210120172423-cc9239ac6294
 	github.com/s-urbaniak/uevent v1.0.0
 	github.com/vishvananda/netlink v1.1.0
-	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
+	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.0.0-20201217014255-9d1352758620
-	golang.org/x/net v0.0.0-20201216054612-986b41b23924 // indirect
-	golang.org/x/sys v0.0.0-20201218084310-7d0127a74742
+	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
+	golang.org/x/net v0.0.0-20210119194325-5f4716e94777 // indirect
+	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
 	golang.org/x/term v0.0.0-20201210144234-2321bbc49cbf // indirect
-	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
