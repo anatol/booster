@@ -27,6 +27,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	for _, fn := range probes {
 		info := fn(r)
 		if info != nil {
+			debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, info.format, info.uuid, info.label)
 			return info, nil
 		}
 	}

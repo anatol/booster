@@ -166,7 +166,6 @@ func devAdd(syspath, devname string) error {
 	if err != nil {
 		return err
 	}
-	debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", devpath, info.format, info.uuid, info.label)
 
 	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
 		return mountRootFs(devpath)
@@ -316,12 +315,13 @@ func luksOpen(dev string, name string) error {
 }
 
 func mountRootFs(dev string) error {
+	info, err := readBlkInfo(dev)
+	if err != nil {
+		return fmt.Errorf("%s: %v", dev, err)
+	}
+
 	fstype := cmdline["rootfstype"]
 	if fstype == "" {
-		info, err := readBlkInfo(dev)
-		if err != nil {
-			return fmt.Errorf("%s: %v", dev, err)
-		}
 		fstype = info.format
 	}
 	debug("mounting %s (fstype=%s) to %s", dev, fstype, newRoot)
