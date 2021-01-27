@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/anatol/clevis.go v0.0.0-20210126173729-9c73798d515b
-	github.com/anatol/luks.go v0.0.0-20210126180755-c1f196316e54
+	github.com/anatol/luks.go v0.0.0-20210127170521-37fb137e8d1d
 	github.com/insomniacslk/dhcp v0.0.0-20210120172423-cc9239ac6294
 	github.com/s-urbaniak/uevent v1.0.0
 	github.com/vishvananda/netlink v1.1.0

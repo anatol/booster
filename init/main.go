@@ -108,6 +108,7 @@ var (
 // Booster handles following kernel command line parameters:
 //    - rd.luks=1 to enable looking for LUKS-encrypted block devices
 //    - rd.luks.name=<uuid>=<name>
+//    - rd.luks.options=opt1,opt2
 //    - root=/dev/mapper/<name>
 //    - root=/dev/<name>
 //    - root=UUID=<uuid>
@@ -190,6 +191,33 @@ func devAdd(syspath, devname string) error {
 	return nil
 }
 
+// rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
+var rdLuksOptions = map[string]string{
+	"discard":                luks.FlagAllowDiscards,
+	"same-cpu-crypt":         luks.FlagSameCPUCrypt,
+	"submit-from-crypt-cpus": luks.FlagSubmitFromCryptCPUs,
+	"no-read-workqueue":      luks.FlagNoReadWorkqueue,
+	"no-write-workqueue":     luks.FlagNoWriteWorkqueue,
+}
+
+func luksApplyFlags(d luks.Device) error {
+	param, ok := cmdline["rd.luks.options"]
+	if !ok {
+		return nil
+	}
+
+	for _, o := range strings.Split(param, ",") {
+		flag, ok := rdLuksOptions[o]
+		if !ok {
+			return fmt.Errorf("Unknown value in rd.luks.options: %v", o)
+		}
+		if err := d.FlagsAdd(flag); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func luksOpen(dev string, name string) error {
 	wg := loadModules("dm_crypt")
 	wg.Wait()
@@ -202,6 +230,10 @@ func luksOpen(dev string, name string) error {
 
 	if len(d.Slots()) == 0 {
 		return fmt.Errorf("device %s has no slots to unlock", dev)
+	}
+
+	if err := luksApplyFlags(d); err != nil {
+		return err
 	}
 
 	// first try to unlock with token

@@ -72,6 +72,8 @@ Some parts of booster boot functionality can be modified with kernel boot parame
 .IP "\[ci]" 4
 \fBrd\.luks\.name=$UUID=$NAME\fR similar to rd\.luks\.uuid parameter but also specifies the name used for the LUKS device opening\.
 .IP "\[ci]" 4
+\fBrd\.luks\.options=opt1,opt2\fR a comma\-separated lists of LUKS flags\. Supported options are \fBdiscard\fR, \fBsame\-cpu\-crypt\fR, \fBsubmit\-from\-crypt\-cpus\fR, \fBno\-read\-workqueue\fR, \fBno\-write\-workqueue\fR\. Note that booster also supports LUKS v2 persistent flags stored with the partition metadata\. Any command\-line options are added on top of the persistent flags\.
+.IP "\[ci]" 4
 \fBbooster\.debug=1\fR enable booster debug output\. It is printed to console at the boot time\. This feature might be useful to debug booster issues\.
 .IP "" 0
 .SH "EXAMPLES"

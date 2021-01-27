@@ -395,7 +395,7 @@ func TestBooster(t *testing.T) {
 	t.Run("LUKS1.WithName", boosterTest(Opts{
 		disk:       "assets/luks1.img",
 		prompt:     "Enter passphrase for cryptroot:",
-		kernelArgs: []string{"rd.luks.name=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415=cryptroot", "root=/dev/mapper/cryptroot"},
+		kernelArgs: []string{"rd.luks.name=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415=cryptroot", "root=/dev/mapper/cryptroot", "rd.luks.options=discard"},
 	}))
 	t.Run("LUKS1.WithUUID", boosterTest(Opts{
 		disk:       "assets/luks1.img",
