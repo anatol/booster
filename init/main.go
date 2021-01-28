@@ -126,7 +126,7 @@ func devAdd(syspath, devname string) error {
 	addedDevices[devname] = true
 	addedDevicesMutex.Unlock()
 
-	debug("Found a new device with path=%v and name=%v", syspath, devname)
+	debug("found a new device with path=%v and name=%v", syspath, devname)
 
 	cmdroot := cmdline["root"]
 
@@ -633,7 +633,7 @@ func matchAlias(alias string) ([]string, error) {
 			return nil, err
 		}
 		if match {
-			debug("Modalias %v matched module %v", alias, a.module)
+			debug("modalias %v matched module %v", alias, a.module)
 			result = append(result, a.module)
 		}
 	}
