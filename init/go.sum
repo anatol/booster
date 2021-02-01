@@ -5,8 +5,8 @@ github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuy
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/anatol/clevis.go v0.0.0-20210126173729-9c73798d515b h1:+UUvTyRDnMJ9pN9i8V5w8SOs3J3IhDeHXAdUzZoTOBM=
 github.com/anatol/clevis.go v0.0.0-20210126173729-9c73798d515b/go.mod h1:kEdHiPKFcnMsR/9Mh6FvWpe1tfcvVDFm00h9wOfQmrY=
-github.com/anatol/luks.go v0.0.0-20210127170521-37fb137e8d1d h1:zeTeJWqBMtLv6Mjkd0zb3qvhDckg5h4IJRpNwDXX23E=
-github.com/anatol/luks.go v0.0.0-20210127170521-37fb137e8d1d/go.mod h1:MtU07dKkCEYQX4kNNaIdTWZTpQXxEOXUxeenRtA42DU=
+github.com/anatol/luks.go v0.0.0-20210201180949-019108cc274b h1:pNO8N70G/sW4G2aOZbNEhuUnCo56xFI/L4Bvi/pzXlY=
+github.com/anatol/luks.go v0.0.0-20210201180949-019108cc274b/go.mod h1:MtU07dKkCEYQX4kNNaIdTWZTpQXxEOXUxeenRtA42DU=
 github.com/anatol/vmtest v0.0.0-20201214200054-5b4319ace2f0 h1:B8TRoIqx3f/kI2QLKOUd/oPaNXrNBMkpCZXkUYZz6Ek=
 github.com/anatol/vmtest v0.0.0-20201214200054-5b4319ace2f0/go.mod h1:EWbYrKMDMxiKbQjI7z6GO7yABGxqRkU3+slxy/avES8=
 github.com/armon/consul-api v0.0.0-20180202201655-eb2c6b5be1b6/go.mod h1:grANhF5doyWs3UAsr3K4I6qtAmlQcZDesFNEHPZAzj8=
