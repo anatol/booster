@@ -561,6 +561,21 @@ linkReadinessLoop:
 				return err
 			}
 		}
+
+		if c.DNSServers != "" {
+			servers := strings.Split(c.DNSServers, ",")
+			ips := make([]net.IP, 0)
+			for _, s := range servers {
+				ip := net.ParseIP(s)
+				if ip == nil {
+					return fmt.Errorf("Unable to parse IP address for DNS server: %v", s)
+				}
+				ips = append(ips, ip)
+			}
+			if err := writeResolvConf(ips); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -600,7 +615,27 @@ func runDhcp(ifname string) error {
 	if err := netlink.AddrAdd(link, &addr); err != nil {
 		return err
 	}
+
+	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
+	if dnsServers != nil {
+		if err := writeResolvConf(dnsServers); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+func writeResolvConf(servers []net.IP) error {
+	var resolvConf bytes.Buffer
+	for _, ip := range servers {
+		resolvConf.WriteString("nameserver ")
+		resolvConf.WriteString(ip.String())
+		resolvConf.WriteByte('\n')
+	}
+	resolvConf.WriteString("search .\n")
+
+	return ioutil.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
 }
 
 func shutdownNetwork() {

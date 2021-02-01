@@ -26,6 +26,7 @@ network:
   dhcp: on
   ip: 10\.0\.2\.15/24
   gateway: 10\.0\.2\.255
+  dns_servers: 192\.168\.1\.1,8\.8\.8\.8
 universal: false
 modules: nvidia,kernel/sound/usb/
 compression: zstd
@@ -34,7 +35,7 @@ extra_files: vim,/usr/share/vim/vim82/
 .fi
 .IP "" 0
 .IP "\[ci]" 4
-\fBnetwork\fR node, if presents, initializes network at the boot time\. It is needed if mounting a root fs requires access to the network (e\.g\. in case of Tang binding)\. The address can be configured with a static ip (node ip) or with DHCPv4 (dhcp: on)\.
+\fBnetwork\fR node, if presents, initializes network at the boot time\. It is needed if mounting a root fs requires access to the network (e\.g\. in case of Tang binding)\. The network can be either configured dynamically with DHCPv4 or statically within this config\. In the former case \fBdhcp\fR is set to \fBon\fR\. In the latter case the config allows to specify \fBip\fR \- the machine IP address and its network mask, \fBgateway\fR \- default gateway, \fBdns_servers\fR \- comma\-separated list of DNS servers\.
 .IP "\[ci]" 4
 \fBuniversal\fR is a boolean flag that tells booster to generate a universal image\. By default booster generates a host\-specific image that includes kernel modules used at the current host\. For example if the host does not have a TPM2 chip then tpm modules are ignored\. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations\.
 .IP "\[ci]" 4

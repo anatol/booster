@@ -61,6 +61,7 @@ network:
   dhcp: on
   ip: 10.0.2.15/24
   gateway: 10.0.2.255
+  dns_servers: 192.168.1.1,8.8.8.8
 universal: false
 modules: nvidia,kernel/sound/usb/
 compression: zstd
@@ -69,7 +70,8 @@ extra_files: vim,/usr/share/vim/vim82/
 ```
 
 `network` node, if presents, initializes network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
-The address can be configured with a static ip (node `ip`) or with DHCPv4 (`dhcp: on`).
+The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
+In the latter case the config allows to specify `ip` - the machine IP address and its network mask, `gateway` - default gateway, `dns_servers` - comma-separated list of DNS servers.
 
 `universal` is a boolean flag that tells booster to generate a universal image.
 By default `booster` generates a host-specific image that includes kernel modules used at the *current host*.
