@@ -490,7 +490,7 @@ func udevListener() {
 			go func() {
 				// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
 				if err := initializeNetworkInterface(ifname); err != nil {
-					fmt.Printf("unable to initialize network interface %s: %v", ifname, err)
+					fmt.Printf("unable to initialize network interface %s: %v\n", ifname, err)
 				}
 			}()
 		}
@@ -650,7 +650,7 @@ func scanSysBlock() error {
 		if err := devAdd(target, d.Name()); err != nil {
 			// even if it fails to find UUID here (e.g. in case of MBR) we still want to check
 			// its partitions
-			fmt.Printf("devAdd: %v", err)
+			fmt.Printf("devAdd: %v\n", err)
 		}
 
 		// Probe all partitions of this block device, too:
@@ -665,7 +665,7 @@ func scanSysBlock() error {
 			}
 			devpath := filepath.Join(target, p.Name())
 			if err := devAdd(devpath, p.Name()); err != nil {
-				fmt.Printf("devAdd: %v", err)
+				fmt.Printf("devAdd: %v\n", err)
 			}
 		}
 	}
@@ -917,11 +917,11 @@ func readStartTime() {
 	var err error
 	startRealtime, err = readClock(unix.CLOCK_REALTIME)
 	if err != nil {
-		fmt.Printf("read realtime clock: %v", err)
+		fmt.Printf("read realtime clock: %v\n", err)
 	}
 	startMonotonic, err = readClock(unix.CLOCK_MONOTONIC)
 	if err != nil {
-		fmt.Printf("read monotonic clock: %v", err)
+		fmt.Printf("read monotonic clock: %v\n", err)
 	}
 }
 

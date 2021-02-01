@@ -174,7 +174,7 @@ func assetsBuildQemu() error {
 
 func runBuilderInQemu(conn *ssh.Client, scpAddress string, id string, params []string) error {
 	if *verbose {
-		log.Printf("Run qemu builder for '%s'", id)
+		log.Printf("Run qemu builder for '%s'\n", id)
 	}
 	sess, err := conn.NewSession()
 	if err != nil {
@@ -202,7 +202,7 @@ func runBuilderInQemu(conn *ssh.Client, scpAddress string, id string, params []s
 
 func runBuilderLocal(id string, extraParams []string) error {
 	if *verbose {
-		log.Printf("Run local builder for '%s'", id)
+		log.Printf("Run local builder for '%s'\n", id)
 	}
 
 	params := []string{"./rootfs_builder", "-id", id}
