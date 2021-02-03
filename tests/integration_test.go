@@ -152,6 +152,7 @@ type Opts struct {
 	params        []string
 	compression   string
 	prompt        string
+	password      string
 	enableTangd   bool
 	useDhcp       bool
 	enableTpm2    bool
@@ -172,6 +173,10 @@ func boosterTest(opts Opts) func(*testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+	const defaultLuksPassword = "1234"
+	if opts.prompt != "" && opts.password == "" {
+		opts.password = defaultLuksPassword
 	}
 
 	return func(t *testing.T) {
@@ -261,8 +266,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			if err := vm.ConsoleExpect(opts.prompt); err != nil {
 				t.Fatal(err)
 			}
-			const luksPassword = "1234"
-			if err := vm.ConsoleWrite(luksPassword + "\n"); err != nil {
+			if err := vm.ConsoleWrite(opts.password + "\n"); err != nil {
 				t.Fatal(err)
 			}
 		}
