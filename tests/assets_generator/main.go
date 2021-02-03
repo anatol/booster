@@ -86,6 +86,7 @@ loopdev=$(losetup -fP --show $raw)
 mount=$(mktemp -d)
 mount $loopdev $mount
 pacstrap -c $mount base openssh
+genfstab -U $mount > $mount/etc/fstab
 
 echo "[Match]
 Name=*
