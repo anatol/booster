@@ -77,26 +77,6 @@ func parseCmdline() error {
 	return nil
 }
 
-// TODO: find out how to avoid synchronous waiting for files
-func waitForFile(filename string) error {
-	deadline := time.Now().Add(1 * time.Second)
-
-	for {
-		_, err := os.Stat(filename)
-		if err == nil {
-			return nil
-		}
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("waitForFile: %v", err)
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for %v", filename)
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 var (
 	addedDevices      = map[string]bool{}
 	addedDevicesMutex sync.Mutex
@@ -136,10 +116,9 @@ func devAdd(syspath, devname string) error {
 	}
 
 	if strings.HasPrefix(devname, "dm-") {
+		// TODO: check if we can use API similar to what
+		// 'sudo dmsetup info -c --noheadings -o name dm-0' does
 		dmNameFile := filepath.Join("/sys", syspath, "dm", "name")
-		if err := waitForFile(dmNameFile); err != nil {
-			return err
-		}
 		content, err := ioutil.ReadFile(dmNameFile)
 		if err != nil {
 			return err
@@ -147,12 +126,8 @@ func devAdd(syspath, devname string) error {
 		mapperName := string(bytes.TrimSpace(content))
 		dmPath := "/dev/mapper/" + mapperName
 
-		// setup symlink /dev/dm-NN -> /dev/mapper/NAME
+		// setup symlink /dev/mapper/NAME -> /dev/dm-NN
 		if err := os.Symlink(devpath, dmPath); err != nil {
-			return err
-		}
-
-		if err := waitForFile(devpath); err != nil {
 			return err
 		}
 		devpath = dmPath // later we use /dev/mapper/NAME as a mount point
@@ -274,14 +249,11 @@ func luksOpen(dev string, name string) error {
 
 		for _, s := range t.Slots {
 			err = d.Unlock(s, password, name)
-			if err == nil {
-				MemZeroBytes(password)
-				return nil
+			if err == luks.ErrPassphraseDoesNotMatch {
+				continue
 			}
-			if err != luks.ErrPassphraseDoesNotMatch {
-				MemZeroBytes(password)
-				return fmt.Errorf("unlocking clevis slot %d: %v", s, err)
-			}
+			MemZeroBytes(password)
+			return err
 		}
 		MemZeroBytes(password)
 	}
@@ -300,10 +272,11 @@ func luksOpen(dev string, name string) error {
 
 		for _, s := range d.Slots() {
 			err = d.Unlock(s, password, name)
-			if err == nil || err != luks.ErrPassphraseDoesNotMatch {
-				MemZeroBytes(password)
-				return err
+			if err == luks.ErrPassphraseDoesNotMatch {
+				continue
 			}
+			MemZeroBytes(password)
+			return err
 		}
 
 		// zeroify the password so we do not keep the sensitive data in the memory
@@ -404,25 +377,47 @@ func cleanup() {
 	shutdownNetwork()
 }
 
-func skipDeviceMapper(dmCookie string) bool {
+// isValidDmEvent checks whether this udev event has correct flags.
+// This is similar to checks done by /usr/lib/udev/rules.d/10-dm.rules udev rules.
+func isValidDmEvent(dmCookie string) bool {
 	if dmCookie == "" {
-		return false // device not set up by libdevmapper
+		return false
 	}
 
-	// skip device mapper devices if their cookie has flag
-	// DM_UDEV_DISABLE_DISK_RULES_FLAG set:
-	// https://sourceware.org/git/?p=lvm2.git;a=blob;f=lib/activate/dev_manager.c;hb=d9e8895a96539d75166c0f74e58f5ed4e729e551#l1935
 	cookie, err := strconv.ParseUint(dmCookie, 0, 32)
 	if err != nil {
 		return false // invalid cookie
 	}
-	// libdevmapper.h
+
 	const (
-		DM_UDEV_FLAGS_SHIFT             = 16
-		DM_UDEV_DISABLE_DISK_RULES_FLAG = 0x0004
+		DM_UDEV_FLAGS_SHIFT           = 16
+		DM_UDEV_DISABLE_DM_RULES_FLAG = 0x0001
+		DM_UDEV_PRIMARY_SOURCE_FLAG   = 0x0040
 	)
 	flags := cookie >> DM_UDEV_FLAGS_SHIFT
-	return flags&DM_UDEV_DISABLE_DISK_RULES_FLAG > 0
+
+	// Quoting https://fossies.org/linux/LVM2/libdm/libdevmapper.h
+	//
+	// DM_UDEV_PRIMARY_SOURCE_FLAG is automatically appended by
+	// libdevmapper for all ioctls generating udev uevents. Once used in
+	// udev rules, we know if this is a real "primary sourced" event or not.
+	// We need to distinguish real events originated in libdevmapper from
+	// any spurious events to gather all missing information (e.g. events
+	// generated as a result of "udevadm trigger" command or as a result
+	// of the "watch" udev rule).
+	if flags&DM_UDEV_PRIMARY_SOURCE_FLAG == 0 {
+		return false
+	}
+
+	// Quoting https://fossies.org/linux/LVM2/libdm/libdevmapper.h
+	//
+	// DM_UDEV_DISABLE_DM_RULES_FLAG is set in case we need to disable
+	// basic device-mapper udev rules that create symlinks in /dev/<DM_DIR>
+	if flags&DM_UDEV_DISABLE_DM_RULES_FLAG != 0 {
+		return false
+	}
+
+	return true
 }
 
 func loadModalias(alias string) error {
@@ -455,6 +450,7 @@ func udevListener() {
 		if err != nil {
 			log.Fatalf("uevent: %v", err)
 		}
+		debug("udev event %+v", ev)
 
 		if modalias, ok := ev.Vars["MODALIAS"]; ok {
 			if err := loadModalias(modalias); err != nil {
@@ -462,17 +458,17 @@ func udevListener() {
 				continue
 			}
 		} else if devname, ok := ev.Vars["DEVNAME"]; ok {
-			// The libdevmapper activation sequence results in an add uevent
-			// before the device is ready, so wait for the change uevent:
-			// https://www.redhat.com/archives/linux-lvm/2020-April/msg00004.html
-			if !(((!strings.HasPrefix(devname, "dm-") && ev.Action == "add") ||
-				(strings.HasPrefix(devname, "dm-") && ev.Action == "change")) &&
-				ev.Subsystem == "block") {
+			if ev.Subsystem != "block" {
 				continue
 			}
 
-			if skipDeviceMapper(ev.Vars["DM_COOKIE"]) {
-				debug("skipping device mapper device %s because of DM_COOKIE", devname)
+			if strings.HasPrefix(devname, "dm-") {
+				cookie := ev.Vars["DM_COOKIE"]
+				if !isValidDmEvent(cookie) {
+					debug("skipping device mapper device %s because of DM_COOKIE: %s", devname, cookie)
+					continue
+				}
+			} else if ev.Action != "add" {
 				continue
 			}
 
