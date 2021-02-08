@@ -3,7 +3,7 @@ module init
 go 1.15
 
 require (
-	github.com/anatol/clevis.go v0.0.0-20210201025903-2bacd280f4af
+	github.com/anatol/clevis.go v0.0.0-20210206190044-7ab6db3fd9c2
 	github.com/anatol/luks.go v0.0.0-20210208171804-d44366ded8ec
 	github.com/insomniacslk/dhcp v0.0.0-20210120172423-cc9239ac6294
 	github.com/s-urbaniak/uevent v1.0.0

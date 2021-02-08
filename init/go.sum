@@ -3,8 +3,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
-github.com/anatol/clevis.go v0.0.0-20210201025903-2bacd280f4af h1:k2aCA/dfG0KBganUSOZXy7yhzpn0kiHezLL+ti8LGUQ=
-github.com/anatol/clevis.go v0.0.0-20210201025903-2bacd280f4af/go.mod h1:AXcMZmPA+anuZaMu3PdG5DOFYn621jpEs/Ha5FZw88g=
+github.com/anatol/clevis.go v0.0.0-20210206190044-7ab6db3fd9c2 h1:2N6B5Q2ZjhcTSLX4vzy7FacS+ao/eZApd+xlyy1dtXc=
+github.com/anatol/clevis.go v0.0.0-20210206190044-7ab6db3fd9c2/go.mod h1:nLqpHHXmLq3oYaXHlh0JwXjNPyg5VUSCUtuKJi6JmGA=
 github.com/anatol/luks.go v0.0.0-20210208171804-d44366ded8ec h1:wGSfcy79/N/uhX/DHdaGI2O5B1I3xJrEsfG66xuXO/0=
 github.com/anatol/luks.go v0.0.0-20210208171804-d44366ded8ec/go.mod h1:xk+gS0uKZ2TdmGna2WyjcxxUKeVstnGNnWA5WDsGKcU=
 github.com/anatol/vmtest v0.0.0-20201215024419-d0326c4b7734 h1:t2+NbgQAyVWDDwrr/OzB2t7jgJakUq65ZFe7Can+4I0=
@@ -39,6 +39,8 @@ github.com/go-logfmt/logfmt v0.4.0/go.mod h1:3RMwSq7FuexP4Kalkev3ejPJsZTpXXBr9+V
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
 github.com/goccy/go-json v0.3.5 h1:HqrLjEWx7hD62JRhBh+mHv+rEEzBANIu6O0kbDlaLzU=
 github.com/goccy/go-json v0.3.5/go.mod h1:6MelG93GURQebXPDq3khkgXZkazVtN9CRI+MGFi0w8I=
+github.com/goccy/go-json v0.4.0 h1:pTx0a95bD8z6L8rxwo6kPsMohjtyjv6RngTCX1mkFXc=
+github.com/goccy/go-json v0.4.0/go.mod h1:6MelG93GURQebXPDq3khkgXZkazVtN9CRI+MGFi0w8I=
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=
 github.com/gogo/protobuf v1.2.1/go.mod h1:hp+jE20tsWTFYpLwKvXlhS1hjn+gTNwPg2I6zVXpSg4=
 github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b/go.mod h1:SBH7ygxi8pfUlaOkMMuAQtPIUF8ecWP5IEl/CR7VP2Q=
@@ -104,8 +106,8 @@ github.com/lestrrat-go/httpcc v1.0.0 h1:FszVC6cKfDvBKcJv646+lkh4GydQg2Z29scgUfkO
 github.com/lestrrat-go/httpcc v1.0.0/go.mod h1:tGS/u00Vh5N6FHNkExqGGNId8e0Big+++0Gf8MBnAvE=
 github.com/lestrrat-go/iter v1.0.0 h1:QD+hHQPDSHC4rCJkZYY/yXChYr/vjfBopKekTc+7l4Q=
 github.com/lestrrat-go/iter v1.0.0/go.mod h1:zIdgO1mRKhn8l9vrZJZz9TUMMFbQbLeTsbqPDrJ/OJc=
-github.com/lestrrat-go/jwx v1.1.0 h1:gerfaQK3mEIL8X8oJ5MFvsB/JuxXoGryLtTlNmPi3/k=
-github.com/lestrrat-go/jwx v1.1.0/go.mod h1:vn9FzD6gJtKkgYs7RTKV7CjWtEka8F/voUollhnn4QE=
+github.com/lestrrat-go/jwx v1.1.1 h1:L7TqffHhO0qSyUcDGfCkDV42GQMp9fNOBi/zFOigMEY=
+github.com/lestrrat-go/jwx v1.1.1/go.mod h1:vn9FzD6gJtKkgYs7RTKV7CjWtEka8F/voUollhnn4QE=
 github.com/lestrrat-go/option v0.0.0-20210103042652-6f1ecfceda35/go.mod h1:5ZHFbivi4xwXxhxY9XHDe2FHo6/Z7WWmtT7T5nBBp3I=
 github.com/lestrrat-go/option v1.0.0 h1:WqAWL8kh8VcSoD6xjSH34/1m8yxluXQbDeKNfvFeEO4=
 github.com/lestrrat-go/option v1.0.0/go.mod h1:5ZHFbivi4xwXxhxY9XHDe2FHo6/Z7WWmtT7T5nBBp3I=
