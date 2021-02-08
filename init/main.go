@@ -764,7 +764,12 @@ func boost() error {
 	if err := mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
 		return err
 	}
-	if err := mount("run", "/run", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV, "mode=0755"); err != nil {
+	if err := mount("run", "/run", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_STRICTATIME, "mode=755"); err != nil {
+		return err
+	}
+
+	// Per systemd convention https://systemd.io/INITRD_INTERFACE/
+	if err := os.Mkdir("/run/initramfs", 0755); err != nil {
 		return err
 	}
 

@@ -100,6 +100,11 @@ func generateInitRamfs() error {
 		return err
 	}
 
+	// appending initrd-release file per recommendation from https://systemd.io/INITRD_INTERFACE/
+	if err := img.AppendContent([]byte{}, 0644, "/etc/initrd-release"); err != nil {
+		return err
+	}
+
 	return img.Close()
 }
 
