@@ -69,7 +69,12 @@ func assetsInit() error {
 
 	tpmStateDir := assetsDir + "/tpm2"
 	_ = os.Mkdir(tpmStateDir, 0755)
-	if err := exec.Command("swtpm_setup", "--tpm-state", tpmStateDir, "--tpm2", "--ecc", "--create-ek-cert", "--create-platform-cert", "--lock-nvram").Run(); err != nil {
+	swtpmSetup := exec.Command("swtpm_setup", "--tpm-state", tpmStateDir, "--tpm2", "--ecc", "--create-ek-cert", "--create-platform-cert", "--lock-nvram")
+	if *verbose {
+		swtpmSetup.Stdout = os.Stdout
+		swtpmSetup.Stderr = os.Stderr
+	}
+	if err := swtpmSetup.Run(); err != nil {
 		return err
 	}
 
