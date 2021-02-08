@@ -973,11 +973,24 @@ func emergencyShell() {
 	}
 }
 
+// checkIfInitrd checks whether this binary run in a prepared initrd environment
+func checkIfInitrd() error {
+	if os.Getpid() != 1 {
+		return fmt.Errorf("Booster init binary does not run as PID 1")
+	}
+
+	if _, err := os.Stat("/etc/initrd-release"); os.IsNotExist(err) {
+		return fmt.Errorf("initrd-release cannot be found")
+	}
+
+	return nil
+}
+
 func main() {
 	readStartTime()
 
-	if os.Getpid() != 1 {
-		panic("Booster init binary does not run as PID 1")
+	if err := checkIfInitrd(); err != nil {
+		panic(err)
 	}
 
 	debug("Starting booster initramfs")
