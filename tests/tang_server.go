@@ -13,13 +13,13 @@ import (
 
 type TangServer struct {
 	binaryPath string
-	cacheDir   string
+	keysDir    string
 	listener   net.Listener
 	quit       chan interface{}
 	port       int
 }
 
-func NewTangServer(cacheDir string) (*TangServer, error) {
+func NewTangServer(keysDir string) (*TangServer, error) {
 	path, err := findTangdLocation()
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func NewTangServer(cacheDir string) (*TangServer, error) {
 
 	s := &TangServer{
 		binaryPath: path,
-		cacheDir:   cacheDir,
+		keysDir:    keysDir,
 		listener:   l,
 		port:       l.Addr().(*net.TCPAddr).Port,
 		quit:       make(chan interface{}),
@@ -78,7 +78,7 @@ func (s *TangServer) handleConection(conn net.Conn) {
 			return
 		}
 
-		tangCmd := exec.Command(s.binaryPath, s.cacheDir)
+		tangCmd := exec.Command(s.binaryPath, s.keysDir)
 		tangCmd.Stdin = bytes.NewReader(buf[:n])
 		if testing.Verbose() {
 			tangCmd.Stderr = os.Stderr

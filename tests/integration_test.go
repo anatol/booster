@@ -205,14 +205,14 @@ func boosterTest(opts Opts) func(*testing.T) {
 		}
 
 		if opts.enableTangd {
-			tangd, err := NewTangServer("assets/tang/cache")
+			tangd, err := NewTangServer("assets/tang")
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer tangd.Stop()
 			// using command directly like one below does not work as extra info is printed to stderr and QEMU incorrectly
 			// assumes it is a part of HTTP reply
-			// guestfwd=tcp:10.0.2.100:5697-cmd:/usr/lib/tangd ./assets/tang/cache 2>/dev/null
+			// guestfwd=tcp:10.0.2.100:5697-cmd:/usr/lib/tangd ./assets/tang 2>/dev/null
 
 			params = append(params, "-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.port))
 		}

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -30,9 +35,46 @@ var imagesToBuild = map[string][]string{
 	"luks2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "639b8fdd-36ba-443e-be3e-e5b335935502", "-fsUuid", "7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
 
 	"luks1.clevis.tpm2": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "28c2e412-ab72-4416-b224-8abd116d6f2f", "-fsUuid", "2996cec0-16fd-4f1d-8bf3-6606afa77043", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
-	"luks1.clevis.tang": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "-fsUuid", "c23aacf4-9e7e-4206-ba6c-af017934e6fa", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/cache/default.jws"}`},
+	"luks1.clevis.tang": {"-luksVersion", "1", "-luksPassword", "1234", "-luksUuid", "4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "-fsUuid", "c23aacf4-9e7e-4206-ba6c-af017934e6fa", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/adv.jwk"}`},
 	"luks2.clevis.tpm2": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "-fsUuid", "c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "-luksClevisPin", "tpm2", "-luksClevisConfig", "{}"},
-	"luks2.clevis.tang": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "f2473f71-9a68-4b16-ae54-8f942b2daf50", "-fsUuid", "7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/cache/default.jws"}`},
+	"luks2.clevis.tang": {"-luksVersion", "2", "-luksPassword", "1234", "-luksUuid", "f2473f71-9a68-4b16-ae54-8f942b2daf50", "-fsUuid", "7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "-luksClevisPin", "tang", "-luksClevisConfig", `{"url":"http://10.0.2.100:5697", "adv":"../assets/tang/adv.jwk"}`},
+}
+
+// generate tang keys
+func assetsTangInit() error {
+	tangDir := assetsDir + "/tang"
+	_ = os.Mkdir(tangDir, 0755)
+	tangKeysCmd := exec.Command("/usr/lib/tangd-keygen", tangDir, "sig", "exc")
+	if *verbose {
+		tangKeysCmd.Stdout = os.Stdout
+		tangKeysCmd.Stderr = os.Stderr
+	}
+	if err := tangKeysCmd.Run(); err != nil {
+		return fmt.Errorf("tangd-keygen: %v", err)
+	}
+
+	// build advertisement for the keys
+	// tang before version v7 had script tangd-update that generated advertisement file
+	// but now we need to build it manually by launching tangd and making "GET /adv" request to it.
+	tangAdvCmd := exec.Command("/usr/lib/tangd", tangDir)
+	tangAdvCmd.Stdin = strings.NewReader("GET /adv HTTP/1.1\n\n")
+	var outb bytes.Buffer
+	tangAdvCmd.Stdout = &outb
+	if *verbose {
+		tangAdvCmd.Stderr = os.Stderr
+	}
+	if err := tangAdvCmd.Run(); err != nil {
+		return fmt.Errorf("tangd: %v", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(outb.Bytes())), nil)
+	if err != nil {
+		return err
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(path.Join(tangDir, "adv.jwk"), body, 0644)
 }
 
 func assetsInit() error {
@@ -45,26 +87,9 @@ func assetsInit() error {
 		return err
 	}
 
-	// generate tang keys
-	tangDir := assetsDir + "/tang"
-	_ = os.Mkdir(tangDir, 0755)
-	_ = os.Mkdir(tangDir+"/keys", 0755)
-	tangKeysCmd := exec.Command("/usr/lib/tangd-keygen", tangDir+"/keys")
-	if *verbose {
-		tangKeysCmd.Stdout = os.Stdout
-		tangKeysCmd.Stderr = os.Stderr
-	}
-	if err := tangKeysCmd.Run(); err != nil {
-		return fmt.Errorf("tangd-keygen: %v", err)
-	}
-
-	tangCacheCmd := exec.Command("/usr/lib/tangd-update", tangDir+"/keys", tangDir+"/cache")
-	if *verbose {
-		tangCacheCmd.Stdout = os.Stdout
-		tangCacheCmd.Stderr = os.Stderr
-	}
-	if err := tangCacheCmd.Run(); err != nil {
-		return fmt.Errorf("tangd-update: %v", err)
+	err := assetsTangInit()
+	if err != nil {
+		return err
 	}
 
 	tpmStateDir := assetsDir + "/tpm2"
