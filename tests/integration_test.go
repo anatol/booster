@@ -452,47 +452,63 @@ func TestBooster(t *testing.T) {
 		if pkg == "linux-lts" {
 			compression = "gzip"
 		}
-		t.Run("ArchLinux."+pkg, boosterTest(Opts{
+		checkVmState := func(vm *vmtest.Qemu, t *testing.T) {
+			config := &ssh.ClientConfig{
+				User:            "root",
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			}
+
+			conn, err := ssh.Dial("tcp", ":10022", config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+
+			sess, err := conn.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess.Close()
+
+			out, err := sess.CombinedOutput("systemd-analyze")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.Contains(string(out), "(initrd)") {
+				t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
+			}
+
+			sess2, err := conn.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess2.Close()
+			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
+			_, _ = sess2.CombinedOutput("shutdown now")
+		}
+
+		// simple ext4 image
+		t.Run("ArchLinux.ext4."+pkg, boosterTest(Opts{
 			kernelVersion: ver,
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{"assets/archlinux.raw", "raw"}},
-			kernelArgs:    []string{"root=/dev/sda", "rw"},
-			checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
-				config := &ssh.ClientConfig{
-					User:            "root",
-					HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-				}
+			disks:         []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
+			kernelArgs:   []string{"root=/dev/sda", "rw"},
+			checkVmState: checkVmState,
+		}))
 
-				conn, err := ssh.Dial("tcp", ":10022", config)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer conn.Close()
-
-				sess, err := conn.NewSession()
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer sess.Close()
-
-				out, err := sess.CombinedOutput("systemd-analyze")
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if !strings.Contains(string(out), "(initrd)") {
-					t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
-				}
-
-				sess2, err := conn.NewSession()
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer sess2.Close()
-				// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-				_, _ = sess2.CombinedOutput("shutdown now")
-			},
+		// more complex setup with LUKS and btrfs subvolumes
+		t.Run("ArchLinux.btrfs."+pkg, boosterTest(Opts{
+			kernelVersion: ver,
+			compression:   compression,
+			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:         []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
+			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
+			prompt:        "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
+			password:      "hello",
+			checkVmState:  checkVmState,
 		}))
 	}
 }

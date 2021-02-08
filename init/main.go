@@ -132,6 +132,10 @@ func devAdd(syspath, devname string) error {
 		}
 		devpath = dmPath // later we use /dev/mapper/NAME as a mount point
 
+		if err := writeUdevDb(mapperName); err != nil {
+			return err
+		}
+
 		if dmPath == cmdroot {
 			return mountRootFs(dmPath)
 		}
@@ -287,6 +291,37 @@ func luksOpen(dev string, name string) error {
 	}
 }
 
+// deviceNo returns major/minor device number for the given device file
+func deviceNo(filename string) (uint32, uint32, error) {
+	stat, err := os.Stat(filename)
+	if err != nil {
+		return 0, 0, err
+	}
+	sys, ok := stat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, fmt.Errorf("Cannot determine the device major and minor numbers for %s", filename)
+	}
+	return unix.Major(sys.Rdev), unix.Minor(sys.Rdev), nil
+
+}
+
+// writeUdevDb writes Udev state to the database.
+// It is an equivalent to what "db_persist" udev option does (see 'man 7 udev').
+func writeUdevDb(dmName string) error {
+	major, minor, err := deviceNo("/dev/mapper/" + dmName)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll("/run/udev/data/", 0755); err != nil {
+		return err
+	}
+
+	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
+	debug("writing udev state to %s", dbFile)
+	return ioutil.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
+}
+
 func mountRootFs(dev string) error {
 	info, err := readBlkInfo(dev)
 	if err != nil {
@@ -323,8 +358,31 @@ func isSystemd(path string) (bool, error) {
 	return strings.HasSuffix(myRealpath, "/systemd"), nil
 }
 
+// moveSlashRunMountpoint moves some of the initramfs mounts into the main image
+func moveSlashRunMountpoint() error {
+	// remount root as it might contain udev state that we need to pass to the new root
+	_, err := os.Stat(newRoot + "/run")
+	if os.IsNotExist(err) {
+		// let's print a warning and hope that the new root works without initrd udev state
+		fmt.Println("/run does not exists at the root filesystem")
+		return nil
+	}
+
+	if err := syscall.Mount("/run", newRoot+"/run", "", syscall.MS_MOVE, ""); err != nil {
+		return fmt.Errorf("move /run to new root: %v", err)
+	}
+
+	return nil
+}
+
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
+	if err := moveSlashRunMountpoint(); err != nil {
+		return err
+	}
+
+	// TODO: remove everything at "/" but do not cross filesystem mountpoint boundaries
+
 	if err := os.Chdir(newRoot); err != nil {
 		return fmt.Errorf("chdir: %v", err)
 	}

@@ -81,9 +81,21 @@ func assetsInit() error {
 	return nil
 }
 
-func buildArchLinuxImage() error {
-	// based on instructions from https://github.com/anatol/vmtest/blob/master/docs/prepare_image.md
-	cmd := `
+func sudoBash(script string) error {
+	sh := exec.Command("sudo", "/bin/sh", "-s")
+	sh.Stdin = strings.NewReader(script)
+	if *verbose {
+		sh.Stdout = os.Stdout
+		sh.Stderr = os.Stderr
+	}
+	return sh.Run()
+
+}
+
+// based on instructions from https://github.com/anatol/vmtest/blob/master/docs/prepare_image.md
+const createExt4Image = `
+set -e
+
 raw=$(mktemp)
 dd if=/dev/zero of=$raw bs=1G count=1
 mkfs.ext4 $raw
@@ -92,6 +104,7 @@ mount=$(mktemp -d)
 mount $loopdev $mount
 pacstrap -c $mount base openssh
 genfstab -U $mount > $mount/etc/fstab
+cat $mount/etc/fstab # echo fstab to logs
 
 echo "[Match]
 Name=*
@@ -108,17 +121,66 @@ umount $mount
 losetup -d $loopdev
 rm -r $mount
 
-#qemu-img convert -f raw -O qcow2 $raw ../assets/archlinux.qcow2
-mv $raw ../assets/archlinux.raw
+mv $raw ../assets/archlinux.ext4.raw
 `
 
-	sh := exec.Command("sudo", "/bin/sh", "-s")
-	sh.Stdin = strings.NewReader(cmd)
-	if *verbose {
-		sh.Stdout = os.Stdout
-		sh.Stderr = os.Stderr
+const createBtrfsImage = `
+set -e
+
+raw=$(mktemp)
+dd if=/dev/zero of=$raw bs=1G count=1
+passphrase="hello"
+cryptdev=/dev/mapper/booster.tests.btrfs
+cryptsetup luksFormat -q --uuid=724151bb-84be-493c-8e32-53e123c8351b --perf-no_read_workqueue --perf-no_write_workqueue --type luks2 --cipher aes-xts-plain64 --key-size 512 --iter-time 2000 --pbkdf argon2id --hash sha3-512 $raw <<< "$passphrase"
+cryptsetup --allow-discards --perf-no_read_workqueue --perf-no_write_workqueue --persistent open $raw booster.tests.btrfs <<< "$passphrase"
+mkfs.btrfs -L Arch --uuid=15700169-8c12-409d-8781-37afa98442a8 $cryptdev
+mount=$(mktemp -d)
+mount $cryptdev $mount
+btrfs sub create $mount/@
+btrfs sub create $mount/@home
+btrfs sub create $mount/@srv
+btrfs sub create $mount/@var
+umount $mount
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@ $cryptdev $mount
+mkdir -p $mount/{home,srv,var}
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@home $cryptdev $mount/home
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@srv $cryptdev $mount/srv
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@var $cryptdev $mount/var
+pacstrap -c $mount base openssh
+genfstab -U $mount > $mount/etc/fstab
+cat $mount/etc/fstab # echo fstab to logs
+
+echo "[Match]
+Name=*
+
+[Network]
+DHCP=yes" > $mount/etc/systemd/network/20-wired.network
+
+sed -i '/^root/ { s/:x:/::/ }' $mount/etc/passwd
+sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' $mount/etc/ssh/sshd_config
+sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords yes/' $mount/etc/ssh/sshd_config
+
+arch-chroot $mount systemctl enable sshd systemd-networkd
+umount $mount/{home,srv,var}
+umount $mount
+cryptsetup close booster.tests.btrfs
+rm -r $mount
+
+mv $raw ../assets/archlinux.btrfs.raw
+`
+
+func buildArchLinuxImages() error {
+	err := sudoBash(createExt4Image)
+	if err != nil {
+		return err
 	}
-	return sh.Run()
+
+	err = sudoBash(createBtrfsImage)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func assetsBuildLocal() error {
@@ -128,7 +190,7 @@ func assetsBuildLocal() error {
 		}
 	}
 
-	if err := buildArchLinuxImage(); err != nil {
+	if err := buildArchLinuxImages(); err != nil {
 		return err
 	}
 
