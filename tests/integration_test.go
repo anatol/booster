@@ -228,6 +228,11 @@ func boosterTest(opts Opts) func(*testing.T) {
 			}
 			defer cmd.Process.Kill()
 
+			// wait till swtpm really starts
+			if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
+				t.Fatal(err)
+			}
+
 			params = append(params, "-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0")
 		}
 
@@ -271,6 +276,25 @@ func boosterTest(opts Opts) func(*testing.T) {
 			}
 		}
 		opts.checkVmState(vm, t)
+	}
+}
+
+func waitForFile(filename string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		_, err := os.Stat(filename)
+		if err == nil {
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("waitForFile: %v", err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for %v", filename)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
