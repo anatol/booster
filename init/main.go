@@ -429,8 +429,8 @@ func switchRoot() error {
 // Cleanup the state before handing off the machine to the new init
 func cleanup() {
 	// We need to close our uevent connection, otherwise it will stay open forever and mess with the new init. .
-	// See https://github.com/s-urbaniak/uevent/pull/1
-	_ = udevReader.Close()
+	// See https://github.com/s-urbaniak/uevent/pull/1 and https://github.com/anatol/booster/issues/22
+	// _ = udevReader.Close()
 
 	shutdownNetwork()
 }
