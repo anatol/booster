@@ -163,6 +163,7 @@ type Opts struct {
 	mountTimeout  int // in seconds
 	extraFiles    string
 	checkVmState  func(vm *vmtest.Qemu, t *testing.T)
+	forceKill     bool // if true then kill VM rather than do a graceful shutdown
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
@@ -265,7 +266,11 @@ func boosterTest(opts Opts) func(*testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer vm.Shutdown()
+		if opts.forceKill {
+			defer vm.Kill()
+		} else {
+			defer vm.Shutdown()
+		}
 
 		if opts.prompt != "" {
 			if err := vm.ConsoleExpect(opts.prompt); err != nil {
@@ -412,11 +417,11 @@ func TestBooster(t *testing.T) {
 
 	t.Run("MountTimeout", boosterTest(Opts{
 		mountTimeout: 1,
+		forceKill:    true,
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
 			if err := vm.ConsoleExpect("Timeout waiting for root filesystem"); err != nil {
 				t.Fatal(err)
 			}
-			vm.Kill()
 		},
 	}))
 
