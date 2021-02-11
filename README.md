@@ -20,7 +20,7 @@ There are other initramfs generators similar to booster: [mkinitcpio](https://gi
 
 ### Install
 #### Arch Linux
-Install [booster-git](https://aur.archlinux.org/packages/booster-git/) package from AUR.
+Install [booster](https://archlinux.org/packages/extra/x86_64/booster/) package from the official repository.
 
 At the installation time this package will create a number of booster images in your `/boot/` directory:
 ```shell
