@@ -62,6 +62,7 @@ func TestBlkInfo(t *testing.T) {
 	t.Run("ext4", blkInfoTest("ext4", "mkfs.ext4 -L %[1]s -U %[2]s %[3]s", "labff3233", "", 10))
 	t.Run("btrfs", blkInfoTest("btrfs", "mkfs.btrfs -L %[1]s -U %[2]s %[3]s", "gf43rfsfd3rf23sdfsdfs", "", 130))
 	t.Run("xfs", blkInfoTest("xfs", "mkfs.xfs -L %[1]s -m uuid=%[2]s %[3]s", "alabel11", "", 100))
+	t.Run("f2fs", blkInfoTest("f2fs", "mkfs.f2fs -l %[1]s -U %[2]s %[3]s", "alabel11", "", 100))
 	t.Run("luks1", blkInfoTest("luks", "cryptsetup luksFormat -q --type=luks1 --iter-time=1 --uuid=%[2]s %[3]s <<< 'tetspassphrase'", "", "", 10)) // luks1 does not support labels
 	t.Run("luks2", blkInfoTest("luks", "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=%[2]s --label=%[1]s %[3]s <<< 'tetspassphrase'", "fdskfskdljfs", "", 10))
 	t.Run("gpt", blkInfoTest("gpt", "fdisk %[3]s <<< 'g\nx\ni\n%[2]s\nr\nw\n'", "", "", 10))

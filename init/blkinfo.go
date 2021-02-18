@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"unicode/utf16"
 )
 
 type blkInfo struct {
@@ -23,7 +24,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	defer r.Close()
 
 	type probeFn func(r io.ReaderAt) *blkInfo
-	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs}
+	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs}
 	for _, fn := range probes {
 		info := fn(r)
 		if info != nil {
@@ -237,4 +238,52 @@ func probeXfs(r io.ReaderAt) *blkInfo {
 		id[8], id[9],
 		id[10], id[11], id[12], id[13], id[14], id[15])
 	return &blkInfo{"xfs", uuid, fixedArrayToString(label)}
+}
+
+func probeF2fs(r io.ReaderAt) *blkInfo {
+	// https://github.com/torvalds/linux/blob/master/include/linux/f2fs_fs.h
+	const (
+		f2fsSuperblockOffset = 0x400
+		f2fsMagicOffset      = 0x0
+		f2fsUUIDOffset       = 0x6c
+		f2fsLabelOffset      = 0x7c
+		f2fsMagic            = "\x10\x20\xF5\xF2"
+	)
+
+	magic := make([]byte, 4)
+	if _, err := r.ReadAt(magic, f2fsSuperblockOffset+f2fsMagicOffset); err != nil {
+		return nil
+	}
+	if !bytes.Equal(magic, []byte(f2fsMagic)) {
+		return nil
+	}
+	id := make([]byte, 16)
+	if _, err := r.ReadAt(id, f2fsSuperblockOffset+f2fsUUIDOffset); err != nil {
+		return nil
+	}
+	buf := make([]byte, 512)
+	if _, err := r.ReadAt(buf, f2fsSuperblockOffset+f2fsLabelOffset); err != nil {
+		return nil
+	}
+	runes := make([]uint16, 256)
+	err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &runes)
+	if err != nil {
+		return nil
+	}
+	for i, r := range runes {
+		// find the first NUL symbol and trim the array to it
+		if r == 0 {
+			runes = runes[:i]
+			break
+		}
+	}
+	label := string(utf16.Decode(runes))
+	uuid := fmt.Sprintf(
+		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		id[0], id[1], id[2], id[3],
+		id[4], id[5],
+		id[6], id[7],
+		id[8], id[9],
+		id[10], id[11], id[12], id[13], id[14], id[15])
+	return &blkInfo{"f2fs", uuid, label}
 }
