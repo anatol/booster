@@ -216,13 +216,15 @@ func appendModules(img *Image) error {
 		"hid_generic", "sd_mod", "ahci",
 		"virtio_pci", "virtio_blk", "virtio_scsi", "virtio_crypto",
 	}
-	if err := kmod.activateModules(true, modules...); err != nil {
+	// some kernels might be compiled without some of the modules (e.g. virtio) from the predefined list
+	// generator should not fail if a module is not detected
+	if err := kmod.activateModules(true, false, modules...); err != nil {
 		return err
 	}
 
 	if len(generatorConfig.Modules) > 0 {
 		mods := strings.Split(generatorConfig.Modules, ",")
-		if err := kmod.activateModules(false, mods...); err != nil {
+		if err := kmod.activateModules(false, true, mods...); err != nil {
 			return err
 		}
 	}

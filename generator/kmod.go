@@ -94,15 +94,18 @@ func NewKmod(universal bool) (*Kmod, error) {
 
 }
 
-func (k *Kmod) activateModules(filter bool, mods ...string) error {
+func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error {
 	filter = filter && !k.universal // filtering works only if we in host (non-universal) mode
 
 	for _, m := range mods {
 		if pattern := m; strings.HasSuffix(pattern, "/") {
 			// trailing '/' means we match path recursively
 			for mod, modPath := range k.nameToPathMapping.forward {
-				matches := strings.HasPrefix(modPath, pattern)
-				if matches && (!filter || filter && k.hostModules[mod]) {
+				if filter && !k.hostModules[mod] {
+					continue
+				}
+				if strings.HasPrefix(modPath, pattern) {
+					debug("activate module %s\n", mod)
 					k.requiredModules[mod] = true
 				}
 			}
@@ -111,18 +114,22 @@ func (k *Kmod) activateModules(filter bool, mods ...string) error {
 				// this module is builtin, no need to add it to image
 				continue
 			}
+			if filter && !k.hostModules[m] {
+				continue
+			}
 
 			if _, ok := k.nameToPathMapping.forward[m]; ok {
-				if !filter || filter && k.hostModules[m] {
-					k.requiredModules[m] = true
-				}
+				debug("activate module %s\n", m)
+				k.requiredModules[m] = true
 			} else if name, ok := k.nameToPathMapping.reverse[m]; ok {
 				// m is a filename that contains the module
-				if !filter || filter && k.hostModules[name] {
-					k.requiredModules[name] = true
-				}
+				debug("activate module %s\n", name)
+				k.requiredModules[name] = true
 			} else {
-				return fmt.Errorf("module %s does not exist", m)
+				debug("requested module %s is missing\n", name)
+				if failIfMissing {
+					return fmt.Errorf("module %s does not exist", m)
+				}
 			}
 		}
 	}
