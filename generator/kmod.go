@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"container/list"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/xi2/xz"
@@ -216,99 +218,71 @@ func readModAliases(dir string) ([]alias, error) {
 }
 
 func (k *Kmod) addModulesToImage(img *Image) error {
-	type module struct {
-		name    string
-		content []byte
-	}
-	contentNum := 0 // number of elements will be available in `contentCh` channel and it is equal to number of goroutines running concurrently
-	contentCh := make(chan module, 10)
-	errorCh := make(chan error)
+	var wg sync.WaitGroup
+	var m sync.Mutex
+	modNum := len(k.requiredModules)
+	errCh := make(chan error, modNum)
 
-	xzUnpack := func(modName, inputPath string) {
-		f, err := os.Open(inputPath)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-		defer f.Close()
+	unpackModule := func(modName string) {
+		defer wg.Done()
 
-		r, err := xz.NewReader(f, 0)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-
-		content, err := ioutil.ReadAll(r)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-		contentCh <- module{modName, content}
-	}
-
-	zstdUnpack := func(modName, inputPath string) {
-		f, err := os.Open(inputPath)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-		defer f.Close()
-
-		r, err := zstd.NewReader(f)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-
-		content, err := ioutil.ReadAll(r)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-		contentCh <- module{modName, content}
-	}
-
-	for modName := range k.requiredModules {
 		p, ok := k.nameToPathMapping.forward[modName]
 		if !ok {
-			return fmt.Errorf("Unable to find module file for %s", modName)
+			errCh <- fmt.Errorf("unable to find module file for %s", modName)
 		}
+
 		modulePath := path.Join(k.dir, p)
 
+		f, err := os.Open(modulePath)
+		if err != nil {
+			errCh <- fmt.Errorf("%s: %v", modulePath, err)
+			return
+		}
+		defer f.Close()
+
+		var r io.Reader
 		switch path.Ext(p) {
 		case ".ko":
-			content, err := ioutil.ReadFile(modulePath)
-			if err != nil {
-				return err
-			}
-			if err := img.AppendContent(content, 0644, path.Join(k.dir, modName+".ko")); err != nil {
-				return err
-			}
+			r = f
 		case ".xz":
-			// xz is a slow algorithm. unpacking a lot of modules takes a lot of time. run unpacking in a separate goroutins
-			// to exploit parallelism.
-			go xzUnpack(modName, modulePath)
-			contentNum++
+			r, err = xz.NewReader(f, 0)
 		case ".zst":
-			go zstdUnpack(modName, modulePath)
-			contentNum++
-		default:
-			return fmt.Errorf("Unknown extension for kernel module %v", modulePath)
+			r, err = zstd.NewReader(f)
+		}
+		if err != nil {
+			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
+			return
+		}
+
+		content, err := ioutil.ReadAll(r)
+		if err != nil {
+			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
+			return
+		}
+
+		m.Lock()
+		// img operations are not thread-safe so we need to serialize them
+		err = img.AppendContent(content, 0644, path.Join(k.dir, modName+".ko"))
+		m.Unlock()
+
+		if err != nil {
+			errCh <- err
+			return
 		}
 	}
 
-	for i := 0; i < contentNum; i++ {
-		select {
-		case mod := <-contentCh:
-			if err := img.AppendContent(mod.content, 0644, path.Join(k.dir, mod.name+".ko")); err != nil {
-				return err
-			}
-		case err := <-errorCh:
-			return err
-		}
+	wg.Add(modNum)
+	for modName := range k.requiredModules {
+		go unpackModule(modName)
 	}
+	wg.Wait()
 
-	return nil
+	select {
+	case err := <-errCh:
+		return err // return the fist error in the channel
+	default:
+		return nil
+	}
 }
 
 func scanModulesDir(dir string) (*Bimap, error) {
