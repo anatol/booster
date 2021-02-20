@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/xi2/xz"
 	"golang.org/x/sys/unix"
 )
@@ -245,6 +246,28 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 		contentCh <- module{modName, content}
 	}
 
+	zstdUnpack := func(modName, inputPath string) {
+		f, err := os.Open(inputPath)
+		if err != nil {
+			errorCh <- err
+			return
+		}
+		defer f.Close()
+
+		r, err := zstd.NewReader(f)
+		if err != nil {
+			errorCh <- err
+			return
+		}
+
+		content, err := ioutil.ReadAll(r)
+		if err != nil {
+			errorCh <- err
+			return
+		}
+		contentCh <- module{modName, content}
+	}
+
 	for modName := range k.requiredModules {
 		p, ok := k.nameToPathMapping.forward[modName]
 		if !ok {
@@ -265,6 +288,9 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			// xz is a slow algorithm. unpacking a lot of modules takes a lot of time. run unpacking in a separate goroutins
 			// to exploit parallelism.
 			go xzUnpack(modName, modulePath)
+			contentNum++
+		case ".zst":
+			go zstdUnpack(modName, modulePath)
 			contentNum++
 		default:
 			return fmt.Errorf("Unknown extension for kernel module %v", modulePath)
