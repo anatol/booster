@@ -337,17 +337,82 @@ func mountRootFs(dev string) error {
 	wg := loadModules(fstype)
 	wg.Wait()
 
-	rootMountFlags := uintptr(syscall.MS_NOATIME)
-	if _, rw := cmdline["rw"]; !rw {
-		rootMountFlags |= syscall.MS_RDONLY
+	rootMountFlags, options := sunderMountFlags(cmdline["rootflags"])
+	if _, ro := cmdline["ro"]; ro {
+		rootMountFlags |= unix.MS_RDONLY
 	}
-	options := cmdline["rootflags"]
+	if _, rw := cmdline["rw"]; rw {
+		rootMountFlags &^= unix.MS_RDONLY
+	}
 	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
 		return err
 	}
 
 	rootMounted.Done()
 	return nil
+}
+
+// sunderMountFlags separates list of mount parameters (usually provided by a user) into `flags` and `options`
+// consumable by mount() functions.
+// for example 'noatime,user_xattr,nodev,nobarrier' becomes MS_NOATIME|MS_NODEV and 'user_xattr,nobarrier'
+func sunderMountFlags(options string) (uintptr, string) {
+	var outOptions []string
+	var flags uintptr
+	for _, o := range strings.Split(options, ",") {
+		switch o {
+		case "dirsync":
+			flags |= unix.MS_DIRSYNC
+		case "lazytime":
+			flags |= unix.MS_LAZYTIME
+		case "nolazytime":
+			flags &^= unix.MS_LAZYTIME
+		case "noatime":
+			flags |= unix.MS_NOATIME
+		case "atime":
+			flags &^= unix.MS_NOATIME
+		case "nodev":
+			flags |= unix.MS_NODEV
+		case "dev":
+			flags &^= unix.MS_NODEV
+		case "nodiratime":
+			flags |= unix.MS_NODIRATIME
+		case "diratime":
+			flags &^= unix.MS_NODIRATIME
+		case "noexec":
+			flags |= unix.MS_NOEXEC
+		case "exec":
+			flags &^= unix.MS_NOEXEC
+		case "nosuid":
+			flags |= unix.MS_NOSUID
+		case "suid":
+			flags &^= unix.MS_NOSUID
+		case "ro":
+			flags |= unix.MS_RDONLY
+		case "rw":
+			flags &^= unix.MS_RDONLY
+		case "relatime":
+			flags |= unix.MS_RELATIME
+		case "norelatime":
+			flags &^= unix.MS_RELATIME
+		case "silent":
+			flags |= unix.MS_SILENT
+		case "strictatime":
+			flags |= unix.MS_STRICTATIME
+		case "nostrictatime":
+			flags &^= unix.MS_STRICTATIME
+		case "sync":
+			flags |= unix.MS_SYNC
+		case "async":
+			flags &^= unix.MS_SYNC
+		case "nosymfollow":
+			flags &^= unix.MS_NOSYMFOLLOW
+		default:
+			// if it did not match any flag then return it back and use as an option
+			outOptions = append(outOptions, o)
+		}
+	}
+
+	return flags, strings.Join(outOptions, ",")
 }
 
 func isSystemd(path string) (bool, error) {
@@ -983,6 +1048,7 @@ func mount(source, target, fstype string, flags uintptr, options string) error {
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return err
 	}
+	debug("mounting %s->%s, fs=%s, flags=0x%x, options=%s", source, target, fstype, flags, options)
 	if err := syscall.Mount(source, target, fstype, flags, options); err != nil {
 		return fmt.Errorf("mount(%v): %v", source, err)
 	}

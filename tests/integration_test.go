@@ -400,6 +400,11 @@ func TestBooster(t *testing.T) {
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
 	}))
+	t.Run("Ext4.MountFlags", boosterTest(Opts{
+		compression: "none",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,noatime,nobarrier,nodev,dirsync,lazytime,nolazytime,dev,rw,ro", "rw"},
+	}))
 	t.Run("Ext4.Label", boosterTest(Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
