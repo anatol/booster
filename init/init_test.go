@@ -19,6 +19,7 @@ func TestSunderMountFlags(t *testing.T) {
 
 	check("", 0x0, "")
 	check("foobar,atest,eee", 0x0, "foobar,atest,eee")
+	check("foo,nosymfollow,bar", unix.MS_NOSYMFOLLOW, "foo,bar")
 	check("nodev", unix.MS_NODEV, "")
 	check("user_xattr,noatime,nobarrier,nodev,dirsync,lazytime,nolazytime,dev,rw,ro", unix.MS_NOATIME|unix.MS_DIRSYNC|unix.MS_RDONLY, "user_xattr,nobarrier")
 }

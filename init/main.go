@@ -405,7 +405,7 @@ func sunderMountFlags(options string) (uintptr, string) {
 		case "async":
 			flags &^= unix.MS_SYNC
 		case "nosymfollow":
-			flags &^= unix.MS_NOSYMFOLLOW
+			flags |= unix.MS_NOSYMFOLLOW
 		default:
 			// if it did not match any flag then return it back and use as an option
 			outOptions = append(outOptions, o)
