@@ -20,10 +20,11 @@ if [ "${all}" -eq "1" ]; then
 fi
 
 for kernel in "${kernels[@]}"; do
-    if ! read -r pkgbase > /dev/null 2>&1 < "${kernel}/pkgbase"; then
-        # if the kernel has no pkgbase, we skip it
+    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+        # if pkgbase does not belong to any package then skip this kernel
         continue
     fi
+    read -r pkgbase < "${kernel}/pkgbase"
 
     booster -force -output /boot/booster-${pkgbase}.img -kernelVersion ${kernel##/usr/lib/modules/} &
     install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
