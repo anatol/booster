@@ -735,6 +735,14 @@ func runDhcp(ifname string) error {
 		return err
 	}
 
+	gateway := dhcpv4.GetIP(dhcpv4.OptionRouter, ack.Options)
+	if gateway != nil {
+		defaultRoute := netlink.Route{Gw: gateway}
+		if err := netlink.RouteAdd(&defaultRoute); err != nil {
+			return err
+		}
+	}
+
 	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
 	if dnsServers != nil {
 		if err := writeResolvConf(dnsServers); err != nil {
