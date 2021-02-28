@@ -143,7 +143,7 @@ func devAdd(syspath, devname string) error {
 
 	info, err := readBlkInfo(devpath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
 	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
