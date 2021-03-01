@@ -83,6 +83,8 @@ func generateInitRamfs(opts Opts) (string, error) {
 		verifyCmd = exec.Command("zstd", "--test", output)
 	case "gzip":
 		verifyCmd = exec.Command("gzip", "--test", output)
+	case "xz":
+		verifyCmd = exec.Command("xz", "--test", output)
 	default:
 		return "", fmt.Errorf("Unknown compression: %s", opts.compression)
 	}
@@ -432,7 +434,19 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	}))
 
+	t.Run("XZImageCompression", boosterTest(Opts{
+		compression: "xz",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
+	}))
+	t.Run("GzipImageCompression", boosterTest(Opts{
+		compression: "gzip",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
+	}))
+
 	t.Run("MountTimeout", boosterTest(Opts{
+		compression:  "xz",
 		mountTimeout: 1,
 		forceKill:    true,
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {

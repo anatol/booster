@@ -16,6 +16,7 @@ import (
 	"github.com/cavaliercoder/go-cpio"
 	"github.com/google/renameio"
 	"github.com/klauspost/compress/zstd"
+	"github.com/ulikunitz/xz"
 )
 
 type Image struct {
@@ -43,6 +44,12 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 		compressor, err = zstd.NewWriter(file)
 	case "gzip":
 		compressor = gzip.NewWriter(file)
+	case "xz":
+		conf := xz.WriterConfig{CheckSum: xz.CRC32}
+		if err := conf.Verify(); err != nil {
+			return nil, err
+		}
+		compressor, err = conf.NewWriter(file)
 	case "none":
 		compressor = file
 	default:

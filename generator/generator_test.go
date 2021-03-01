@@ -236,6 +236,8 @@ func verifyCompressedFile(compression string, file string) error {
 		verifyCmd = exec.Command("zstd", "--test", file)
 	case "gzip":
 		verifyCmd = exec.Command("gzip", "--test", file)
+	case "xz":
+		verifyCmd = exec.Command("xz", "--test", file)
 	default:
 		return fmt.Errorf("Unknown compression: %s", compression)
 	}
@@ -313,6 +315,10 @@ func testZstdImageCompression(t *testing.T) {
 
 func testGzipImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "gzip"})
+}
+
+func testXzImageCompression(t *testing.T) {
+	createTestInitRamfs(t, &options{compression: "xz"})
 }
 
 func testUniversalMode(t *testing.T) {
@@ -516,6 +522,7 @@ func TestGenerator(t *testing.T) {
 	t.Run("NoneImageCompression", testNoneImageCompression)
 	t.Run("ZstdImageCompression", testZstdImageCompression)
 	t.Run("GzipImageCompression", testGzipImageCompression)
+	t.Run("XzImageCompression", testXzImageCompression)
 	t.Run("UniversalMode", testUniversalMode)
 	t.Run("HostMode", testHostMode)
 	t.Run("SoftDepenencies", testSoftDependencies)
