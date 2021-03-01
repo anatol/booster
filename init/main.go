@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -305,6 +306,31 @@ func deviceNo(filename string) (uint32, uint32, error) {
 
 }
 
+func fsck(dev string) error {
+	if _, err := os.Stat("/usr/bin/fsck"); !os.IsNotExist(err) {
+		cmd := exec.Command("/usr/bin/fsck", "-y", dev)
+		if debugEnabled {
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
+		}
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin")
+		if err := cmd.Run(); err != nil {
+			if err, ok := err.(*exec.ExitError); ok {
+				code := err.ExitCode()
+				code &^= 0x1 // bit 1 means errors were corrected successfully which is good
+
+				if code != 0 {
+					return fmt.Errorf("fsck for %s failed with code 0x%x", dev, err.ExitCode())
+				}
+			}
+
+			return fmt.Errorf("fsck for %s: unknown error %v", dev, err)
+		}
+	}
+
+	return nil
+}
+
 // writeUdevDb writes Udev state to the database.
 // It is an equivalent to what "db_persist" udev option does (see 'man 7 udev').
 func writeUdevDb(dmName string) error {
@@ -336,6 +362,10 @@ func mountRootFs(dev string) error {
 
 	wg := loadModules(fstype)
 	wg.Wait()
+
+	if err := fsck(dev); err != nil {
+		return err
+	}
 
 	rootMountFlags, options := sunderMountFlags(cmdline["rootflags"])
 	if _, ro := cmdline["ro"]; ro {

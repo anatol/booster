@@ -428,6 +428,12 @@ func TestBooster(t *testing.T) {
 			}
 		},
 	}))
+	t.Run("Fsck", boosterTest(Opts{
+		compression: "none",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=LABEL=atestlabel12"},
+		extraFiles:  "fsck,fsck.ext4",
+	}))
 
 	t.Run("LUKS1.WithName", boosterTest(Opts{
 		disk:       "assets/luks1.img",
