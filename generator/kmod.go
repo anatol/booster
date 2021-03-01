@@ -5,7 +5,6 @@ import (
 	"container/list"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -233,7 +232,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			return
 		}
 
-		content, err := ioutil.ReadAll(r)
+		content, err := io.ReadAll(r)
 		if err != nil {
 			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
 			return

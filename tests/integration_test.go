@@ -3,7 +3,6 @@ package tests
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -27,7 +26,7 @@ var (
 )
 
 func detectKernelVersion() (map[string]string, error) {
-	files, err := ioutil.ReadDir(kernelsDir)
+	files, err := os.ReadDir(kernelsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +37,7 @@ func detectKernelVersion() (map[string]string, error) {
 		if _, err := os.Stat(vmlinux); err != nil {
 			continue
 		}
-		pkgbase, err := ioutil.ReadFile(filepath.Join(kernelsDir, ver, "pkgbase"))
+		pkgbase, err := os.ReadFile(filepath.Join(kernelsDir, ver, "pkgbase"))
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +49,7 @@ func detectKernelVersion() (map[string]string, error) {
 }
 
 func generateInitRamfs(opts Opts) (string, error) {
-	file, err := ioutil.TempFile("", "booster.img")
+	file, err := os.CreateTemp("", "booster.img")
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +112,7 @@ type GeneratorConfig struct {
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
-	file, err := ioutil.TempFile("", "booster.yaml")
+	file, err := os.CreateTemp("", "booster.yaml")
 	if err != nil {
 		return "", err
 	}

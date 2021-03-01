@@ -6,7 +6,6 @@ import (
 	"debug/elf"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -190,7 +189,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 
-		files, err := ioutil.ReadDir(fn)
+		files, err := os.ReadDir(fn)
 		if err != nil {
 			return err
 		}
@@ -201,7 +200,7 @@ func (img *Image) AppendFile(fn string) error {
 		}
 	} else {
 		// file
-		content, err := ioutil.ReadFile(fn)
+		content, err := os.ReadFile(fn)
 		if err != nil {
 			return err
 		}

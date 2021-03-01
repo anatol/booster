@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -70,11 +70,11 @@ func assetsTangInit() error {
 	if err != nil {
 		return err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(path.Join(tangDir, "adv.jwk"), body, 0644)
+	return os.WriteFile(path.Join(tangDir, "adv.jwk"), body, 0644)
 }
 
 func assetsInit() error {

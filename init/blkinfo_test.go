@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -13,7 +12,7 @@ func blkInfoTest(format, cmd, label, uuid string, deviceSizeMb int64) func(t *te
 	return func(t *testing.T) {
 		t.Parallel()
 
-		f, err := ioutil.TempFile("", "blk")
+		f, err := os.CreateTemp("", "blk")
 		if err != nil {
 			log.Fatal(err)
 		}

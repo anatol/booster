@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -56,7 +55,7 @@ func getKernelVersion() (string, error) {
 }
 
 func parseCmdline() error {
-	b, err := ioutil.ReadFile("/proc/cmdline")
+	b, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
 		return err
 	}
@@ -120,7 +119,7 @@ func devAdd(syspath, devname string) error {
 		// TODO: check if we can use API similar to what
 		// 'sudo dmsetup info -c --noheadings -o name dm-0' does
 		dmNameFile := filepath.Join("/sys", syspath, "dm", "name")
-		content, err := ioutil.ReadFile(dmNameFile)
+		content, err := os.ReadFile(dmNameFile)
 		if err != nil {
 			return err
 		}
@@ -320,7 +319,7 @@ func writeUdevDb(dmName string) error {
 
 	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
 	debug("writing udev state to %s", dbFile)
-	return ioutil.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
+	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
 }
 
 func mountRootFs(dev string) error {
@@ -763,7 +762,7 @@ func writeResolvConf(servers []net.IP) error {
 	}
 	resolvConf.WriteString("search .\n")
 
-	return ioutil.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
+	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
 }
 
 func shutdownNetwork() {
@@ -804,7 +803,7 @@ func matchAlias(alias string) ([]string, error) {
 }
 
 func scanSysBlock() error {
-	devs, err := ioutil.ReadDir("/sys/block")
+	devs, err := os.ReadDir("/sys/block")
 	if err != nil {
 		return err
 	}
@@ -817,7 +816,7 @@ func scanSysBlock() error {
 		}
 
 		// Probe all partitions of this block device, too:
-		parts, err := ioutil.ReadDir(target)
+		parts, err := os.ReadDir(target)
 		if err != nil {
 			return err
 		}
@@ -846,7 +845,7 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
-	b, err := ioutil.ReadFile(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -968,7 +967,7 @@ func readAliases() error {
 var config InitConfig
 
 func readConfig() error {
-	data, err := ioutil.ReadFile(initConfigPath)
+	data, err := os.ReadFile(initConfigPath)
 	if err != nil {
 		return err
 	}
