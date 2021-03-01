@@ -27,7 +27,7 @@ type Image struct {
 func NewImage(path string, compression string) (*Image, error) {
 	file, err := renameio.TempFile("", path)
 	if err != nil {
-		return nil, fmt.Errorf("new image: %v", err)
+		return nil, err
 	}
 	if err := file.Chmod(0644); err != nil {
 		return nil, err
@@ -83,6 +83,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 	if img.contains[dir] {
 		return nil
 	}
+	img.contains[dir] = true
 	if dir == "/" {
 		return nil
 	}
@@ -96,17 +97,14 @@ func (img *Image) AppendDirEntry(dir string) error {
 		Name: strings.TrimPrefix(dir, "/"),
 		Mode: cpio.FileMode(0755) | cpio.ModeDir,
 	}
-	if err := img.out.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("AppendDirEntry: %v", err)
-	}
-	img.contains[dir] = true
-	return nil
+	return img.out.WriteHeader(hdr)
 }
 
 func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) error {
 	if img.contains[dest] {
 		return fmt.Errorf("Trying to add a file %s but it already been added to the image", dest)
 	}
+	img.contains[dest] = true
 
 	// append parent dirs first
 	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
@@ -119,12 +117,11 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 		Size: int64(len(content)),
 	}
 	if err := img.out.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("AppendFile: %v", err)
+		return err
 	}
 	if _, err := img.out.Write(content); err != nil {
 		return err
 	}
-	img.contains[dest] = true
 
 	const minimalELFSize = 64 // 64 bytes is a size of 64bit ELF header
 	if len(content) < minimalELFSize {
@@ -142,11 +139,7 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 	}
 	defer ef.Close()
 
-	if err := img.AppendElfDependencies(ef); err != nil {
-		return fmt.Errorf("AppendFile: %v", err)
-	}
-
-	return nil
+	return img.AppendElfDependencies(ef)
 }
 
 // AppendFile appends the file + its dependencies to the ramfs file
@@ -163,13 +156,14 @@ func (img *Image) AppendFile(fn string) error {
 
 	fi, err := os.Lstat(fn)
 	if err != nil {
-		return fmt.Errorf("AppendFile: %v", err)
+		return err
 	}
 
 	if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		img.contains[fn] = true
 		linkTarget, err := os.Readlink(fn)
 		if err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
 
 		hdr := &cpio.Header{
@@ -178,19 +172,18 @@ func (img *Image) AppendFile(fn string) error {
 			Size: int64(len(linkTarget)),
 		}
 		if err := img.out.WriteHeader(hdr); err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
 		if _, err := img.out.Write([]byte(linkTarget)); err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
-		img.contains[fn] = true
 
 		// now add the link target as well
 		if !filepath.IsAbs(linkTarget) {
 			linkTarget = path.Join(path.Dir(fn), linkTarget)
 		}
 		if err := img.AppendFile(linkTarget); err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
 	} else if fi.IsDir() {
 		if err := img.AppendDirEntry(fn); err != nil {
@@ -210,11 +203,11 @@ func (img *Image) AppendFile(fn string) error {
 		// file
 		content, err := ioutil.ReadFile(fn)
 		if err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
 
 		if err := img.AppendContent(content, fi.Mode().Perm(), fn); err != nil {
-			return fmt.Errorf("AppendFile: %v", err)
+			return err
 		}
 	}
 
@@ -235,7 +228,7 @@ func (img *Image) AppendElfDependencies(ef *elf.File) error {
 
 	libs, err := ef.ImportedLibraries()
 	if err != nil {
-		return fmt.Errorf("AppendElfDependencies: %v", err)
+		return err
 	}
 
 	is := ef.Section(".interp")
@@ -253,7 +246,7 @@ func (img *Image) AppendElfDependencies(ef *elf.File) error {
 		}
 		err := img.AppendFile(p)
 		if err != nil {
-			return fmt.Errorf("AppendElfDependencies: %v", err)
+			return err
 		}
 	}
 	return nil

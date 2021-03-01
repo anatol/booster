@@ -344,7 +344,7 @@ func testExtraFiles(t *testing.T) {
 func testInvalidExtraFiles(t *testing.T) {
 	createTestInitRamfs(t, &options{
 		extraFiles:  []string{"true", "/usr/bin/false", "/foo/nonexistent"},
-		expectError: "AppendFile: lstat /foo/nonexistent: no such file or directory",
+		expectError: "lstat /foo/nonexistent: no such file or directory",
 	})
 }
 
