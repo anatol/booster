@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"container/list"
 	"fmt"
 	"io"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/xi2/xz"
-	"golang.org/x/sys/unix"
 )
 
 type set map[string]bool
@@ -26,7 +24,7 @@ type alias struct {
 type Kmod struct {
 	universal         bool // if false - include modules for current host only
 	kernelVersion     string
-	dir               string // e.g. /usr/lib/modules/5.9.9-arch1-1
+	hostModulesDir    string // host path to modules e.g. /usr/lib/modules/5.9.9-arch1-1, note that image path is always /usr/lib/modules
 	nameToPathMapping *Bimap // kernel module name to path (relative to modulesDir)
 	builtinModules    set
 	requiredModules   set                 // set of modules that we need to be added to the image
@@ -38,52 +36,56 @@ type Kmod struct {
 	hostModules       set
 }
 
-func NewKmod(universal bool) (*Kmod, error) {
-	kernel := *kernelVersion
-	if kernel == "" {
-		var err error
-		kernel, err = readKernelVersion()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	modulesDir := path.Join("/usr/lib/modules", kernel)
-
-	nameToPathMapping, err := scanModulesDir(modulesDir)
+func NewKmod(conf *generatorConfig) (*Kmod, error) {
+	nameToPathMapping, err := scanModulesDir(conf.modulesDir)
 	if err != nil {
 		return nil, err
 	}
 
-	builtinModules, err := readModuleBuiltin(modulesDir)
+	builtinModules, err := readModuleBuiltin(conf.modulesDir)
 	if err != nil {
 		return nil, err
 	}
 
-	aliases, err := readModAliases(modulesDir)
+	aliases, err := readKernelAliases(conf.modulesDir)
 	if err != nil {
 		return nil, err
 	}
+	// TODO: aliases list might be quite big. Drop all aliases for non-interesting modules?
 
 	hostModAliases := make([]alias, 0)
 	hostModules := make(set)
-	if !universal {
-		hostModAliases, err = readHostAliases(aliases)
+	if !conf.universal {
+		devAliases, err := conf.readDeviceAliases()
 		if err != nil {
 			return nil, err
 		}
 
-		// find all current modules at /proc/modules
-		hostModules, err = readHostModules()
+		// filter out only aliases known to kernel
+		for _, a := range devAliases {
+			matched, err := matchAlias(a, aliases)
+			if err != nil {
+				return nil, err
+			}
+			if len(matched) > 0 {
+				// TODO: here could be duplicates
+				hostModAliases = append(hostModAliases, matched...)
+			} else {
+				debug("no matches found for a device alias '%s'\n", a)
+			}
+		}
+
+		// find all modules currently used at the host
+		hostModules, err = readHostModules(conf.hostModulesFile)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	kmod := &Kmod{
-		universal:         universal,
-		kernelVersion:     kernel,
-		dir:               modulesDir,
+		universal:         conf.universal,
+		kernelVersion:     conf.kernelVersion,
+		hostModulesDir:    conf.modulesDir,
 		nameToPathMapping: nameToPathMapping,
 		builtinModules:    builtinModules,
 		requiredModules:   make(set),
@@ -141,12 +143,12 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 
 func (k *Kmod) resolveDependencies() error {
 	// read modules.dep
-	modulesDep, err := k.readModulesDep(k.dir, k.nameToPathMapping)
+	modulesDep, err := k.readModulesDep(k.hostModulesDir, k.nameToPathMapping)
 	if err != nil {
 		return err
 	}
 
-	modulesSoftDep, err := k.readModulesSoftDep(k.dir)
+	modulesSoftDep, err := k.readModulesSoftDep(k.hostModulesDir)
 	if err != nil {
 		return err
 	}
@@ -190,7 +192,7 @@ func (k *Kmod) resolveDependencies() error {
 	return nil
 }
 
-func readModAliases(dir string) ([]alias, error) {
+func readKernelAliases(dir string) ([]alias, error) {
 	f, err := os.Open(path.Join(dir, "modules.alias"))
 	if err != nil {
 		return nil, err
@@ -231,7 +233,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			errCh <- fmt.Errorf("unable to find module file for %s", modName)
 		}
 
-		modulePath := path.Join(k.dir, p)
+		modulePath := path.Join(k.hostModulesDir, p)
 
 		f, err := os.Open(modulePath)
 		if err != nil {
@@ -241,13 +243,16 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 		defer f.Close()
 
 		var r io.Reader
-		switch path.Ext(p) {
+		ext := path.Ext(p)
+		switch ext {
 		case ".ko":
 			r = f
 		case ".xz":
 			r, err = xz.NewReader(f, 0)
 		case ".zst":
 			r, err = zstd.NewReader(f)
+		default:
+			err = fmt.Errorf("unknown module compression format: %s", ext)
 		}
 		if err != nil {
 			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
@@ -262,7 +267,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 
 		m.Lock()
 		// img operations are not thread-safe so we need to serialize them
-		err = img.AppendContent(content, 0644, path.Join(k.dir, modName+".ko"))
+		err = img.AppendContent(content, 0644, imageModulesDir+modName+".ko")
 		m.Unlock()
 
 		if err != nil {
@@ -348,39 +353,6 @@ func readModuleBuiltin(dir string) (map[string]bool, error) {
 }
 
 // TODO: read modules.bin file using following logic https://github.com/vadmium/module-init-tools/blob/master/index.c#L253
-
-func readKernelVersion() (string, error) {
-	// read kernel binary version as
-	//     if (argc > 1){
-	//        FILE* f = fopen(argv[1], "r");
-	//        short offset = 0;
-	//        char str[128];
-	//        if(f){
-	//            fseek(f, 0x20E, SEEK_SET);
-	//            fread(&offset, 2, 1, f);
-	//            fseek(f, offset + 0x200, SEEK_SET);
-	//            fread(str, 128, 1, f);
-	//            str[127] = '\0';
-	//            printf("%s\n", str);
-	//            fclose(f);
-	//            return 0;
-	//        }else {
-	//            return 2;
-	//        }
-	//    } else {
-	//        printf("use: kver [kernel image file]\n");
-	//        return 1;
-	//    }
-
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err != nil {
-		return "", err
-	}
-	release := uts.Release
-	length := bytes.IndexByte(release[:], 0)
-	return string(uts.Release[:length]), nil
-}
-
 func (k *Kmod) readModulesDep(dir string, nameToPathMapping *Bimap) (map[string][]string, error) {
 	f, err := os.Open(path.Join(dir, "modules.dep"))
 	if err != nil {
@@ -558,8 +530,8 @@ func (k *Kmod) filterAliasesForRequiredModules() ([]alias, error) {
 	return result, nil
 }
 
-func readHostAliases(allAliases []alias) ([]alias, error) {
-	var hostAliases []alias
+func readDeviceAliases() ([]string, error) {
+	var aliases []string
 
 	err := filepath.Walk("/sys/devices", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -572,36 +544,27 @@ func readHostAliases(allAliases []alias) ([]alias, error) {
 			return nil
 		}
 
-		b, err := ioutil.ReadFile(path)
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		alias := strings.TrimSpace(string(b))
-		if alias == "" {
+		al := strings.TrimSpace(string(b))
+		if al == "" {
 			return nil
 		}
 
-		// for debugging one can use "modprobe -qaR 'pci:v00001AF4d00001004sv00001AF4sd00000008bc01sc00i00'" to find out what driver is responsible for a given alias
-		matched, err := matchAlias(alias, allAliases)
-		if err != nil {
-			return err
-		}
-		if len(matched) > 0 {
-			hostAliases = append(hostAliases, matched...)
-		} else {
-			debug("no matches found for alias '%s' (%s)\n", alias, path)
-		}
+		aliases = append(aliases, al)
 
 		return nil
 	})
 
-	return hostAliases, err
+	return aliases, err
 }
 
-func readHostModules() (map[string]bool, error) {
+func readHostModules(modulesFile string) (map[string]bool, error) {
 	modules := make(map[string]bool)
 
-	f, err := os.Open("/proc/modules")
+	f, err := os.Open(modulesFile)
 	if err != nil {
 		return nil, err
 	}

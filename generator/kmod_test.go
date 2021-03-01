@@ -13,8 +13,23 @@ import (
 	"github.com/xi2/xz"
 )
 
+// Scans all modules at the current kernel and verifies that its calculated mod name equal to one embeeded into the module
 func TestModuleNames(t *testing.T) {
-	kmod, err := NewKmod(true)
+	t.Parallel()
+
+	ver, err := readKernelVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conf := &generatorConfig{
+		universal:         true,
+		kernelVersion:     ver,
+		modulesDir:        "/usr/lib/modules/" + ver,
+		hostModulesFile:   "/proc/modules",
+		readDeviceAliases: readDeviceAliases,
+	}
+	kmod, err := NewKmod(conf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +42,7 @@ func TestModuleNames(t *testing.T) {
 			t.Fatalf("filepath %s is not clean", fn)
 		}
 
-		extractedName, err := modNameFromFile(path.Join(kmod.dir, fn))
+		extractedName, err := modNameFromFile(path.Join(kmod.hostModulesDir, fn))
 		if err != nil {
 			t.Fatal(err)
 		}

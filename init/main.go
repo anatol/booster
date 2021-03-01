@@ -38,9 +38,10 @@ const (
 var (
 	cmdline      = make(map[string]string)
 	debugEnabled bool
-	modulesDir   string
 	rootMounted  sync.WaitGroup // waits until the root partition is mounted
 )
+
+const imageModulesDir = "/usr/lib/modules/"
 
 type alias struct{ pattern, module string } // module alias info
 
@@ -876,9 +877,7 @@ func boost() error {
 			"Please rebuild booster image for kernel '%s'.", config.Kernel, kernelVersion, kernelVersion)
 	}
 
-	modulesDir = path.Join("/usr/lib/modules", kernelVersion)
-
-	if err := readAliases(modulesDir); err != nil {
+	if err := readAliases(); err != nil {
 		return err
 	}
 
@@ -949,8 +948,8 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 
 var aliases []alias
 
-func readAliases(dir string) error {
-	f, err := os.Open(path.Join(dir, "booster.alias"))
+func readAliases() error {
+	f, err := os.Open(imageModulesDir + "/booster.alias")
 	if err != nil {
 		return err
 	}
@@ -1029,7 +1028,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 }
 
 func finitModule(module string) error {
-	f, err := os.Open(path.Join(modulesDir, module+".ko"))
+	f, err := os.Open(imageModulesDir + "/" + module + ".ko")
 	if err != nil {
 		return err
 	}
