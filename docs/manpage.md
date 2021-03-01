@@ -2,7 +2,7 @@ booster(1) -- fast and secure initramfs generator
 =================================================
 
 ## DESCRIPTION
-**Booster** is a tool to create initramfs images used at the early stage of Linux boot process. Booster is made with speed and full disk encryption use-case in mind.
+**Booster** is a tool to create initramfs images needed at the early stage of Linux boot process. Booster is made with speed and full disk encryption use-case in mind.
 
 Booster advantages:
 
@@ -17,6 +17,7 @@ Booster advantages:
 
     network:
       dhcp: on
+      # either dhcp above or static configuration below can be used
       ip: 10.0.2.15/24
       gateway: 10.0.2.255
       dns_servers: 192.168.1.1,8.8.8.8
@@ -40,8 +41,8 @@ Booster advantages:
 
   * `extra_files` is a comma-separated list of extra files to add to the image. If an item starts with slash ("/") then it considered an absolute path. Otherwise it is a path relative to /usr/bin. If the item is a directory then its content is added recursively. A special case is `busybox`, adding it to the image enables emergency shell in case of a panic during the boot process.
 
-## OPTIONS
-  `booster` command accepts following arguments:
+## COMMAND-LINE FLAGS
+  `booster` command accepts following flags:
 
   * `-universal` generate a universal image
   * `-kernelVersion` use modules for the given kernel version. If the flag is not specified then the current kernel is used (as reported by "uname -r").
@@ -60,6 +61,11 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.options=opt1,opt2` a comma-separated lists of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `booster.debug=1` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
+
+## DEBUGGING
+If you have a problem with booster boot tool you can enable debug mode to get more
+information about what is going on. Just add `booster.debug=1` kernel parameter and booster
+provide additional logs.
 
 ## EXAMPLES
 Create an initramfs file specific for the current kernel/host. The output file is booster.img:
