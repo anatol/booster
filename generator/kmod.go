@@ -32,7 +32,6 @@ type Kmod struct {
 	aliases           []alias
 	extraDep          map[string][]string // extra dependencies added by the generator
 	loadModules       []string            // force modules to load in init
-	hostAliases       []alias
 	hostModules       set
 }
 
@@ -51,35 +50,11 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: aliases list might be quite big. Drop all aliases for non-interesting modules?
 
-	hostModAliases := make([]alias, 0)
-	hostModules := make(set)
-	if !conf.universal {
-		devAliases, err := conf.readDeviceAliases()
-		if err != nil {
-			return nil, err
-		}
-
-		// filter out only aliases known to kernel
-		for _, a := range devAliases {
-			matched, err := matchAlias(a, aliases)
-			if err != nil {
-				return nil, err
-			}
-			if len(matched) > 0 {
-				// TODO: here could be duplicates
-				hostModAliases = append(hostModAliases, matched...)
-			} else {
-				debug("no matches found for a device alias '%s'\n", a)
-			}
-		}
-
-		// find all modules currently used at the host
-		hostModules, err = readHostModules(conf.hostModulesFile)
-		if err != nil {
-			return nil, err
-		}
+	// find all modules currently used at the host
+	hostModules, err := readHostModules(conf.hostModulesFile)
+	if err != nil {
+		return nil, err
 	}
 
 	kmod := &Kmod{
@@ -92,7 +67,6 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 		aliases:           aliases,
 		extraDep:          make(map[string][]string),
 		loadModules:       make([]string, 0),
-		hostAliases:       hostModAliases,
 		hostModules:       hostModules,
 	}
 	return kmod, nil
@@ -412,9 +386,9 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 			return nil, fmt.Errorf("Invalid softdep line: %s", line)
 		}
 		modname := parts[1]
-		modname, err = k.resolveModname(modname)
-		if err != nil {
-			return nil, err
+		modname = k.resolveModname(modname)
+		if modname == "" {
+			return nil, fmt.Errorf("unable to resolve modname %s", modname)
 		}
 
 		parts = parts[2:]
@@ -422,9 +396,8 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 		deps := make([]string, 0)
 		for _, d := range parts {
 			if d != "pre:" && d != "post:" {
-				var err error
-				d, err = k.resolveModname(d)
-				if err != nil {
+				d = k.resolveModname(d)
+				if d == "" {
 					// some softdeps have really weird modnames e.g. kpc_i2c or kpc_nwl_dma, just ignore it
 					continue
 				}
@@ -440,10 +413,6 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 		}
 	}
 	return modules, scanner.Err()
-}
-
-func (k *Kmod) matchAlias(alias string) ([]alias, error) {
-	return matchAlias(alias, k.aliases)
 }
 
 // this function may return multiple matches for the input match, e.g.
@@ -466,32 +435,36 @@ func matchAlias(needle string, aliases []alias) ([]alias, error) {
 	return result, nil
 }
 
-func (k *Kmod) resolveModname(name string) (string, error) {
+// matches needed using simple string comparison instead of using path matching
+// returns the match module name
+func firstExactAliasMatch(needle string, aliases []alias) string {
+	for _, a := range aliases {
+		if a.pattern == needle {
+			return a.module
+		}
+	}
+	return ""
+}
+
+// resolveModname tries to resolve and normalize to its canonical name
+// return empty stream if cannot normalize it
+func (k *Kmod) resolveModname(name string) string {
 	if k.builtinModules[name] {
-		return name, nil
+		return name
 	}
 	if _, exists := k.nameToPathMapping.forward[name]; exists {
-		return name, nil
+		return name
 	}
 
 	normalizedMod := normalizeModuleName(name)
 	if k.builtinModules[normalizedMod] {
-		return normalizedMod, nil
+		return normalizedMod
 	}
 	if _, exists := k.nameToPathMapping.forward[normalizedMod]; exists {
-		return normalizedMod, nil
+		return normalizedMod
 	}
 
-	aliases, err := k.matchAlias(name)
-	if err != nil {
-		return "", err
-	}
-
-	// return the first map element if it exists
-	for _, a := range aliases {
-		return a.module, nil
-	}
-	return "", fmt.Errorf("cannot resolve module name: %s", name)
+	return firstExactAliasMatch(name, k.aliases)
 }
 
 func normalizeModuleName(mod string) string {
@@ -512,26 +485,44 @@ func (k *Kmod) forceLoadModules() []string {
 	return result
 }
 
-func (k *Kmod) filterAliasesForRequiredModules() ([]alias, error) {
-	var all, result []alias
+// filter only those aliases that match activated modules and, if host mode enabled,
+// active devices aliases
+func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, error) {
+	var filteredAliases []alias
 
-	if k.universal {
-		all = k.aliases
-	} else {
-		all = k.hostAliases
-	}
-
-	for _, a := range all {
+	for _, a := range k.aliases {
 		if k.requiredModules[a.module] {
-			result = append(result, a)
+			filteredAliases = append(filteredAliases, a)
 		}
 	}
 
-	return result, nil
+	if !k.universal {
+		devAliases, err := conf.readDeviceAliases()
+		if err != nil {
+			return nil, err
+		}
+
+		// filter out only aliases known to kernel
+		var newFilteredAliases []alias // aliases for the given devices
+		for a := range devAliases {
+			matched, err := matchAlias(a, filteredAliases)
+			if err != nil {
+				return nil, err
+			}
+			if len(matched) > 0 {
+				newFilteredAliases = append(newFilteredAliases, matched...)
+			} else {
+				debug("no matches found for a device alias '%s'\n", a)
+			}
+		}
+		filteredAliases = newFilteredAliases
+	}
+
+	return filteredAliases, nil
 }
 
-func readDeviceAliases() ([]string, error) {
-	var aliases []string
+func readDeviceAliases() (set, error) {
+	aliases := make(set)
 
 	err := filepath.Walk("/sys/devices", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -553,7 +544,7 @@ func readDeviceAliases() ([]string, error) {
 			return nil
 		}
 
-		aliases = append(aliases, al)
+		aliases[al] = true
 
 		return nil
 	})

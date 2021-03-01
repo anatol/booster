@@ -103,3 +103,17 @@ func moduleName(r io.ReaderAt) (string, error) {
 	b = b[moduleNameOffset64:]
 	return string(b[:bytes.IndexByte(b, '\x00')]), nil
 }
+
+func TestReadDeviceAliases(t *testing.T) {
+	t.Parallel()
+
+	a, err := readDeviceAliases()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// on a regular host we would expect at least dozen devices/aliases
+	if len(a) < 12 {
+		t.Fatalf("too few device aliases detected: %d", len(a))
+	}
+}

@@ -26,7 +26,7 @@ type generatorConfig struct {
 	kernelVersion       string
 	modulesDir          string
 	debug               bool
-	readDeviceAliases   func() ([]string, error)
+	readDeviceAliases   func() (set, error)
 	hostModulesFile     string // path to file with host modules, default is /proc/modules
 }
 
@@ -176,7 +176,7 @@ func (img *Image) appendModules(conf *generatorConfig) (*Kmod, error) {
 	}
 
 	// collect aliases for required modules only
-	aliases, err := kmod.filterAliasesForRequiredModules()
+	aliases, err := kmod.filterAliasesForRequiredModules(conf)
 	if err != nil {
 		return nil, err
 	}

@@ -117,8 +117,12 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		t.Fatal(err)
 	}
 
-	devAliases := func() ([]string, error) {
-		return opts.hostAliases, nil
+	devAliases := func() (set, error) {
+		aliases := make(set)
+		for _, a := range opts.hostAliases {
+			aliases[a] = true
+		}
+		return aliases, nil
 	}
 
 	compression := opts.compression
