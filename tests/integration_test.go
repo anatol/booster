@@ -79,11 +79,11 @@ func generateInitRamfs(opts Opts) (string, error) {
 	var verifyCmd *exec.Cmd
 	switch opts.compression {
 	case "none":
-		verifyCmd = exec.Command("/usr/bin/cpio", "-i", "--only-verify-crc", "--file", output)
+		verifyCmd = exec.Command("cpio", "-i", "--only-verify-crc", "--file", output)
 	case "zstd", "":
-		verifyCmd = exec.Command("/usr/bin/zstd", "--test", output)
+		verifyCmd = exec.Command("zstd", "--test", output)
 	case "gzip":
-		verifyCmd = exec.Command("/usr/bin/gzip", "--test", output)
+		verifyCmd = exec.Command("gzip", "--test", output)
 	default:
 		return "", fmt.Errorf("Unknown compression: %s", opts.compression)
 	}
