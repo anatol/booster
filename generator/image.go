@@ -83,12 +83,13 @@ func (img *Image) AppendDirEntry(dir string) error {
 	if img.contains[dir] {
 		return nil
 	}
+	if dir == "/" {
+		return nil
+	}
 
-	if dir != "/" {
-		parent := path.Dir(dir)
-		if err := img.AppendDirEntry(parent); err != nil {
-			return err
-		}
+	parent := path.Dir(dir)
+	if err := img.AppendDirEntry(parent); err != nil {
+		return err
 	}
 
 	hdr := &cpio.Header{
