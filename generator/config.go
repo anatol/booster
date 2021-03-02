@@ -31,7 +31,6 @@ type UserConfig struct {
 
 const (
 	defaultConfigPath = "/etc/booster.yaml"
-	defaultTimeout    = 3 * time.Minute
 )
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -83,8 +82,6 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			return nil, fmt.Errorf("Unable to parse mount timeout value: %v", err)
 		}
 		conf.timeout = timeout
-	} else {
-		conf.timeout = defaultTimeout
 	}
 
 	// now check command line flags
