@@ -459,7 +459,12 @@ func moveSlashRunMountpoint() error {
 	_, err := os.Stat(newRoot + "/run")
 	if os.IsNotExist(err) {
 		// let's print a warning and hope that the new root works without initrd udev state
-		fmt.Println("/run does not exists at the root filesystem")
+		fmt.Println("/run does not exist at the root filesystem")
+
+		// unmount /run so its directory can be removed and reclaimed
+		if err := syscall.Unmount("/run", 0); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -470,16 +475,134 @@ func moveSlashRunMountpoint() error {
 	return nil
 }
 
+// deleteContent deletes content of the path recursively but without crossing mountpoints.
+// It checks that deleted files belong to the same device id (i.e. not a mountpoint).
+func deleteContent(path string, rootDev uint64) error {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+
+	stat, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("expected stat_t structure for '%s'", path)
+	}
+	if stat.Dev != rootDev {
+		// we crossed the fs boundary, it is time to stop deleting files
+		return nil
+	}
+
+	if st.IsDir() {
+		dirEntries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+
+		for _, e := range dirEntries {
+			if e.Name() == "." || e.Name() == ".." {
+				continue
+			}
+			if err := deleteContent(filepath.Join(path, e.Name()), rootDev); err != nil {
+				return err
+			}
+		}
+	}
+
+	if path != "/" {
+		// root directory cannot be removed as it is busy (initramfs is mounted here).
+		// "/" and newRoot are going to be the only leftovers from initramfs stage.
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Once we completed rootfs identification/mount it is time to remove the ramfs and reclaime some mempry back
+// to the system.
+// IT IS A DANGEROUS OPERATION
+// We need to be *extra* careful here and do not remove user's content from the root filesystem.
+// Thus we perform many checks to be sure that
+//   * current process is a booster init
+//   * remove files at the iniramfs only and do not cross mount boundaries
+func deleteRamfs() error {
+	if os.Getpid() != 1 {
+		return fmt.Errorf("init PID is not 1")
+	}
+
+	rootStat, err := os.Stat("/")
+	if err != nil {
+		return err
+	}
+	s, ok := rootStat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("expected stat_t structure for '/' mountpoint")
+	}
+	rootDev := s.Dev
+
+	newStat, err := os.Stat(".")
+	if err != nil {
+		return err
+	}
+	n, ok := newStat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("expected stat_t structure for '.' mountpoint")
+	}
+	if n.Dev == rootDev {
+		return fmt.Errorf("new root fs is the same device as initramfs")
+	}
+
+	// extra sanity check that we really at booster initramfs
+	for _, f := range []string{"/init", "/etc/booster.init.yaml", "/etc/initrd-release"} {
+		st, err := os.Stat(f)
+		if err != nil {
+			return err
+		}
+
+		if st.IsDir() {
+			return fmt.Errorf("expected that %s is a file", f)
+		}
+
+		n, ok := st.Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("expected stat_t structure for '%s' file", f)
+		}
+		if n.Dev != rootDev {
+			return fmt.Errorf("file %s is not at the initramfs", f)
+		}
+	}
+
+	// initramfs should be mounted as ramfs/tmpfs
+	var statfs unix.Statfs_t
+	if err := unix.Statfs("/", &statfs); err != nil {
+		return fmt.Errorf("statfs(/): %v", err)
+	}
+	if uint32(statfs.Type) != unix.RAMFS_MAGIC && uint32(statfs.Type) != unix.TMPFS_MAGIC {
+		return fmt.Errorf("initramfs is not of ramfs/tmpfs type")
+	}
+
+	return deleteContent("/", rootDev)
+}
+
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
 	if err := moveSlashRunMountpoint(); err != nil {
 		return err
 	}
 
-	// TODO: remove everything at "/" but do not cross filesystem mountpoint boundaries
+	// note that /run has been unmounted earlier
+	for _, m := range []string{"/dev", "/proc", "/sys"} {
+		if err := syscall.Unmount(m, 0); err != nil {
+			return err
+		}
+	}
 
 	if err := os.Chdir(newRoot); err != nil {
 		return fmt.Errorf("chdir: %v", err)
+	}
+	if err := deleteRamfs(); err != nil {
+		return err
 	}
 	if err := syscall.Mount(".", "/", "", syscall.MS_MOVE, ""); err != nil {
 		return fmt.Errorf("mount dir to root: %v", err)
