@@ -52,7 +52,7 @@ Booster advantages:
   * `-universal` generate a universal image
   * `-kernelVersion` use modules for the given kernel version. If the flag is not specified then the current kernel is used (as reported by "uname -r").
   * `-output` output file, by default booster.img used
-  * `-compression` output file compression. Currently supported compression algorithms are "zstd" (default) and "gzip".
+  * `-compression` output file compression. Currently supported compression algorithms are "zstd" (default), "gzip" and "none".
   * `-strip` strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image
   * `-force` overwrite output file if it exists
 
