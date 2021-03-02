@@ -194,7 +194,6 @@ func readKernelAliases(dir string) ([]alias, error) {
 
 func (k *Kmod) addModulesToImage(img *Image) error {
 	var wg sync.WaitGroup
-	var m sync.Mutex
 	modNum := len(k.requiredModules)
 	errCh := make(chan error, modNum)
 
@@ -238,12 +237,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			return
 		}
 
-		m.Lock()
-		// img operations are not thread-safe so we need to serialize them
-		err = img.AppendContent(content, 0644, imageModulesDir+modName+".ko")
-		m.Unlock()
-
-		if err != nil {
+		if err := img.AppendContent(content, 0644, imageModulesDir+modName+".ko"); err != nil {
 			errCh <- err
 			return
 		}

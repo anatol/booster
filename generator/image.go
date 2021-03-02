@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cavaliercoder/go-cpio"
 	"github.com/google/renameio"
@@ -18,6 +19,8 @@ import (
 )
 
 type Image struct {
+	m sync.Mutex // synchronizes access to shared mutable state
+
 	file          *renameio.PendingFile
 	compressor    io.Closer
 	out           *cpio.Writer
@@ -82,10 +85,14 @@ func (img *Image) Close() error {
 // AppendDirEntry appends directory entry to the image (and its parent if it is needed).
 // It does not add the directory content
 func (img *Image) AppendDirEntry(dir string) error {
+	img.m.Lock()
 	if img.contains[dir] {
+		img.m.Unlock()
 		return nil
 	}
 	img.contains[dir] = true
+	img.m.Unlock()
+
 	if dir == "/" {
 		return nil
 	}
@@ -99,7 +106,11 @@ func (img *Image) AppendDirEntry(dir string) error {
 		Name: strings.TrimPrefix(dir, "/"),
 		Mode: cpio.FileMode(0755) | cpio.ModeDir,
 	}
-	return img.out.WriteHeader(hdr)
+	img.m.Lock()
+	err := img.out.WriteHeader(hdr)
+	img.m.Unlock()
+
+	return err
 }
 
 func stripElf(in []byte, stripAll bool) ([]byte, error) {
@@ -130,10 +141,13 @@ func stripElf(in []byte, stripAll bool) ([]byte, error) {
 }
 
 func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) error {
+	img.m.Lock()
 	if img.contains[dest] {
+		img.m.Unlock()
 		return fmt.Errorf("Trying to add a file %s but it already been added to the image", dest)
 	}
 	img.contains[dest] = true
+	img.m.Unlock()
 
 	// append parent dirs first
 	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
@@ -172,10 +186,13 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 		Mode: cpio.FileMode(mode) | cpio.ModeRegular,
 		Size: int64(len(content)),
 	}
+	img.m.Lock()
 	if err := img.out.WriteHeader(hdr); err != nil {
+		img.m.Unlock()
 		return err
 	}
 	_, err := img.out.Write(content)
+	img.m.Unlock()
 	return err
 }
 
@@ -183,9 +200,13 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 // If input is a directory then content is added to the image recursively.
 func (img *Image) AppendFile(fn string) error {
 	fn = path.Clean(fn)
+
+	img.m.Lock()
 	if img.contains[fn] {
+		img.m.Unlock()
 		return nil
 	}
+	img.m.Unlock()
 
 	if err := img.AppendDirEntry(path.Dir(fn)); err != nil {
 		return err
@@ -197,7 +218,15 @@ func (img *Image) AppendFile(fn string) error {
 	}
 
 	if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		// check img.contains again as there might be race-condition between prev check this this update
+		img.m.Lock()
+		if img.contains[fn] {
+			img.m.Unlock()
+			return nil
+		}
 		img.contains[fn] = true
+		img.m.Unlock()
+
 		linkTarget, err := os.Readlink(fn)
 		if err != nil {
 			return err
@@ -208,12 +237,17 @@ func (img *Image) AppendFile(fn string) error {
 			Mode: cpio.FileMode(fi.Mode().Perm()) | cpio.ModeSymlink,
 			Size: int64(len(linkTarget)),
 		}
+
+		img.m.Lock()
 		if err := img.out.WriteHeader(hdr); err != nil {
+			img.m.Unlock()
 			return err
 		}
 		if _, err := img.out.Write([]byte(linkTarget)); err != nil {
+			img.m.Unlock()
 			return err
 		}
+		img.m.Unlock()
 
 		// now add the link target as well
 		if !filepath.IsAbs(linkTarget) {
