@@ -28,6 +28,7 @@ type generatorConfig struct {
 	debug               bool
 	readDeviceAliases   func() (set, error)
 	hostModulesFile     string // path to file with host modules, default is /proc/modules
+	stripBinaries       bool
 }
 
 type networkStaticConfig struct {
@@ -71,7 +72,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return fmt.Errorf("File %v exists, please specify -force if you want to overwrite it", conf.output)
 	}
 
-	img, err := NewImage(conf.output, conf.compression)
+	img, err := NewImage(conf.output, conf.compression, conf.stripBinaries)
 	if err != nil {
 		return err
 	}

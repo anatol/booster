@@ -17,6 +17,7 @@ var (
 	configFile         = flag.String("config", "", "Configuration file path")
 	debugEnabled       = flag.Bool("debug", false, "Enable debug output")
 	universal          = flag.Bool("universal", false, "Add wide range of modules/tools to allow this image boot at different machines")
+	strip              = flag.Bool("strip", false, "Strip ELF binaries before adding it to the image")
 	pprofcpu           = flag.String("pprof.cpu", "", "Write cpu profile to file")
 )
 

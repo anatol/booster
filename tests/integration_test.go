@@ -103,12 +103,13 @@ type NetworkConfig struct {
 	Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
 }
 type GeneratorConfig struct {
-	Network      *NetworkConfig `yaml:",omitempty"`
-	Universal    bool           `yaml:",omitempty"`
-	Modules      string         `yaml:",omitempty"`
-	Compression  string         `yaml:",omitempty"`
-	MountTimeout string         `yaml:"mount_timeout,omitempty"`
-	ExtraFiles   string         `yaml:"extra_files,omitempty"`
+	Network       *NetworkConfig `yaml:",omitempty"`
+	Universal     bool           `yaml:",omitempty"`
+	Modules       string         `yaml:",omitempty"`
+	Compression   string         `yaml:",omitempty"`
+	MountTimeout  string         `yaml:"mount_timeout,omitempty"`
+	ExtraFiles    string         `yaml:"extra_files,omitempty"`
+	StripBinaries bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -133,6 +134,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.Compression = opts.compression
 	conf.MountTimeout = strconv.Itoa(opts.mountTimeout) + "s"
 	conf.ExtraFiles = opts.extraFiles
+	conf.StripBinaries = opts.stripBinaries
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -163,6 +165,7 @@ type Opts struct {
 	extraFiles    string
 	checkVmState  func(vm *vmtest.Qemu, t *testing.T)
 	forceKill     bool // if true then kill VM rather than do a graceful shutdown
+	stripBinaries bool
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
@@ -433,6 +436,12 @@ func TestBooster(t *testing.T) {
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 		extraFiles:  "fsck,fsck.ext4",
+	}))
+	t.Run("StripBinaries", boosterTest(Opts{
+		disk:          "assets/luks2.clevis.tpm2.img",
+		enableTpm2:    true,
+		stripBinaries: true,
+		kernelArgs:    []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
 	}))
 
 	t.Run("LUKS1.WithName", boosterTest(Opts{

@@ -21,11 +21,12 @@ type UserConfig struct {
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
 	}
-	Universal    bool   `yaml:",omitempty"`
-	Modules      string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
-	Compression  string `yaml:",omitempty"`              // output file compression
-	MountTimeout string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
-	ExtraFiles   string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
+	Universal     bool   `yaml:",omitempty"`
+	Modules       string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
+	Compression   string `yaml:",omitempty"`              // output file compression
+	MountTimeout  string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
+	ExtraFiles    string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
+	StripBinaries bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
 }
 
 const (
@@ -109,6 +110,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.debug = *debugEnabled
 	conf.readDeviceAliases = readDeviceAliases
 	conf.hostModulesFile = "/proc/modules"
+	conf.stripBinaries = u.StripBinaries || *strip
 
 	return &conf, nil
 }

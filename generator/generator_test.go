@@ -44,6 +44,7 @@ type options struct {
 	kernelAliases    []alias  // aliases as found under kernel/modules.alias (pattern + corresponding module)
 	extraFiles       []string
 	expectError      string
+	stripBinaries    bool
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -140,6 +141,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		readDeviceAliases: devAliases,
 		hostModulesFile:   wd + "/proc_modules",
 		extraFiles:        opts.extraFiles,
+		stripBinaries:     opts.stripBinaries,
 	}
 	err := generateInitRamfs(&conf)
 	if opts.expectError == "" {
@@ -359,6 +361,15 @@ func testCompressedModules(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "booster.alias")
 }
 
+func testStripBinaries(t *testing.T) {
+	opts := options{
+		universal:        true,
+		stripBinaries:    true,
+		prepareModulesAt: []string{"kernel/fs/foo.ko", "kernel/testfoo.ko", "kernel/crypto/cbc.ko", "kernel/subdir/virtio_scsi.ko"},
+	}
+	createTestInitRamfs(t, &opts)
+}
+
 func TestGenerator(t *testing.T) {
 	prepareAssets(t)
 
@@ -371,4 +382,5 @@ func TestGenerator(t *testing.T) {
 	t.Run("ExtraFiles", testExtraFiles)
 	t.Run("InvalidExtraFiles", testInvalidExtraFiles)
 	t.Run("CompressedModules", testCompressedModules)
+	t.Run("StripBinaries", testStripBinaries)
 }

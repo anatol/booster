@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -17,13 +18,14 @@ import (
 )
 
 type Image struct {
-	file       *renameio.PendingFile
-	compressor io.Closer
-	out        *cpio.Writer
-	contains   map[string]bool // whether image contains the file
+	file          *renameio.PendingFile
+	compressor    io.Closer
+	out           *cpio.Writer
+	contains      map[string]bool // whether image contains the file
+	stripBinaries bool
 }
 
-func NewImage(path string, compression string) (*Image, error) {
+func NewImage(path string, compression string, stripBinaries bool) (*Image, error) {
 	file, err := renameio.TempFile("", path)
 	if err != nil {
 		return nil, err
@@ -49,10 +51,11 @@ func NewImage(path string, compression string) (*Image, error) {
 	out := cpio.NewWriter(compressor)
 
 	return &Image{
-		file:       file,
-		compressor: compressor,
-		out:        out,
-		contains:   make(map[string]bool),
+		file:          file,
+		compressor:    compressor,
+		out:           out,
+		contains:      make(map[string]bool),
+		stripBinaries: stripBinaries,
 	}, nil
 }
 
@@ -99,6 +102,33 @@ func (img *Image) AppendDirEntry(dir string) error {
 	return img.out.WriteHeader(hdr)
 }
 
+func stripElf(in []byte, stripAll bool) ([]byte, error) {
+	t, err := os.CreateTemp("", "booster.strip")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(t.Name())
+
+	if _, err := t.Write(in); err != nil {
+		_ = t.Close()
+		return nil, err
+	}
+	_ = t.Close()
+
+	args := make([]string, 0, 2)
+	if stripAll {
+		args = append(args, "--strip-all")
+	} else {
+		args = append(args, "--strip-unneeded")
+	}
+	args = append(args, t.Name())
+	if err := exec.Command("strip", args...).Run(); err != nil {
+		return nil, err
+	}
+
+	return os.ReadFile(t.Name())
+}
+
 func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) error {
 	if img.contains[dest] {
 		return fmt.Errorf("Trying to add a file %s but it already been added to the image", dest)
@@ -110,6 +140,33 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 		return err
 	}
 
+	const minimalELFSize = 64 // 64 bytes is a size of 64bit ELF header
+	if len(content) >= minimalELFSize {
+		// now check if the added file was ELF, then we scan the ELF dependencies and add them as well
+		ef, err := elf.NewFile(bytes.NewReader(content))
+		if err != nil {
+			if _, ok := err.(*elf.FormatError); !ok || !strings.HasPrefix(err.Error(), "bad magic number") {
+				// not an ELF
+				return fmt.Errorf("cannot open ELF file: %v", err)
+			} // else it is a regular non-ELF file
+		} else {
+			defer ef.Close()
+
+			if img.stripBinaries {
+				// do not use --strip-all for modules/shared libs as it fails to load
+				isBinary := ef.Type == elf.ET_EXEC
+				content, err = stripElf(content, isBinary)
+				if err != nil {
+					return err
+				}
+			}
+
+			if err := img.AppendElfDependencies(ef); err != nil {
+				return err
+			}
+		}
+	}
+
 	hdr := &cpio.Header{
 		Name: strings.TrimPrefix(dest, "/"),
 		Mode: cpio.FileMode(mode) | cpio.ModeRegular,
@@ -118,27 +175,8 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 	if err := img.out.WriteHeader(hdr); err != nil {
 		return err
 	}
-	if _, err := img.out.Write(content); err != nil {
-		return err
-	}
-
-	const minimalELFSize = 64 // 64 bytes is a size of 64bit ELF header
-	if len(content) < minimalELFSize {
-		return nil
-	}
-	// now check if the added file was ELF, then we scan the ELF dependencies and add them as well
-	ef, err := elf.NewFile(bytes.NewReader(content))
-	if err != nil {
-		if _, ok := err.(*elf.FormatError); !ok || !strings.HasPrefix(err.Error(), "bad magic number") {
-			// not an ELF
-			return fmt.Errorf("cannot open ELF file: %v", err)
-		} else {
-			return nil
-		}
-	}
-	defer ef.Close()
-
-	return img.AppendElfDependencies(ef)
+	_, err := img.out.Write(content)
+	return err
 }
 
 // AppendFile appends the file + its dependencies to the ramfs file
