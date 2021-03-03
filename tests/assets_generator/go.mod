@@ -1,9 +1,9 @@
 module assets_generator
 
-go 1.15
+go 1.16
 
 require (
-	github.com/anatol/vmtest v0.0.0-20201215024419-d0326c4b7734
-	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
-	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c // indirect
+	github.com/anatol/vmtest v0.0.0-20210225191124-26540db15d49
+	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83
+	golang.org/x/sys v0.0.0-20210301091718-77cc2087c03b // indirect
 )
