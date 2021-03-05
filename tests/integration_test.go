@@ -103,13 +103,14 @@ type NetworkConfig struct {
 	Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
 }
 type GeneratorConfig struct {
-	Network       *NetworkConfig `yaml:",omitempty"`
-	Universal     bool           `yaml:",omitempty"`
-	Modules       string         `yaml:",omitempty"`
-	Compression   string         `yaml:",omitempty"`
-	MountTimeout  string         `yaml:"mount_timeout,omitempty"`
-	ExtraFiles    string         `yaml:"extra_files,omitempty"`
-	StripBinaries bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
+	Network              *NetworkConfig `yaml:",omitempty"`
+	Universal            bool           `yaml:",omitempty"`
+	Modules              string         `yaml:",omitempty"`
+	Compression          string         `yaml:",omitempty"`
+	MountTimeout         string         `yaml:"mount_timeout,omitempty"`
+	ExtraFiles           string         `yaml:"extra_files,omitempty"`
+	StripBinaries        bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
+	EnableVirtualConsole bool           `yaml:"vconsole,omitempty"`
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -135,6 +136,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.MountTimeout = strconv.Itoa(opts.mountTimeout) + "s"
 	conf.ExtraFiles = opts.extraFiles
 	conf.StripBinaries = opts.stripBinaries
+	conf.EnableVirtualConsole = opts.enableVirtualConsole
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -150,22 +152,23 @@ func generateBoosterConfig(opts Opts) (string, error) {
 }
 
 type Opts struct {
-	params        []string
-	compression   string
-	prompt        string
-	password      string
-	enableTangd   bool
-	useDhcp       bool
-	enableTpm2    bool
-	kernelVersion string // kernel version
-	kernelArgs    []string
-	disk          string
-	disks         []vmtest.QemuDisk
-	mountTimeout  int // in seconds
-	extraFiles    string
-	checkVmState  func(vm *vmtest.Qemu, t *testing.T)
-	forceKill     bool // if true then kill VM rather than do a graceful shutdown
-	stripBinaries bool
+	params               []string
+	compression          string
+	prompt               string
+	password             string
+	enableTangd          bool
+	useDhcp              bool
+	enableTpm2           bool
+	kernelVersion        string // kernel version
+	kernelArgs           []string
+	disk                 string
+	disks                []vmtest.QemuDisk
+	mountTimeout         int // in seconds
+	extraFiles           string
+	checkVmState         func(vm *vmtest.Qemu, t *testing.T)
+	forceKill            bool // if true then kill VM rather than do a graceful shutdown
+	stripBinaries        bool
+	enableVirtualConsole bool
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
@@ -436,6 +439,12 @@ func TestBooster(t *testing.T) {
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 		extraFiles:  "fsck,fsck.ext4",
+	}))
+	t.Run("VirtualConsole", boosterTest(Opts{
+		compression:          "none",
+		disk:                 "assets/ext4.img",
+		kernelArgs:           []string{"root=LABEL=atestlabel12"},
+		enableVirtualConsole: true,
 	}))
 	t.Run("StripBinaries", boosterTest(Opts{
 		disk:          "assets/luks2.clevis.tpm2.img",

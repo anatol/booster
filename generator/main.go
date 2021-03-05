@@ -29,6 +29,10 @@ func debug(format string, v ...interface{}) {
 	}
 }
 
+func warning(format string, v ...interface{}) {
+	fmt.Printf(format, v...)
+}
+
 func saveProfile(profile, path string) error {
 	f, err := os.Create(path)
 	if err != nil {

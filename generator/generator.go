@@ -29,6 +29,10 @@ type generatorConfig struct {
 	readDeviceAliases   func() (set, error)
 	hostModulesFile     string // path to file with host modules, default is /proc/modules
 	stripBinaries       bool
+
+	// virtual console configs
+	enableVirtualConsole     bool
+	vconsolePath, localePath string
 }
 
 type networkStaticConfig struct {
@@ -91,7 +95,15 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	if err := img.appendInitConfig(conf, kmod.dependencies); err != nil {
+	var vconsole *VirtualConsole
+	if conf.enableVirtualConsole {
+		vconsole, err = img.enableVirtualConsole(conf.vconsolePath, conf.localePath)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := img.appendInitConfig(conf, kmod.dependencies, vconsole); err != nil {
 		return err
 	}
 
@@ -125,12 +137,13 @@ func (img *Image) appendExtraFiles(binaries []string) error {
 	return nil
 }
 
-func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string) error {
+func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string, vconsole *VirtualConsole) error {
 	var initConfig InitConfig // config for init stored to /etc/booster.init.yaml
 
 	initConfig.MountTimeout = int(conf.timeout.Seconds())
 	initConfig.Kernel = conf.kernelVersion
 	initConfig.ModuleDependencies = kmodDeps
+	initConfig.VirtualConsole = vconsole
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

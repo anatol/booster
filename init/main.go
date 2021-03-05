@@ -1058,6 +1058,10 @@ func boost() error {
 		return err
 	}
 
+	if err := configureVirtualConsole(); err != nil {
+		return err
+	}
+
 	rootMounted.Add(1)
 
 	go udevListener()

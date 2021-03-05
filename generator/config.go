@@ -21,12 +21,13 @@ type UserConfig struct {
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
 	}
-	Universal     bool   `yaml:",omitempty"`
-	Modules       string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
-	Compression   string `yaml:",omitempty"`              // output file compression
-	MountTimeout  string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
-	ExtraFiles    string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
-	StripBinaries bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
+	Universal            bool   `yaml:",omitempty"`
+	Modules              string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
+	Compression          string `yaml:",omitempty"`              // output file compression
+	MountTimeout         string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
+	ExtraFiles           string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
+	StripBinaries        bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
+	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
 }
 
 const (
@@ -108,6 +109,11 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readDeviceAliases = readDeviceAliases
 	conf.hostModulesFile = "/proc/modules"
 	conf.stripBinaries = u.StripBinaries || *strip
+	conf.enableVirtualConsole = u.EnableVirtualConsole
+	if conf.enableVirtualConsole {
+		conf.vconsolePath = "/etc/vconsole.conf"
+		conf.localePath = "/etc/locale.conf"
+	}
 
 	return &conf, nil
 }

@@ -27,6 +27,7 @@ Booster advantages:
     mount_timeout: 5m6s
     strip: true
     extra_files: vim,/usr/share/vim/vim82/,fsck,fsck.ext4
+    vconsole: true
 
   * `network` node, if presents, initializes network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
@@ -45,6 +46,9 @@ Booster advantages:
   * `extra_files` is a comma-separated list of extra files to add to the image. If an item starts with slash ("/") then it considered an absolute path. Otherwise it is a path relative to /usr/bin. If the item is a directory then its content is added recursively. There are a few special cases:
        * adding `busybox` to the image enables emergency shell in case of a panic during the boot process.
        * adding `fsck` enables boot time filesystem check. It also requires filesystem specific binary called `fsck.$rootfstype` to be added to the image. Filesystems are corrected automatically and if it fails then boot stops and it is responsibily of the user to fix the root filesystem.
+
+  * `vconsole` is a flag that enables early-user console configuration. If it set to `true` then booster reads configuration from `/etc/vconsole.conf` and `/etc/locale.conf` and adds required keymap and fonts to the generated image.
+    following config properties are taken into account: `KEYMAP`, `KEYMAP_TOGGLE`, `FONT`, `FONT_MAP`, `FONT_UNIMAP`. See also [man vconsole.conf](https://man.archlinux.org/man/vconsole.conf.5.en).
 
 ## COMMAND-LINE FLAGS
   `booster` command accepts following flags:

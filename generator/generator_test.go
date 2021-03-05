@@ -34,17 +34,19 @@ func prepareAssets(t *testing.T) {
 }
 
 type options struct {
-	workDir          string
-	compression      string
-	universal        bool
-	prepareModulesAt []string // copy a test module to these locations
-	unpackImage      bool
-	hostModules      []string // modules as found under /proc/modules
-	hostAliases      []string // list of all aliases for the host devices
-	kernelAliases    []alias  // aliases as found under kernel/modules.alias (pattern + corresponding module)
-	extraFiles       []string
-	expectError      string
-	stripBinaries    bool
+	workDir                      string
+	compression                  string
+	universal                    bool
+	prepareModulesAt             []string // copy a test module to these locations
+	unpackImage                  bool
+	hostModules                  []string // modules as found under /proc/modules
+	hostAliases                  []string // list of all aliases for the host devices
+	kernelAliases                []alias  // aliases as found under kernel/modules.alias (pattern + corresponding module)
+	extraFiles                   []string
+	expectError                  string
+	stripBinaries                bool
+	enableVirtualConsole         bool
+	vConsoleConfig, localeConfig string
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -132,17 +134,30 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	}
 
 	conf := generatorConfig{
-		initBinary:        "/usr/bin/false",
-		compression:       compression,
-		universal:         opts.universal,
-		kernelVersion:     "matestkernel",
-		modulesDir:        modulesDir,
-		output:            wd + "/booster.img",
-		readDeviceAliases: devAliases,
-		hostModulesFile:   wd + "/proc_modules",
-		extraFiles:        opts.extraFiles,
-		stripBinaries:     opts.stripBinaries,
+		initBinary:           "/usr/bin/false",
+		compression:          compression,
+		universal:            opts.universal,
+		kernelVersion:        "matestkernel",
+		modulesDir:           modulesDir,
+		output:               wd + "/booster.img",
+		readDeviceAliases:    devAliases,
+		hostModulesFile:      wd + "/proc_modules",
+		extraFiles:           opts.extraFiles,
+		stripBinaries:        opts.stripBinaries,
+		enableVirtualConsole: opts.enableVirtualConsole,
 	}
+	if opts.enableVirtualConsole {
+		conf.vconsolePath = wd + "/vconsole.conf"
+		if err := os.WriteFile(conf.vconsolePath, []byte(opts.vConsoleConfig), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		conf.localePath = wd + "/locale.conf"
+		if err := os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	err := generateInitRamfs(&conf)
 	if opts.expectError == "" {
 		if err != nil {
@@ -370,6 +385,22 @@ func testStripBinaries(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 }
 
+func testEnableVirtualConsole(t *testing.T) {
+	opts := options{
+		universal:            true,
+		enableVirtualConsole: true,
+		vConsoleConfig:       "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
+		localeConfig:         "LANG=en_US.UTF-8\n",
+		unpackImage:          true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/setfont")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/keymap")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
+}
+
 func TestGenerator(t *testing.T) {
 	prepareAssets(t)
 
@@ -383,4 +414,5 @@ func TestGenerator(t *testing.T) {
 	t.Run("InvalidExtraFiles", testInvalidExtraFiles)
 	t.Run("CompressedModules", testCompressedModules)
 	t.Run("StripBinaries", testStripBinaries)
+	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
 }
