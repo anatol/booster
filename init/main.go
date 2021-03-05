@@ -313,7 +313,6 @@ func fsck(dev string) error {
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
 		}
-		cmd.Env = append(os.Environ(), "PATH=/usr/bin")
 		if err := cmd.Run(); err != nil {
 			if err, ok := err.(*exec.ExitError); ok {
 				code := err.ExitCode()
@@ -1014,6 +1013,10 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 }
 
 func boost() error {
+	if err := os.Setenv("PATH", "/usr/bin"); err != nil {
+		return err
+	}
+
 	if err := readConfig(); err != nil {
 		return err
 	}
