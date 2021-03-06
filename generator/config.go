@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path"
 	"strings"
@@ -15,6 +16,8 @@ import (
 // UserConfig is a format for /etc/booster.yaml config that is interface between user and booster generator
 type UserConfig struct {
 	Network *struct {
+		Interfaces string `yaml:",omitempty"` // comma-separaed list of interfaces to initialize at early-userspace
+
 		Dhcp bool `yaml:",omitempty"`
 
 		Ip         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
@@ -59,13 +62,33 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	var conf generatorConfig
 
 	// copy user config to generator
-	if net := u.Network; net != nil {
-		if net.Dhcp {
+	if n := u.Network; n != nil {
+		if n.Dhcp {
 			conf.networkConfigType = netDhcp
 		} else {
 			conf.networkConfigType = netStatic
 			conf.networkStaticConfig = &networkStaticConfig{
-				net.Ip, net.Gateway, net.DNSServers,
+				n.Ip, n.Gateway, n.DNSServers,
+			}
+		}
+
+		if u.Network.Interfaces != "" {
+			// get MAC addresses for the specified interface names
+			for _, i := range strings.Split(u.Network.Interfaces, ",") {
+				// user can either provice the mac addr itself
+				if hwAddr, err := net.ParseMAC(i); err == nil {
+					conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, hwAddr)
+					continue
+				}
+
+				// or a network interface
+				ifc, err := net.InterfaceByName(i)
+				if err != nil {
+					return nil, fmt.Errorf("invalid network interface: %s", i)
+				}
+				// TODO: or maybe instead of resolving it to MAC address here we should compute predictable interface names
+				// in init? See the algorithm https://github.com/systemd/systemd/blob/main/src/udev/udev-builtin-net_id.c
+				conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
 			}
 		}
 	}

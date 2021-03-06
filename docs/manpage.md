@@ -16,6 +16,7 @@ Booster advantages:
 **booster** generator config file is located at `/etc/booster.yaml`. Here is a sample config file:
 
     network:
+      interfaces: enp0s31f2,2e:1d:61:30:a3:63
       dhcp: on
       # either dhcp above or static configuration below can be used
       ip: 10.0.2.15/24
@@ -32,6 +33,9 @@ Booster advantages:
   * `network` node, if presents, initializes network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
     In the latter case the config allows to specify `ip` - the machine IP address and its network mask, `gateway` - default gateway, `dns_servers` - comma-separated list of DNS servers.
+    The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
+    Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
+    If `interfaces` node is not specified then all the interfaces activated at boot.
 
   * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 

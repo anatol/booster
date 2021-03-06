@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -13,22 +14,23 @@ import (
 // An internal structure that represents configuration for the generator.
 // It is essentially combination of UserConfig + flags
 type generatorConfig struct {
-	networkConfigType   netConfigType
-	networkStaticConfig *networkStaticConfig
-	universal           bool
-	modules             []string // extra modules to add
-	compression         string
-	timeout             time.Duration
-	extraFiles          []string
-	output              string
-	forceOverwrite      bool // overwrite output file
-	initBinary          string
-	kernelVersion       string
-	modulesDir          string
-	debug               bool
-	readDeviceAliases   func() (set, error)
-	hostModulesFile     string // path to file with host modules, default is /proc/modules
-	stripBinaries       bool
+	networkConfigType       netConfigType
+	networkStaticConfig     *networkStaticConfig
+	networkActiveInterfaces []net.HardwareAddr
+	universal               bool
+	modules                 []string // extra modules to add
+	compression             string
+	timeout                 time.Duration
+	extraFiles              []string
+	output                  string
+	forceOverwrite          bool // overwrite output file
+	initBinary              string
+	kernelVersion           string
+	modulesDir              string
+	debug                   bool
+	readDeviceAliases       func() (set, error)
+	hostModulesFile         string // path to file with host modules, default is /proc/modules
+	stripBinaries           bool
 
 	// virtual console configs
 	enableVirtualConsole     bool
@@ -153,6 +155,9 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]
 		initConfig.Network.Ip = conf.networkStaticConfig.ip
 		initConfig.Network.Gateway = conf.networkStaticConfig.gateway
 		initConfig.Network.DNSServers = conf.networkStaticConfig.dnsServers
+	}
+	if conf.networkActiveInterfaces != nil {
+		initConfig.Network.Interfaces = conf.networkActiveInterfaces
 	}
 
 	content, err := yaml.Marshal(initConfig)

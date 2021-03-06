@@ -89,10 +89,6 @@ func shutdownNetwork() {
 var initializedIfnames []string
 
 func initializeNetworkInterface(ifname string) error {
-	if ifname == "lo" {
-		return nil
-	}
-
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
 		return err

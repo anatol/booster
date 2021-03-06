@@ -98,9 +98,13 @@ func generateInitRamfs(opts Opts) (string, error) {
 }
 
 type NetworkConfig struct {
-	Dhcp    bool   `yaml:",omitempty"`
-	Ip      string `yaml:",omitempty"` // e.g. 10.0.2.15/24
-	Gateway string `yaml:",omitempty"` // e.g. 10.0.2.255
+	Interfaces string `yaml:",omitempty"` // comma-separaed list of interfaces to initialize at early-userspace
+
+	Dhcp bool `yaml:",omitempty"`
+
+	Ip         string `yaml:",omitempty"` // e.g. 10.0.2.15/24
+	Gateway    string `yaml:",omitempty"` // e.g. 10.0.2.255
+	DNSServers string `yaml:"dns_servers,omitempty"`
 }
 type GeneratorConfig struct {
 	Network              *NetworkConfig `yaml:",omitempty"`
@@ -130,6 +134,8 @@ func generateBoosterConfig(opts Opts) (string, error) {
 		} else {
 			net.Ip = "10.0.2.15/24"
 		}
+
+		net.Interfaces = opts.activeNetIfaces
 	}
 	conf.Universal = true
 	conf.Compression = opts.compression
@@ -158,6 +164,7 @@ type Opts struct {
 	password             string
 	enableTangd          bool
 	useDhcp              bool
+	activeNetIfaces      string
 	enableTpm2           bool
 	kernelVersion        string // kernel version
 	kernelArgs           []string
@@ -486,10 +493,26 @@ func TestBooster(t *testing.T) {
 		kernelArgs:  []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 	}))
 	t.Run("LUKS2.Clevis.Tang.DHCP", boosterTest(Opts{
-		disk:        "assets/luks2.clevis.tang.img",
-		enableTangd: true,
-		useDhcp:     true,
-		kernelArgs:  []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+		disk:            "assets/luks2.clevis.tang.img",
+		enableTangd:     true,
+		useDhcp:         true,
+		activeNetIfaces: "52-54-00-12-34-53,52:54:00:12:34:56,52:54:00:12:34:57", // 52:54:00:12:34:56 is QEMU's NIC address
+		kernelArgs:      []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+	}))
+	t.Run("InactiveNetwork", boosterTest(Opts{
+		disk:            "assets/luks2.clevis.tang.img",
+		enableTangd:     true,
+		useDhcp:         true,
+		activeNetIfaces: "52:54:00:12:34:57", // 52:54:00:12:34:56 is QEMU's NIC address
+		kernelArgs:      []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+
+		mountTimeout: 10,
+		forceKill:    true,
+		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
+			if err := vm.ConsoleExpect("Timeout waiting for root filesystem"); err != nil {
+				t.Fatal(err)
+			}
+		},
 	}))
 
 	t.Run("LUKS1.Clevis.Tpm2", boosterTest(Opts{

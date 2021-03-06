@@ -135,10 +135,28 @@ func udevListener() {
 				}
 			}()
 		} else if ev.Subsystem == "net" && ev.Action == "add" {
+			ifname := ev.Vars["INTERFACE"]
 			if config.Network == nil {
+				debug("network is disabled, skipping interface %s", ifname)
 				continue
 			}
-			ifname := ev.Vars["INTERFACE"]
+			if ifname == "lo" {
+				continue
+			}
+
+			if len(config.Network.Interfaces) > 0 {
+				i, err := net.InterfaceByName(ifname)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				if !macListContains(i.HardwareAddr, config.Network.Interfaces) {
+					debug("interface %s is not in 'active' list, skipping it", ifname)
+					continue
+				}
+			}
+
 			go func() {
 				// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
 				if err := initializeNetworkInterface(ifname); err != nil {

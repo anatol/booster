@@ -1,6 +1,10 @@
 package main
 
+import "net"
+
 type InitNetworkConfig struct {
+	Interfaces []net.HardwareAddr `yaml:",omitempty"` // list of active interfaces to use
+
 	Dhcp bool `yaml:",omitempty"`
 
 	Ip         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
