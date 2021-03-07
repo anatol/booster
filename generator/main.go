@@ -15,7 +15,7 @@ var (
 	initBinary         = flag.String("initBinary", "/usr/lib/booster/init", "Booster 'init' binary location")
 	compression        = flag.String("compression", "", `Output file compression ("zstd", "gzip", "none")`)
 	kernelVersion      = flag.String("kernelVersion", "", "Linux kernel version to generate initramfs for")
-	configFile         = flag.String("config", "", "Configuration file path")
+	configFile         = flag.String("config", "/etc/booster.yaml", "Configuration file path")
 	debugEnabled       = flag.Bool("debug", false, "Enable debug output")
 	universal          = flag.Bool("universal", false, "Add wide range of modules/tools to allow this image boot at different machines")
 	strip              = flag.Bool("strip", false, "Strip ELF binaries before adding it to the image")
@@ -63,18 +63,7 @@ func runGenerator() error {
 		defer pprof.StopCPUProfile()
 	}
 
-	file := *configFile
-	if file == "" {
-		_, err := os.Stat(defaultConfigPath)
-		if err == nil {
-			file = defaultConfigPath
-		} else if !os.IsNotExist(err) {
-			// It is OK if the default config is missing. In this case we consider if the default config is empty.
-			return err
-		}
-	}
-
-	conf, err := readGeneratorConfig(file)
+	conf, err := readGeneratorConfig(*configFile)
 	if err != nil {
 		return err
 	}

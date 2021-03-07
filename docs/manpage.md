@@ -57,6 +57,7 @@ Booster advantages:
 ## COMMAND-LINE FLAGS
   `booster` command accepts following flags:
 
+  * `-config` config file to use. Default value is `/etc/booster.yaml`.
   * `-universal` generate a universal image
   * `-kernelVersion` use modules for the given kernel version. If the flag is not specified then the current kernel is used (as reported by "uname -r").
   * `-output` output file, by default booster.img used

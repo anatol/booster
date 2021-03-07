@@ -33,10 +33,6 @@ type UserConfig struct {
 	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
 }
 
-const (
-	defaultConfigPath = "/etc/booster.yaml"
-)
-
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
 // (as if empty file is specified).
 // once the user config is parsed, flags values are applied on top of it.
