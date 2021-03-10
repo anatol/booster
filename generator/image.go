@@ -113,7 +113,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 	return err
 }
 
-func stripElf(in []byte, stripAll bool) ([]byte, error) {
+func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
 	t, err := os.CreateTemp("", "booster.strip")
 	if err != nil {
 		return nil, err
@@ -133,8 +133,8 @@ func stripElf(in []byte, stripAll bool) ([]byte, error) {
 		args = append(args, "--strip-unneeded")
 	}
 	args = append(args, t.Name())
-	if err := exec.Command("strip", args...).Run(); err != nil {
-		return nil, err
+	if out, err := exec.Command("strip", args...).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("%s: %v\n%s", name, err, string(out))
 	}
 
 	return os.ReadFile(t.Name())
@@ -167,10 +167,15 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 		} else {
 			defer ef.Close()
 
-			if img.stripBinaries {
+			doStrip := img.stripBinaries
+			if strings.HasPrefix(dest, firmwareDir) {
+				// some firmware files are actually ELF but we should not run strip on them
+				doStrip = false
+			}
+			if doStrip {
 				// do not use --strip-all for modules/shared libs as it fails to load
 				isBinary := ef.Type == elf.ET_EXEC
-				content, err = stripElf(content, isBinary)
+				content, err = stripElf(dest, content, isBinary)
 				if err != nil {
 					return err
 				}
