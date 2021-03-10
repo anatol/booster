@@ -1,0 +1,17 @@
+#!/bin/bash -e
+
+# find out all installed kernels
+kernels=($(ls -d /usr/lib/modules/*))
+
+for kernel in "${kernels[@]}"; do
+    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+        # if pkgbase does not belong to any package then skip this kernel
+        continue
+    fi
+    read -r pkgbase < "${kernel}/pkgbase"
+
+    booster -force -output /boot/booster-${pkgbase}.img -kernelVersion ${kernel##/usr/lib/modules/} &
+    install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+done
+
+wait
