@@ -51,7 +51,10 @@ const (
 	netStatic
 )
 
-const imageModulesDir = "/usr/lib/modules/"
+const (
+	imageModulesDir = "/usr/lib/modules/"
+	firmwareDir     = "/usr/lib/firmware/"
+)
 
 // This is default modules list checked by booster. It either specifies a name of the module
 // or whole directory that added recursively. Dependencies of these scanned modules are added as well.
@@ -133,6 +136,20 @@ func (img *Image) appendExtraFiles(binaries []string) error {
 		}
 
 		if err := img.AppendFile(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (img *Image) appendFirmwareFiles(modName string, fws []string) error {
+	for _, fw := range fws {
+		fwPath := firmwareDir + fw
+		if _, err := os.Stat(fwPath); os.IsNotExist(err) {
+			debug("module %s depends on firmware %s but the firmware file does not exist", modName, fw)
+			continue
+		}
+		if err := img.AppendFile(fwPath); err != nil {
 			return err
 		}
 	}

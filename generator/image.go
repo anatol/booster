@@ -144,7 +144,8 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 	img.m.Lock()
 	if img.contains[dest] {
 		img.m.Unlock()
-		return fmt.Errorf("Trying to add a file %s but it already been added to the image", dest)
+		warning("trying to add file %s to the image but it is already there", dest)
+		return nil
 	}
 	img.contains[dest] = true
 	img.m.Unlock()

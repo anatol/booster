@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"container/list"
+	"debug/elf"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -88,15 +91,13 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 				}
 			}
 		} else {
-			if k.builtinModules[m] {
-				// this module is builtin, no need to add it to image
-				continue
-			}
 			if filter && !k.hostModules[m] {
 				continue
 			}
 
-			if _, ok := k.nameToPathMapping.forward[m]; ok {
+			if k.builtinModules[m] {
+				k.requiredModules[m] = true
+			} else if _, ok := k.nameToPathMapping.forward[m]; ok {
 				debug("activate module %s", m)
 				k.requiredModules[m] = true
 			} else if name, ok := k.nameToPathMapping.reverse[m]; ok {
@@ -192,6 +193,29 @@ func readKernelAliases(dir string) ([]alias, error) {
 	return aliases, s.Err()
 }
 
+// readBuiltinModinfo reads builtin modules properties and returns a map of
+// module -> [values]
+// Note that values is an array as a module can contain multiple properties with the same name.
+func readBuiltinModinfo(dir string, propName string) (map[string][]string, error) {
+	data, err := os.ReadFile(path.Join(dir, "modules.builtin.modinfo"))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string)
+
+	re := regexp.MustCompile(`(\w*?).` + propName + `=([^\0]*)`)
+	matches := re.FindAllSubmatch(data, -1)
+
+	for _, m := range matches {
+		name := string(m[1])
+		fw := string(m[2])
+		result[name] = append(result[name], fw)
+	}
+
+	return result, nil
+}
+
 func (k *Kmod) addModulesToImage(img *Image) error {
 	var wg sync.WaitGroup
 	modNum := len(k.requiredModules)
@@ -241,11 +265,39 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			errCh <- err
 			return
 		}
+
+		ef, err := elf.NewFile(bytes.NewReader(content))
+		if err != nil {
+			errCh <- err
+			return
+		}
+
+		fws, err := readModuleFirmwareRequirements(ef)
+		if err != nil {
+			errCh <- err
+			return
+		}
+
+		if err := img.appendFirmwareFiles(modName, fws); err != nil {
+			errCh <- err
+			return
+		}
 	}
 
-	wg.Add(modNum)
+	builtinFw, err := readBuiltinModinfo(k.hostModulesDir, "firmware")
+	if err != nil {
+		return err
+	}
+
 	for modName := range k.requiredModules {
-		go unpackModule(modName)
+		if k.builtinModules[modName] {
+			if err := img.appendFirmwareFiles(modName, builtinFw[modName]); err != nil {
+				return err
+			}
+		} else {
+			wg.Add(1)
+			go unpackModule(modName)
+		}
 	}
 	wg.Wait()
 
@@ -386,19 +438,14 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 
 		parts = parts[2:]
 
-		deps := make([]string, 0)
+		var deps []string
 		for _, d := range parts {
 			if d != "pre:" && d != "post:" {
-				d = k.resolveModname(d)
-				if d == "" {
-					// some softdeps have really weird modnames e.g. kpc_i2c or kpc_nwl_dma, just ignore it
-					continue
+				if n := k.resolveModname(d); n != "" {
+					deps = append(deps, n)
+				} else {
+					debug("softdep: unable to resolve module name %s", d)
 				}
-				if _, ok := k.builtinModules[d]; ok {
-					// skip builtin dependencies
-					continue
-				}
-				deps = append(deps, d)
 			}
 		}
 		if len(deps) > 0 {
@@ -565,15 +612,29 @@ func readHostModules(modulesFile string) (map[string]bool, error) {
 }
 
 func (k *Kmod) addExtraDep(mod string, deps ...string) {
-	for _, d := range deps {
-		// skip builtin deps
-		if _, ok := k.builtinModules[d]; ok {
-			continue
-		}
-		k.extraDep[mod] = append(k.extraDep[mod], d)
-	}
+	k.extraDep[mod] = append(k.extraDep[mod], deps...)
 }
 
 func (k *Kmod) forceLoad(mods ...string) {
 	k.loadModules = append(k.loadModules, mods...)
+}
+
+// readModuleFirmwareRequirements parses given module file .modinfo section
+// and collects all firmware files dependencies for it.
+func readModuleFirmwareRequirements(ef *elf.File) ([]string, error) {
+	var result []string
+	if sec := ef.Section(".modinfo"); sec != nil {
+		data, err := sec.Data()
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range strings.Split(string(data), "\x00") {
+			const prefix = "firmware="
+			if strings.HasPrefix(s, prefix) {
+				fw := s[len(prefix):]
+				result = append(result, fw)
+			}
+		}
+	}
+	return result, nil
 }

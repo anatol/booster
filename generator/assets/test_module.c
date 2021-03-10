@@ -7,6 +7,10 @@ MODULE_AUTHOR("Anatol Pomozov");
 MODULE_DESCRIPTION("A test module for booster.");
 MODULE_VERSION("0.01");
 
+MODULE_FIRMWARE("whiteheat.fw");
+MODULE_FIRMWARE("usbdux_firmware.bin");
+MODULE_FIRMWARE("rtw88/rtw8723d_fw.bin");
+
 static int __init booster_init(void) {
   printk(KERN_INFO "Hello, Booster!\n");
   return 0;

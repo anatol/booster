@@ -117,3 +117,19 @@ func TestReadDeviceAliases(t *testing.T) {
 		t.Fatalf("too few device aliases detected: %d", len(a))
 	}
 }
+
+func TestReadBuiltinModinfo(t *testing.T) {
+	t.Parallel()
+
+	ver, err := readKernelVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fws, err := readBuiltinModinfo("/usr/lib/modules/"+ver, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = fws
+}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,8 @@ type options struct {
 	hostModules                  []string // modules as found under /proc/modules
 	hostAliases                  []string // list of all aliases for the host devices
 	kernelAliases                []alias  // aliases as found under kernel/modules.alias (pattern + corresponding module)
+	softDeps                     []string
+	builtin                      []string
 	extraFiles                   []string
 	expectError                  string
 	stripBinaries                bool
@@ -61,6 +64,22 @@ func generateAliasesFile(aliases []alias) []byte {
 	}
 
 	return buff.Bytes()
+}
+
+func generateSoftdepFile(deps []string) []byte {
+	var buff bytes.Buffer
+
+	for _, d := range deps {
+		buff.WriteString("softdep ")
+		buff.WriteString(d)
+		buff.WriteString("\n")
+	}
+
+	return buff.Bytes()
+}
+
+func generateBuiltinFile(mods []string) []byte {
+	return []byte(strings.Join(mods, "\n"))
 }
 
 func generateProcModulesFile(modules []string) []byte {
@@ -104,16 +123,19 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		}
 	}
 
-	if err := os.WriteFile(modulesDir+"/modules.builtin", []byte(""), 0644); err != nil {
+	if err := os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(opts.builtin), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(opts.kernelAliases), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(modulesDir+"/modules.dep", []byte(""), 0644); err != nil {
+	if err := os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(modulesDir+"/modules.softdep", []byte(""), 0644); err != nil {
+	if err := os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(opts.softDeps), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(wd+"/proc_modules", generateProcModulesFile(opts.hostModules), 0644); err != nil {
@@ -291,6 +313,24 @@ cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 	if string(aliasesFile) != expectedAliases {
 		t.Fatalf("Generated booster.alias '%s' does not match the expected one '%s'", string(aliasesFile), expectedAliases)
 	}
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin")
+}
+
+func testSoftDependencies(t *testing.T) {
+	opts := options{
+		prepareModulesAt: []string{"kernel/fs/foo.ko"},
+		hostModules:      []string{"foo"},
+		softDeps:         []string{"foo abuiltinfoo"},
+		builtin:          []string{"kernel/arch/x86/kernel/abuiltinfoo.ko"},
+		unpackImage:      true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	// all except kernel/testfoo.ko need to be in the image
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "booster.alias")
 }
 
 func testHostMode(t *testing.T) {
@@ -329,6 +369,10 @@ cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 	if string(aliasesFile) != expectedAliases {
 		t.Fatalf("Generated booster.alias '%s' does not match the expected one '%s'", string(aliasesFile), expectedAliases)
 	}
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin")
 }
 
 func testExtraFiles(t *testing.T) {
@@ -355,7 +399,6 @@ func testExtraFiles(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/true")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/false")
 	checkDirListing(t, opts.workDir+"/image.unpacked/"+d, files...)
-
 }
 
 func testInvalidExtraFiles(t *testing.T) {
@@ -374,6 +417,10 @@ func testCompressedModules(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "booster.alias")
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin")
 }
 
 func testStripBinaries(t *testing.T) {
@@ -381,8 +428,13 @@ func testStripBinaries(t *testing.T) {
 		universal:        true,
 		stripBinaries:    true,
 		prepareModulesAt: []string{"kernel/fs/foo.ko", "kernel/testfoo.ko", "kernel/crypto/cbc.ko", "kernel/subdir/virtio_scsi.ko"},
+		unpackImage:      true,
 	}
 	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin")
 }
 
 func testEnableVirtualConsole(t *testing.T) {
@@ -412,6 +464,7 @@ func TestGenerator(t *testing.T) {
 	t.Run("GzipImageCompression", testGzipImageCompression)
 	t.Run("UniversalMode", testUniversalMode)
 	t.Run("HostMode", testHostMode)
+	t.Run("SoftDepenencies", testSoftDependencies)
 	t.Run("ExtraFiles", testExtraFiles)
 	t.Run("InvalidExtraFiles", testInvalidExtraFiles)
 	t.Run("CompressedModules", testCompressedModules)
