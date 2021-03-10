@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xi2/xz"
@@ -34,6 +35,8 @@ func TestModuleNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ch := make(chan error)
+	wg := sync.WaitGroup{}
 	for name, fn := range kmod.nameToPathMapping.forward {
 		if fn[0] == '/' {
 			t.Fatalf("module filename %s should not start with slash", fn)
@@ -42,45 +45,58 @@ func TestModuleNames(t *testing.T) {
 			t.Fatalf("filepath %s is not clean", fn)
 		}
 
-		extractedName, err := modNameFromFile(path.Join(kmod.hostModulesDir, fn))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if name != extractedName {
-			t.Fatalf("filename %s: calculated modname is %s, extracted from the binary - %s", fn, name, extractedName)
-		}
+		wg.Add(1)
+		go checkModuleName(name, path.Join(kmod.hostModulesDir, fn), &wg, ch)
 	}
+
+	wg.Wait()
 }
 
-func modNameFromFile(filename string) (string, error) {
+func checkModuleName(modname, filename string, wg *sync.WaitGroup, ch chan error) {
+	defer wg.Done()
+
+	var r io.ReaderAt
+
 	if strings.HasSuffix(filename, ".ko") {
+		var err error
 		f, err := os.Open(filename)
 		if err != nil {
-			return "", err
+			ch <- err
+			return
 		}
+		r = f
 		defer f.Close()
-
-		return moduleName(f)
 	} else if strings.HasSuffix(filename, ".ko.xz") {
 		f, err := os.Open(filename)
 		if err != nil {
-			return "", err
+			ch <- err
+			return
 		}
 		defer f.Close()
 
-		r, err := xz.NewReader(f, 0)
+		x, err := xz.NewReader(f, 0)
 		if err != nil {
-			return "", err
+			ch <- err
+			return
 		}
-
-		return moduleName(NewBufferedReaderAt(r))
+		r = NewBufferedReaderAt(x)
+	} else {
+		ch <- fmt.Errorf("unknown kernel module extension: %s", filename)
+		return
 	}
 
-	return "", fmt.Errorf("unknown kernel module extension: %s", filename)
+	extractedName, err := readModnameFromELF(r)
+	if err != nil {
+		ch <- err
+		return
+	}
 
+	if modname != extractedName {
+		ch <- fmt.Errorf("filename %s: calculated modname is %s, extracted from the binary - %s", filename, extractedName, extractedName)
+	}
 }
 
-func moduleName(r io.ReaderAt) (string, error) {
+func readModnameFromELF(r io.ReaderAt) (string, error) {
 	// read the content of '.gnu.linkonce.this_module' section and get
 	// data at offset 24 (64bit arch), this is going to be module_name
 	const moduleNameOffset64 = 24
