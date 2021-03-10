@@ -11,6 +11,7 @@ import (
 
 type blkInfo struct {
 	format string // gpt, dos, ext4, btrfs, ...
+	isFs   bool   // specifies if the format a mountable filesystem
 	uuid   string
 	label  string
 }
@@ -62,7 +63,7 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 		guid[7], guid[6],
 		guid[8], guid[9],
 		guid[10], guid[11], guid[12], guid[13], guid[14], guid[15])
-	return &blkInfo{"gpt", uuid, ""}
+	return &blkInfo{"gpt", false, uuid, ""}
 }
 
 func probeMbr(r io.ReaderAt) *blkInfo {
@@ -93,7 +94,7 @@ func probeMbr(r io.ReaderAt) *blkInfo {
 		return nil
 	}
 	id := binary.LittleEndian.Uint32(idBytes)
-	return &blkInfo{"mbr", fmt.Sprintf("%08x", id), ""}
+	return &blkInfo{"mbr", false, fmt.Sprintf("%08x", id), ""}
 }
 
 func probeLuks(r io.ReaderAt) *blkInfo {
@@ -132,7 +133,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 		label = fixedArrayToString(buff)
 	}
 
-	return &blkInfo{"luks", fixedArrayToString(uuid), label}
+	return &blkInfo{"luks", false, fixedArrayToString(uuid), label}
 }
 
 func probeExt4(r io.ReaderAt) *blkInfo {
@@ -167,7 +168,7 @@ func probeExt4(r io.ReaderAt) *blkInfo {
 		id[6], id[7],
 		id[8], id[9],
 		id[10], id[11], id[12], id[13], id[14], id[15])
-	return &blkInfo{"ext4", uuid, fixedArrayToString(label)}
+	return &blkInfo{"ext4", true, uuid, fixedArrayToString(label)}
 }
 
 func probeBtrfs(r io.ReaderAt) *blkInfo {
@@ -202,7 +203,7 @@ func probeBtrfs(r io.ReaderAt) *blkInfo {
 		id[6], id[7],
 		id[8], id[9],
 		id[10], id[11], id[12], id[13], id[14], id[15])
-	return &blkInfo{"btrfs", uuid, fixedArrayToString(label)}
+	return &blkInfo{"btrfs", true, uuid, fixedArrayToString(label)}
 }
 
 func probeXfs(r io.ReaderAt) *blkInfo {
@@ -237,7 +238,7 @@ func probeXfs(r io.ReaderAt) *blkInfo {
 		id[6], id[7],
 		id[8], id[9],
 		id[10], id[11], id[12], id[13], id[14], id[15])
-	return &blkInfo{"xfs", uuid, fixedArrayToString(label)}
+	return &blkInfo{"xfs", true, uuid, fixedArrayToString(label)}
 }
 
 func probeF2fs(r io.ReaderAt) *blkInfo {
@@ -285,5 +286,5 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 		id[6], id[7],
 		id[8], id[9],
 		id[10], id[11], id[12], id[13], id[14], id[15])
-	return &blkInfo{"f2fs", uuid, label}
+	return &blkInfo{"f2fs", true, uuid, label}
 }

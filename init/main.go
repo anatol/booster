@@ -176,6 +176,11 @@ func mountRootFs(dev string) error {
 
 	fstype := cmdline["rootfstype"]
 	if fstype == "" {
+		// use detected filetype, but first let's check if it is a real filesystem
+		if !info.isFs {
+			return fmt.Errorf("%s: device you are trying to mount has type '%s' that does not look like a mountable filesystem", dev, info.format)
+		}
+
 		fstype = info.format
 	}
 	debug("mounting %s (fstype=%s) to %s", dev, fstype, newRoot)
