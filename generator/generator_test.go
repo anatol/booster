@@ -402,6 +402,8 @@ func testEnableVirtualConsole(t *testing.T) {
 }
 
 func TestGenerator(t *testing.T) {
+	*debugEnabled = testing.Verbose()
+
 	prepareAssets(t)
 
 	t.Run("Simple", testSimple)

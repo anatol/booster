@@ -83,7 +83,7 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 					continue
 				}
 				if strings.HasPrefix(modPath, pattern) {
-					debug("activate module %s\n", mod)
+					debug("activate module %s", mod)
 					k.requiredModules[mod] = true
 				}
 			}
@@ -97,14 +97,14 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 			}
 
 			if _, ok := k.nameToPathMapping.forward[m]; ok {
-				debug("activate module %s\n", m)
+				debug("activate module %s", m)
 				k.requiredModules[m] = true
 			} else if name, ok := k.nameToPathMapping.reverse[m]; ok {
 				// m is a filename that contains the module
-				debug("activate module %s\n", name)
+				debug("activate module %s", name)
 				k.requiredModules[name] = true
 			} else {
-				debug("requested module %s is missing\n", name)
+				debug("requested module %s is missing", m)
 				if failIfMissing {
 					return fmt.Errorf("module %s does not exist", m)
 				}
@@ -505,7 +505,7 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 			if len(matched) > 0 {
 				newFilteredAliases = append(newFilteredAliases, matched...)
 			} else {
-				debug("no matches found for a device alias '%s'\n", a)
+				debug("no matches found for a device alias '%s'", a)
 			}
 		}
 		filteredAliases = newFilteredAliases

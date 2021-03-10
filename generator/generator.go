@@ -205,7 +205,7 @@ func (img *Image) appendModules(conf *generatorConfig) (*Kmod, error) {
 
 	for m := range kmod.hostModules {
 		if !kmod.requiredModules[m] {
-			debug("ignoring loaded module '%s'\n", m)
+			debug("ignoring loaded module '%s'", m)
 		}
 	}
 

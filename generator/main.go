@@ -25,12 +25,12 @@ var (
 
 func debug(format string, v ...interface{}) {
 	if *debugEnabled {
-		fmt.Printf(format, v...)
+		fmt.Printf(format+"\n", v...)
 	}
 }
 
 func warning(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
+	fmt.Printf(format+"\n", v...)
 }
 
 func saveProfile(profile, path string) error {
