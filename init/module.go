@@ -74,10 +74,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			loadModuleUnlocked(&depsWg, deps...)
 		}
 
-		// pay attention that 'module' is a loop variable and cannot be passed to goroutine
-		// https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
-		mod := module
-		go func() {
+		go func(mod string) {
 			depsWg.Wait()
 			debug("loading module %s", mod)
 			if err := finitModule(mod); err != nil {
@@ -94,7 +91,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			}
 			delete(loadingModules, mod)
 			loadedModules[mod] = true
-		}()
+		}(module)
 	}
 }
 
