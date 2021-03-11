@@ -113,6 +113,9 @@ func devAdd(syspath, devname string) error {
 
 	devpath := path.Join("/dev", devname)
 	if devpath == cmdroot {
+		if err := resume(devpath); err != nil {
+			return err
+		}
 		return mountRootFs(devpath)
 	}
 
@@ -137,6 +140,10 @@ func devAdd(syspath, devname string) error {
 			return err
 		}
 
+		if err := resume(devpath); err != nil {
+			return err
+		}
+
 		if dmPath == cmdroot {
 			return mountRootFs(dmPath)
 		}
@@ -147,10 +154,11 @@ func devAdd(syspath, devname string) error {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
-	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
-		return mountRootFs(devpath)
+	if err := resume(devpath); err != nil {
+		return err
 	}
-	if strings.HasPrefix(cmdroot, "LABEL=") && info.label == strings.TrimPrefix(cmdroot, "LABEL=") {
+
+	if blkInfoMatchesArg(info, cmdroot) {
 		return mountRootFs(devpath)
 	}
 
@@ -717,6 +725,57 @@ func checkIfInitrd() error {
 
 	if _, err := os.Stat("/etc/initrd-release"); os.IsNotExist(err) {
 		return fmt.Errorf("initrd-release cannot be found")
+	}
+
+	return nil
+}
+
+func blkInfoMatchesArg(info *blkInfo, arg string) bool {
+	if strings.HasPrefix(arg, "UUID=") && info.uuid == strings.TrimPrefix(arg, "UUID=") {
+		return true
+	}
+	if strings.HasPrefix(arg, "LABEL=") && info.label == strings.TrimPrefix(arg, "LABEL=") {
+		return true
+	}
+
+	return false
+}
+
+func resume(devpath string) error {
+	resume, ok := cmdline["resume"]
+	if !ok {
+		return nil
+	}
+
+	var resumeDevice string
+	if resume == devpath {
+		resumeDevice = devpath
+		goto resume
+	}
+
+	{
+		info, err := readBlkInfo(devpath)
+		if err != nil {
+			return fmt.Errorf("%s: %v", devpath, err)
+		}
+
+		if blkInfoMatchesArg(info, devpath) {
+			resumeDevice = devpath
+			goto resume
+		}
+	}
+
+	return nil
+resume:
+	major, minor, err := deviceNo(resumeDevice)
+	if err != nil {
+		return err
+	}
+
+	rd := fmt.Sprintf("%d:%d", major, minor)
+	debug("resume matched: %s=%s, writing %s", resume, resumeDevice, rd)
+	if err := os.WriteFile("/sys/power/resume", []byte(rd), 0644); err != nil {
+		return err
 	}
 
 	return nil
