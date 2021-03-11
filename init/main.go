@@ -183,7 +183,6 @@ func mountRootFs(dev string) error {
 
 		fstype = info.format
 	}
-	debug("mounting %s (fstype=%s) to %s", dev, fstype, newRoot)
 
 	wg := loadModules(fstype)
 	wg.Wait()
