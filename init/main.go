@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ var (
 	cmdline      = make(map[string]string)
 	debugEnabled bool
 	rootMounted  sync.WaitGroup // waits until the root partition is mounted
+	uuidRegex    = regexp.MustCompile("UUID=\"?([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\"?$")
 )
 
 func getKernelVersion() (string, error) {
@@ -121,7 +123,7 @@ func devAdd(syspath, devname string) error {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
-	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
+	if uuid := parseUUIDFromCmdRoot(cmdroot); info.uuid == uuid {
 		return mountRootFs(devpath)
 	}
 	if strings.HasPrefix(cmdroot, "LABEL=") && info.label == strings.TrimPrefix(cmdroot, "LABEL=") {
@@ -142,6 +144,13 @@ func devAdd(syspath, devname string) error {
 	}
 
 	return nil
+}
+
+func parseUUIDFromCmdRoot(cmdroot string) string {
+	if matches := uuidRegex.FindStringSubmatch(cmdroot); len(matches) == 2 {
+		return matches[1]
+	}
+	return ""
 }
 
 func fsck(dev string) error {
