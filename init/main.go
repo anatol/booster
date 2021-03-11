@@ -287,7 +287,7 @@ func moveSlashRunMountpoint() error {
 
 		// unmount /run so its directory can be removed and reclaimed
 		if err := syscall.Unmount("/run", 0); err != nil {
-			return err
+			return fmt.Errorf("unmount(/run): %v", err)
 		}
 		return nil
 	}
@@ -336,7 +336,7 @@ func deleteContent(path string, rootDev uint64) error {
 		// root directory cannot be removed as it is busy (initramfs is mounted here).
 		// "/" and newRoot are going to be the only leftovers from initramfs stage.
 		if err := os.Remove(path); err != nil {
-			return err
+			return fmt.Errorf("remove(%s): %v", path, err)
 		}
 	}
 
@@ -418,7 +418,7 @@ func switchRoot() error {
 	// note that /run has been unmounted earlier
 	for _, m := range []string{"/dev", "/proc", "/sys"} {
 		if err := syscall.Unmount(m, 0); err != nil {
-			return err
+			return fmt.Errorf("unmount(%s): %v", m, err)
 		}
 	}
 
@@ -426,7 +426,7 @@ func switchRoot() error {
 		return fmt.Errorf("chdir: %v", err)
 	}
 	if err := deleteRamfs(); err != nil {
-		return err
+		return fmt.Errorf("wiping ramfs: %v", err)
 	}
 	if err := syscall.Mount(".", "/", "", syscall.MS_MOVE, ""); err != nil {
 		return fmt.Errorf("mount dir to root: %v", err)
