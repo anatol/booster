@@ -417,7 +417,8 @@ func switchRoot() error {
 
 	// note that /run has been unmounted earlier
 	for _, m := range []string{"/dev", "/proc", "/sys"} {
-		if err := syscall.Unmount(m, 0); err != nil {
+		// some drivers (e.g. GPU) might use these filesystems, unmount it lazily
+		if err := syscall.Unmount(m, syscall.MNT_DETACH); err != nil {
 			return fmt.Errorf("unmount(%s): %v", m, err)
 		}
 	}
