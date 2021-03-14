@@ -78,7 +78,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			depsWg.Wait()
 			debug("loading module %s", mod)
 			if err := finitModule(mod); err != nil {
-				fmt.Println(err)
+				severe("%v", err)
 				return
 			}
 

@@ -24,10 +24,16 @@ const (
 	newInitBin = "/sbin/init"
 )
 
+const (
+	levelSevere = iota
+	levelWarning
+	levelDebug
+)
+
 var (
-	cmdline      = make(map[string]string)
-	debugEnabled bool
-	rootMounted  sync.WaitGroup // waits until the root partition is mounted
+	cmdline        = make(map[string]string)
+	verbosityLevel = levelWarning // by default show warnings and errors
+	rootMounted    sync.WaitGroup // waits until the root partition is mounted
 )
 
 func getKernelVersion() (string, error) {
@@ -57,10 +63,30 @@ func parseCmdline() error {
 	}
 
 	if _, ok := cmdline["booster.debug"]; ok {
-		debugEnabled = true
+		verbosityLevel = levelDebug
+	} else if _, ok := cmdline["quiet"]; ok {
+		verbosityLevel = levelSevere
 	}
 
 	return nil
+}
+
+func debug(format string, v ...interface{}) {
+	if verbosityLevel >= levelDebug {
+		fmt.Printf(format+"\n", v...)
+	}
+}
+
+func warning(format string, v ...interface{}) {
+	if verbosityLevel >= levelWarning {
+		fmt.Printf(format+"\n", v...)
+	}
+}
+
+func severe(format string, v ...interface{}) {
+	if verbosityLevel >= levelSevere {
+		fmt.Printf(format+"\n", v...)
+	}
 }
 
 var (
@@ -147,7 +173,7 @@ func devAdd(syspath, devname string) error {
 func fsck(dev string) error {
 	if _, err := os.Stat("/usr/bin/fsck"); !os.IsNotExist(err) {
 		cmd := exec.Command("/usr/bin/fsck", "-y", dev)
-		if debugEnabled {
+		if verbosityLevel >= levelDebug {
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
 		}
@@ -283,7 +309,7 @@ func moveSlashRunMountpoint() error {
 	_, err := os.Stat(newRoot + "/run")
 	if os.IsNotExist(err) {
 		// let's print a warning and hope that the new root works without initrd udev state
-		fmt.Println("/run does not exist at the root filesystem")
+		warning("/run does not exist at the root filesystem")
 
 		// unmount /run so its directory can be removed and reclaimed
 		if err := syscall.Unmount("/run", 0); err != nil {
@@ -486,9 +512,9 @@ func scanSysBlock() error {
 	for _, d := range devs {
 		target := filepath.Join("/sys/block/", d.Name())
 		if err := devAdd(target, d.Name()); err != nil {
-			// even if it fails to find UUID here (e.g. in case of MBR) we still want to check
-			// its partitions
-			fmt.Printf("devAdd: %v\n", err)
+			// even if it fails to find UUID here (e.g. in case of unsupported partition table)
+			// we still want to check its partitions
+			warning("devAdd: %v\n", err)
 		}
 
 		// Probe all partitions of this block device, too:
@@ -503,7 +529,7 @@ func scanSysBlock() error {
 			}
 			devpath := filepath.Join(target, p.Name())
 			if err := devAdd(devpath, p.Name()); err != nil {
-				fmt.Printf("devAdd: %v\n", err)
+				warning("devAdd: %v\n", err)
 			}
 		}
 	}
@@ -651,12 +677,6 @@ func mount(source, target, fstype string, flags uintptr, options string) error {
 	return nil
 }
 
-func debug(format string, v ...interface{}) {
-	if debugEnabled {
-		fmt.Printf(format+"\n", v...)
-	}
-}
-
 // readClock returns value of the clock in usec units
 func readClock(clockId int32) (uint64, error) {
 	var t unix.Timespec
@@ -673,18 +693,18 @@ func readStartTime() {
 	var err error
 	startRealtime, err = readClock(unix.CLOCK_REALTIME)
 	if err != nil {
-		fmt.Printf("read realtime clock: %v\n", err)
+		severe("read realtime clock: %v\n", err)
 	}
 	startMonotonic, err = readClock(unix.CLOCK_MONOTONIC)
 	if err != nil {
-		fmt.Printf("read monotonic clock: %v\n", err)
+		severe("read monotonic clock: %v\n", err)
 	}
 }
 
 func emergencyShell() {
 	if _, err := os.Stat("/usr/bin/busybox"); !os.IsNotExist(err) {
 		if err := syscall.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
-			fmt.Printf("Unable to start an emergency shell: %v\n", err)
+			severe("Unable to start an emergency shell: %v\n", err)
 		}
 	}
 }
@@ -714,7 +734,7 @@ func main() {
 	// function boost() should never return
 	if err := boost(); err != nil {
 		// if it does then it indicates some problem
-		fmt.Println(err)
+		severe("%v", err)
 	}
 	emergencyShell()
 }

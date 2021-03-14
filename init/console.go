@@ -26,7 +26,7 @@ func consoleSetFont(c *VirtualConsole) error {
 		args = append(args, "-u", c.FontUnicodeFile)
 	}
 	cmd := exec.Command("setfont", args...)
-	if debugEnabled {
+	if verbosityLevel >= levelDebug {
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 	}

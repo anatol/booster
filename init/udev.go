@@ -131,7 +131,7 @@ func udevListener() {
 			go func() {
 				// run luks log-in init in a separate goroutine as it is a slow operation
 				if err := devAdd(ev.Devpath, devname); err != nil {
-					fmt.Printf("devAdd: %v\n", err)
+					warning("devAdd: %v\n", err)
 				}
 			}()
 		} else if ev.Subsystem == "net" && ev.Action == "add" {
@@ -160,7 +160,7 @@ func udevListener() {
 			go func() {
 				// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
 				if err := initializeNetworkInterface(ifname); err != nil {
-					fmt.Printf("unable to initialize network interface %s: %v\n", ifname, err)
+					warning("unable to initialize network interface %s: %v\n", ifname, err)
 				}
 			}()
 		}

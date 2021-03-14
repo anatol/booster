@@ -76,7 +76,7 @@ func luksOpen(dev string, name string) error {
 				Jwe json.RawMessage
 			}
 			if err := json.Unmarshal(t.Payload, &node); err != nil {
-				fmt.Println(err)
+				warning("%v", err)
 				continue
 			}
 			payload = node.Jwe
@@ -89,7 +89,7 @@ func luksOpen(dev string, name string) error {
 			if err == nil {
 				break
 			} else {
-				fmt.Println(err)
+				warning("%v", err)
 				time.Sleep(time.Second)
 			}
 		}
