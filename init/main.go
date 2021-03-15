@@ -391,7 +391,7 @@ func deleteRamfs() error {
 	}
 	rootDev := s.Dev
 
-	newStat, err := os.Stat(".")
+	newStat, err := os.Stat(newRoot)
 	if err != nil {
 		return err
 	}
@@ -449,11 +449,11 @@ func switchRoot() error {
 		}
 	}
 
-	if err := os.Chdir(newRoot); err != nil {
-		return fmt.Errorf("chdir: %v", err)
-	}
 	if err := deleteRamfs(); err != nil {
 		return fmt.Errorf("wiping ramfs: %v", err)
+	}
+	if err := os.Chdir(newRoot); err != nil {
+		return fmt.Errorf("chdir: %v", err)
 	}
 	if err := syscall.Mount(".", "/", "", syscall.MS_MOVE, ""); err != nil {
 		return fmt.Errorf("mount dir to root: %v", err)
