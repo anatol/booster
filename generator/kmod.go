@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/pierrec/lz4"
 	"github.com/xi2/xz"
 )
 
@@ -247,6 +248,8 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			r, err = xz.NewReader(f, 0)
 		case ".zst":
 			r, err = zstd.NewReader(f)
+		case ".lz4":
+			r = lz4.NewReader(f)
 		default:
 			err = fmt.Errorf("unknown module compression format: %s", ext)
 		}

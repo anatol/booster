@@ -32,6 +32,13 @@ func prepareAssets(t *testing.T) {
 		if err := exec.Command("xz", "-z", "--keep", "assets/test_module.ko").Run(); err != nil {
 			t.Fatal(err)
 		}
+
+		// compress with lz4
+		cmd = exec.Command("lz4", "-z", "assets/test_module.ko")
+		cmd.Stdout = os.Stdout // lz4 does not work without stdout, it is weird
+		if err := cmd.Run(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -118,6 +125,8 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 			source += ".xz"
 		case ".zst":
 			source += ".zst"
+		case ".lz4":
+			source += ".lz4"
 		}
 		if err := exec.Command("cp", source, loc).Run(); err != nil {
 			t.Fatal(err)
@@ -418,12 +427,12 @@ func testInvalidExtraFiles(t *testing.T) {
 func testCompressedModules(t *testing.T) {
 	opts := options{
 		universal:        true,
-		prepareModulesAt: []string{"kernel/fs/plain.ko", "kernel/fs/zst.ko.zst", "kernel/fs/xz.ko.xz"},
+		prepareModulesAt: []string{"kernel/fs/plain.ko", "kernel/fs/zst.ko.zst", "kernel/fs/xz.ko.xz", "kernel/fs/lz4.ko.lz4"},
 		unpackImage:      true,
 	}
 	createTestInitRamfs(t, &opts)
 
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "booster.alias")
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "lz4.ko", "booster.alias")
 
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
