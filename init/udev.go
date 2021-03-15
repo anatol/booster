@@ -147,7 +147,7 @@ func udevListener() {
 			if len(config.Network.Interfaces) > 0 {
 				i, err := net.InterfaceByName(ifname)
 				if err != nil {
-					fmt.Println(err)
+					warning("%v", err)
 					continue
 				}
 
