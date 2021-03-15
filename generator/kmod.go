@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"container/list"
 	"debug/elf"
 	"fmt"
@@ -250,6 +251,8 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			r, err = zstd.NewReader(f)
 		case ".lz4":
 			r = lz4.NewReader(f)
+		case ".gz":
+			r, err = gzip.NewReader(f)
 		default:
 			err = fmt.Errorf("unknown module compression format: %s", ext)
 		}
