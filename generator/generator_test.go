@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -269,6 +270,28 @@ func checkFileExistence(t *testing.T, file string) {
 	}
 }
 
+func checkFilesEqual(t *testing.T, files ...string) {
+	if len(files) < 2 {
+		t.Fatal("expect at least 2 files as input")
+	}
+
+	b1, err := ioutil.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, f := range files[1:] {
+		b, err := ioutil.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(b1, b) {
+			t.Fatalf("files %s and %s are different", files[0], f)
+		}
+	}
+}
+
 func testSimple(t *testing.T) {
 	createTestInitRamfs(t, &options{})
 }
@@ -433,6 +456,13 @@ func testCompressedModules(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "lz4.ko", "booster.alias")
+	checkFilesEqual(t,
+		"assets/test_module.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/plain.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/zst.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/xz.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/lz4.ko",
+	)
 
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
