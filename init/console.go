@@ -112,14 +112,14 @@ func consoleLoadKeymap(c *VirtualConsole) error {
 	)
 
 	var mode int
-	var ctrl string
+	var ctrl string // refer 'man console_codes' for the control codes explanation
 	if isUtf {
 		mode = K_UNICODE
-		ctrl = "\033%%G"
+		ctrl = "\033%G"
 		// stty -F ${dev} iutf8
 	} else {
 		mode = K_XLATE
-		ctrl = "\033%%@"
+		ctrl = "\033%@"
 		// stty -F ${dev} -iutf8
 	}
 	// kbd_mode
