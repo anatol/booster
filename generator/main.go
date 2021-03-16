@@ -23,6 +23,8 @@ var (
 	pprofmem           = flag.String("pprof.mem", "", "Write memory profile to file")
 )
 
+type set map[string]bool
+
 func debug(format string, v ...interface{}) {
 	if *debugEnabled {
 		fmt.Printf(format+"\n", v...)

@@ -20,7 +20,6 @@ import (
 	"github.com/xi2/xz"
 )
 
-type set map[string]bool
 type alias struct {
 	pattern, module string
 }
@@ -136,7 +135,7 @@ func (k *Kmod) resolveDependencies() error {
 
 	k.dependencies = make(map[string][]string)
 
-	depsVisited := make(map[string]bool)
+	depsVisited := make(set)
 	for e := depsToVisit.Front(); e != nil; e = e.Next() {
 		name := e.Value.(string)
 		if depsVisited[name] {
@@ -355,14 +354,14 @@ func scanModulesDir(dir string) (*Bimap, error) {
 	return nameToPathMapping, err
 }
 
-func readModuleBuiltin(dir string) (map[string]bool, error) {
+func readModuleBuiltin(dir string) (set, error) {
 	f, err := os.Open(path.Join(dir, "modules.builtin"))
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	result := make(map[string]bool)
+	result := make(set)
 	for s := bufio.NewScanner(f); s.Scan(); {
 		filename := s.Text()
 		module := path.Base(filename)
@@ -598,8 +597,8 @@ func readDeviceAliases() (set, error) {
 	return aliases, err
 }
 
-func readHostModules(modulesFile string) (map[string]bool, error) {
-	modules := make(map[string]bool)
+func readHostModules(modulesFile string) (set, error) {
+	modules := make(set)
 
 	f, err := os.Open(modulesFile)
 	if err != nil {

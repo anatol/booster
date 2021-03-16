@@ -24,7 +24,7 @@ type Image struct {
 	file          *renameio.PendingFile
 	compressor    io.Closer
 	out           *cpio.Writer
-	contains      map[string]bool // whether image contains the file
+	contains      set // whether image contains the file
 	stripBinaries bool
 }
 
@@ -57,7 +57,7 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 		file:          file,
 		compressor:    compressor,
 		out:           out,
-		contains:      make(map[string]bool),
+		contains:      make(set),
 		stripBinaries: stripBinaries,
 	}, nil
 }
