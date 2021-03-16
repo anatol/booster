@@ -27,7 +27,7 @@ func TestModuleNames(t *testing.T) {
 		universal:         true,
 		kernelVersion:     ver,
 		modulesDir:        "/usr/lib/modules/" + ver,
-		hostModulesFile:   "/proc/modules",
+		readHostModules:   readHostModules,
 		readDeviceAliases: readDeviceAliases,
 	}
 	kmod, err := NewKmod(conf)

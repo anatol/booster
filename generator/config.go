@@ -126,7 +126,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.modulesDir = path.Join("/usr/lib/modules", conf.kernelVersion)
 	conf.debug = *debugEnabled
 	conf.readDeviceAliases = readDeviceAliases
-	conf.hostModulesFile = "/proc/modules"
+	conf.readHostModules = readHostModules
 	conf.stripBinaries = u.StripBinaries || *strip
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {

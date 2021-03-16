@@ -55,7 +55,7 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 	}
 
 	// find all modules currently used at the host
-	hostModules, err := readHostModules(conf.hostModulesFile)
+	hostModules, err := conf.readHostModules()
 	if err != nil {
 		return nil, err
 	}
@@ -597,23 +597,30 @@ func readDeviceAliases() (set, error) {
 	return aliases, err
 }
 
-func readHostModules(modulesFile string) (set, error) {
-	modules := make(set)
-
-	f, err := os.Open(modulesFile)
+func readHostModules() (set, error) {
+	// Unlike /proc/modules (or `lsmod`) /sys/module provides information about builtin modules as well.
+	// And we need to check the built-in modules and try to add it to the image. This is needed because
+	// with the next kernel this built-in module might be compiled as loadable *.ko module.
+	dir, err := os.Open("/sys/module")
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer dir.Close()
 
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		line := s.Text()
-		modname := strings.Split(line, " ")[0]
-		modules[modname] = true
+	ents, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
 	}
 
-	return modules, s.Err()
+	result := make(set, len(ents))
+	modules := make([]string, len(ents))
+	for i, e := range ents {
+		result[e.Name()] = true
+		modules[i] = e.Name()
+	}
+	debug("active host modules: %v", modules)
+
+	return result, nil
 }
 
 func (k *Kmod) addExtraDep(mod string, deps ...string) {

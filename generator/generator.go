@@ -29,7 +29,7 @@ type generatorConfig struct {
 	modulesDir              string
 	debug                   bool
 	readDeviceAliases       func() (set, error)
-	hostModulesFile         string // path to file with host modules, default is /proc/modules
+	readHostModules         func() (set, error)
 	stripBinaries           bool
 
 	// virtual console configs

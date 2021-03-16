@@ -160,12 +160,12 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		t.Fatal(err)
 	}
 
-	devAliases := func() (set, error) {
-		aliases := make(set)
-		for _, a := range opts.hostAliases {
-			aliases[a] = true
+	listAsFunc := func(in []string) func() (set, error) {
+		out := make(set)
+		for _, a := range in {
+			out[a] = true
 		}
-		return aliases, nil
+		return func() (set, error) { return out, nil }
 	}
 
 	compression := opts.compression
@@ -180,8 +180,8 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		kernelVersion:        "matestkernel",
 		modulesDir:           modulesDir,
 		output:               wd + "/booster.img",
-		readDeviceAliases:    devAliases,
-		hostModulesFile:      wd + "/proc_modules",
+		readDeviceAliases:    listAsFunc(opts.hostAliases),
+		readHostModules:      listAsFunc(opts.hostModules),
 		extraFiles:           opts.extraFiles,
 		stripBinaries:        opts.stripBinaries,
 		enableVirtualConsole: opts.enableVirtualConsole,
