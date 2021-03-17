@@ -17,6 +17,7 @@ import (
 	"github.com/google/renameio"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
+	"github.com/pierrec/lz4"
 )
 
 type Image struct {
@@ -50,6 +51,8 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 			return nil, err
 		}
 		compressor, err = conf.NewWriter(file)
+	case "lz4":
+		compressor = lz4.NewWriterLegacy(file)
 	case "none":
 		compressor = file
 	default:
