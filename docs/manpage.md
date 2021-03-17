@@ -41,7 +41,7 @@ Booster advantages:
 
   * `modules` is a comma-separates list of extra modules to add to the generated image. One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION). If the path ends with slash symbol (/) then it considered a directory and all modules from this directory needs to be added recursively. booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
 
-  * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "none". If no option specified then "zstd" is used as a default compression.
+  * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 
   * `mount_timeout` timeout for waiting for root filesystem to appear. The field format is a decimal number and then unit number. Valid units are "s", "m", "h". If no value specified then default timeout (3 minutes) is used. To disable the timeout completely specify "0s".
 

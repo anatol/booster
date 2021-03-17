@@ -85,6 +85,8 @@ func generateInitRamfs(opts Opts) (string, error) {
 		verifyCmd = exec.Command("gzip", "--test", output)
 	case "xz":
 		verifyCmd = exec.Command("xz", "--test", output)
+	case "lz4":
+		verifyCmd = exec.Command("lz4", "--test", output)
 	default:
 		return "", fmt.Errorf("Unknown compression: %s", opts.compression)
 	}
@@ -441,6 +443,11 @@ func TestBooster(t *testing.T) {
 	}))
 	t.Run("GzipImageCompression", boosterTest(Opts{
 		compression: "gzip",
+		disk:        "assets/ext4.img",
+		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
+	}))
+	t.Run("Lz4ImageCompression", boosterTest(Opts{
+		compression: "lz4",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	}))
