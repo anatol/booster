@@ -333,11 +333,8 @@ func scanModulesDir(dir string) (*Bimap, error) {
 
 		parts := strings.Split(info.Name(), ".")
 		// kernel module either has ext of *.ko or *.ko.$COMPRESSION
-		if len(parts) == 2 || len(parts) == 3 {
-			if parts[1] != "ko" {
-				return nil
-			}
-		} else {
+		if len(parts) < 2 || len(parts) > 3 || parts[1] != "ko" {
+			// it is not a kernel module
 			return nil
 		}
 
@@ -346,7 +343,17 @@ func scanModulesDir(dir string) (*Bimap, error) {
 		modName := normalizeModuleName(parts[0])
 		relativePath := filename[len(dir)+1:]
 
-		return nameToPathMapping.Add(modName, relativePath)
+		// In addition tracking modname->pathname add (possible) filename aliases.
+		// A filename alias is the filename without archive extension, i.e. for kernel/foo.ko.xz an alias would be
+		// kernel/foo.ko and a user can specify it in its config and thus avoiding future module compression change in
+		// the future.
+		var aliases []string
+		if len(parts) == 3 {
+			compressionSuffix := "." + parts[2]
+			aliases = []string{strings.TrimSuffix(relativePath, compressionSuffix)}
+		}
+
+		return nameToPathMapping.Add(modName, relativePath, aliases...)
 	})
 	if err != nil {
 		return nil, err

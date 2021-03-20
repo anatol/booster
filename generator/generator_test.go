@@ -52,6 +52,7 @@ type options struct {
 	workDir                      string
 	compression                  string
 	universal                    bool
+	extraModules                 []string // modules to add to the image
 	prepareModulesAt             []string // copy a test module to these locations
 	unpackImage                  bool
 	hostModules                  []string // modules as found under /proc/modules
@@ -183,6 +184,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		readDeviceAliases:    listAsFunc(opts.hostAliases),
 		readHostModules:      listAsFunc(opts.hostModules),
 		extraFiles:           opts.extraFiles,
+		modules:              opts.extraModules,
 		stripBinaries:        opts.stripBinaries,
 		enableVirtualConsole: opts.enableVirtualConsole,
 	}
@@ -489,6 +491,23 @@ func testCompressedModules(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin")
 }
 
+func testModuleNameAliases(t *testing.T) {
+	opts := options{
+		prepareModulesAt: []string{"kernel/fs/plain.ko", "kernel/fs/zst.ko.zst", "kernel/fs/xz.ko.xz", "kernel/fs/lz4.ko.lz4", "kernel/fs/gz.ko.gz"},
+		extraModules:     []string{"zst", "kernel/fs/xz.ko.xz", "kernel/fs/gz.ko"},
+		unpackImage:      true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "zst.ko", "xz.ko", "gz.ko", "booster.alias")
+	checkFilesEqual(t,
+		"assets/test_module.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/zst.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/xz.ko",
+		opts.workDir+"/image.unpacked/usr/lib/modules/gz.ko",
+	)
+}
+
 func testStripBinaries(t *testing.T) {
 	opts := options{
 		universal:        true,
@@ -536,6 +555,7 @@ func TestGenerator(t *testing.T) {
 	t.Run("ExtraFiles", testExtraFiles)
 	t.Run("InvalidExtraFiles", testInvalidExtraFiles)
 	t.Run("CompressedModules", testCompressedModules)
+	t.Run("ModuleNameAliases", testModuleNameAliases)
 	t.Run("StripBinaries", testStripBinaries)
 	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
 }

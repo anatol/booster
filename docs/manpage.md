@@ -23,7 +23,7 @@ Booster advantages:
       gateway: 10.0.2.255
       dns_servers: 192.168.1.1,8.8.8.8
     universal: false
-    modules: nvidia,kernel/sound/usb/
+    modules: hid_apple,kernel/sound/usb/,kernel/fs/btrfs/btrfs.ko,kernel/lib/crc4.ko.xz
     compression: zstd
     mount_timeout: 5m6s
     strip: true
@@ -39,7 +39,7 @@ Booster advantages:
 
   * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
-  * `modules` is a comma-separates list of extra modules to add to the generated image. One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION). If the path ends with slash symbol (/) then it considered a directory and all modules from this directory needs to be added recursively. booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
+  * `modules` is a comma-separates list of extra modules to add to the generated image. One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION). The compression algorithm suffix (e.g. ".xz", ".gz) can be omitted from the module filename. If the path ends with slash symbol (/) then it considered a directory and all modules from this directory needs to be added recursively. booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
 
   * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 
