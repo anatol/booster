@@ -136,7 +136,7 @@ func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
 	}
 	_ = t.Close()
 
-	args := []string{"-R", ".note.*", "-R", ".comment", "-R", ".go.buildinfo", "-R", ".gosymtab"}
+	args := []string{"-R", ".note.*", "-R", ".comment", "-R", ".go.buildinfo", "-R", ".gosymtab", "-R", "__bug_table", "-R", ".rela__bug_table"}
 	if stripAll {
 		args = append(args, "--strip-all")
 	} else {
