@@ -16,6 +16,8 @@ type blkInfo struct {
 	label  string
 }
 
+var errUnknownBlockType = fmt.Errorf("cannot detect block device type")
+
 // readBlkInfo block device information. Returns nil if the format was not detected.
 func readBlkInfo(path string) (*blkInfo, error) {
 	r, err := os.Open(path)
@@ -34,7 +36,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("cannot detect block device type")
+	return nil, errUnknownBlockType
 }
 
 func probeGpt(r io.ReaderAt) *blkInfo {

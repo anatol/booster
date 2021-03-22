@@ -133,3 +133,35 @@ func luksOpen(dev string, name string) error {
 		fmt.Println("   incorrect passphrase, please try again")
 	}
 }
+
+func handleLuksBlockDevice(info *blkInfo, devpath string) error {
+	var name string
+	var matches bool
+
+	if param, ok := cmdline["rd.luks.name"]; ok {
+		parts := strings.Split(param, "=")
+		if len(parts) != 2 {
+			return fmt.Errorf("Invalid rd.luks.name kernel parameter. Got: %v   Expected: rd.luks.name=<UUID>=<Name>", cmdline["rd.luks.name"])
+		}
+		if strings.EqualFold(parts[0], info.uuid) {
+			matches = true
+			name = parts[1]
+		}
+	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
+		if strings.EqualFold(uuid, info.uuid) {
+			matches = true
+			name = "luks-" + info.uuid
+		}
+	}
+	if matches {
+		go func() {
+			// opening a luks device is a is a slow operation, run it in a separate goroutine
+			if err := luksOpen(devpath, name); err != nil {
+				severe("%v", err)
+			}
+		}()
+	} else {
+		debug("luks device %s does not match rd.luks.xx param", devpath)
+	}
+	return nil
+}

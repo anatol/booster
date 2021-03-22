@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -9,22 +8,25 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 
+	"github.com/anatol/devmapper.go"
 	"github.com/s-urbaniak/uevent"
 	"golang.org/x/sys/unix"
 )
 
 // isValidDmEvent checks whether this udev event has correct flags.
 // This is similar to checks done by /usr/lib/udev/rules.d/10-dm.rules udev rules.
-func isValidDmEvent(dmCookie string) bool {
+func isValidDmEvent(ev *uevent.Uevent) bool {
+	dmCookie := ev.Vars["DM_COOKIE"]
 	if dmCookie == "" {
+		debug("udev event does not contain DM_COOKIE")
 		return false
 	}
 
 	cookie, err := strconv.ParseUint(dmCookie, 0, 32)
 	if err != nil {
-		return false // invalid cookie
+		debug("unable to parse DM_COOKIE value: %s", dmCookie)
+		return false
 	}
 
 	const (
@@ -44,6 +46,7 @@ func isValidDmEvent(dmCookie string) bool {
 	// generated as a result of "udevadm trigger" command or as a result
 	// of the "watch" udev rule).
 	if flags&DM_UDEV_PRIMARY_SOURCE_FLAG == 0 {
+		debug("device mapper event: not a primary source")
 		return false
 	}
 
@@ -52,41 +55,11 @@ func isValidDmEvent(dmCookie string) bool {
 	// DM_UDEV_DISABLE_DM_RULES_FLAG is set in case we need to disable
 	// basic device-mapper udev rules that create symlinks in /dev/<DM_DIR>
 	if flags&DM_UDEV_DISABLE_DM_RULES_FLAG != 0 {
+		debug("device mapper event: dm rules disabled")
 		return false
 	}
 
 	return true
-}
-
-// deviceNo returns major/minor device number for the given device file
-func deviceNo(filename string) (uint32, uint32, error) {
-	stat, err := os.Stat(filename)
-	if err != nil {
-		return 0, 0, err
-	}
-	sys, ok := stat.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0, fmt.Errorf("Cannot determine the device major and minor numbers for %s", filename)
-	}
-	return unix.Major(sys.Rdev), unix.Minor(sys.Rdev), nil
-
-}
-
-// writeUdevDb writes Udev state to the database.
-// It is an equivalent to what "db_persist" udev option does (see 'man 7 udev').
-func writeUdevDb(dmName string) error {
-	major, minor, err := deviceNo("/dev/mapper/" + dmName)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll("/run/udev/data/", 0755); err != nil {
-		return err
-	}
-
-	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
-	debug("writing udev state to %s", dbFile)
-	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
 }
 
 var udevReader io.ReadCloser
@@ -109,72 +82,120 @@ func udevListener() {
 		debug("udev event %+v", ev)
 
 		if modalias, ok := ev.Vars["MODALIAS"]; ok {
-			if err := loadModalias(modalias); err != nil {
-				debug("unable to load modalias %s: %v", modalias, err)
-				continue
-			}
-		} else if devname, ok := ev.Vars["DEVNAME"]; ok {
-			if ev.Subsystem != "block" {
-				continue
-			}
+			err = loadModalias(modalias)
+		} else if ev.Subsystem == "block" {
+			err = handleBlockDeviceUevent(ev)
+		} else if ev.Subsystem == "net" {
+			err = handleNetworkUevent(ev)
+		}
 
-			if strings.HasPrefix(devname, "dm-") {
-				cookie := ev.Vars["DM_COOKIE"]
-				if !isValidDmEvent(cookie) {
-					debug("skipping device mapper device %s because of DM_COOKIE: %s", devname, cookie)
-					continue
-				}
-			} else if ev.Action != "add" {
-				continue
-			}
-
-			go func() {
-				// run luks log-in init in a separate goroutine as it is a slow operation
-				if err := devAdd(ev.Devpath, devname); err != nil {
-					warning("devAdd: %v\n", err)
-				}
-			}()
-		} else if ev.Subsystem == "net" && ev.Action == "add" {
-			ifname := ev.Vars["INTERFACE"]
-			if config.Network == nil {
-				debug("network is disabled, skipping interface %s", ifname)
-				continue
-			}
-			if ifname == "lo" {
-				continue
-			}
-
-			if len(config.Network.Interfaces) > 0 {
-				i, err := net.InterfaceByName(ifname)
-				if err != nil {
-					warning("%v", err)
-					continue
-				}
-
-				if !macListContains(i.HardwareAddr, config.Network.Interfaces) {
-					debug("interface %s is not in 'active' list, skipping it", ifname)
-					continue
-				}
-			}
-
-			go func() {
-				// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
-				if err := initializeNetworkInterface(ifname); err != nil {
-					warning("unable to initialize network interface %s: %v\n", ifname, err)
-				}
-			}()
+		if err != nil {
+			warning("%v", err)
 		}
 	}
 }
 
-func writeResolvConf(servers []net.IP) error {
-	var resolvConf bytes.Buffer
-	for _, ip := range servers {
-		resolvConf.WriteString("nameserver ")
-		resolvConf.WriteString(ip.String())
-		resolvConf.WriteByte('\n')
+func handleNetworkUevent(ev *uevent.Uevent) error {
+	if ev.Action != "add" {
+		return nil
 	}
-	resolvConf.WriteString("search .\n")
 
-	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
+	ifname := ev.Vars["INTERFACE"]
+	if ifname == "lo" {
+		return nil
+	}
+
+	if config.Network == nil {
+		debug("network is disabled, skipping interface %s", ifname)
+		return nil
+	}
+
+	if len(config.Network.Interfaces) > 0 {
+		i, err := net.InterfaceByName(ifname)
+		if err != nil {
+			return err
+		}
+
+		if !macListContains(i.HardwareAddr, config.Network.Interfaces) {
+			debug("interface %s is not in 'active' list, skipping it", ifname)
+			return nil
+		}
+	}
+
+	go func() {
+		// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
+		if err := initializeNetworkInterface(ifname); err != nil {
+			warning("unable to initialize network interface %s: %v\n", ifname, err)
+		}
+	}()
+
+	return nil
+}
+
+func handleBlockDeviceUevent(ev *uevent.Uevent) error {
+	devName := ev.Vars["DEVNAME"]
+
+	if strings.HasPrefix(devName, "dm-") {
+		dmPath, err := handleMapperDeviceUevent(ev)
+		if err == errIgnoredMapperEvent {
+			return nil //
+		} else if err != nil {
+			return err
+		}
+
+		devName = dmPath // devName gets replaced from "dm-X" to "mapper/somename"
+	} else if ev.Action != "add" {
+		return nil
+	}
+
+	return addBlockDevice(devName)
+}
+
+var errIgnoredMapperEvent = fmt.Errorf("ignored device mapper event")
+
+// handleMapperDeviceUevent handles device mapper related uevent
+// if udev event is valid then it return non-empty string that contains
+// new mapper device name (e.g. /dev/mapper/name)
+func handleMapperDeviceUevent(ev *uevent.Uevent) (string, error) {
+	if !isValidDmEvent(ev) {
+		return "", errIgnoredMapperEvent
+	}
+
+	devName := ev.Vars["DEVNAME"]
+
+	major, err := strconv.Atoi(ev.Vars["MAJOR"])
+	if err != nil {
+		return "", fmt.Errorf("udev['MAJOR']: %v", err)
+	}
+	minor, err := strconv.Atoi(ev.Vars["MINOR"])
+	if err != nil {
+		return "", fmt.Errorf("udev['MAJOR']: %v", err)
+	}
+	devNo := unix.Mkdev(uint32(major), uint32(minor))
+
+	info, err := devmapper.InfoByDevno(devNo)
+	if err != nil {
+		return "", fmt.Errorf("devmapper.Info(%s): %v", devName, err)
+	}
+
+	dmBlockDev := "mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
+
+	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
+	if err := os.Symlink("/dev/"+devName, "/dev/"+dmBlockDev); err != nil {
+		return "", err
+	}
+
+	return dmBlockDev, devMapperUpdateUdevDb(major, minor)
+}
+
+// devMapperUpdateUdevDb writes Udev state to the database.
+// It is an equivalent to what "db_persist" udev option does (see 'man 7 udev').
+func devMapperUpdateUdevDb(major, minor int) error {
+	if err := os.MkdirAll("/run/udev/data/", 0755); err != nil {
+		return err
+	}
+
+	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
+	debug("writing udev state to %s", dbFile)
+	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
 }

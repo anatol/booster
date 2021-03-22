@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/anatol/clevis.go v0.0.0-20210303074313-5911702bb1fb
+	github.com/anatol/devmapper.go v0.0.0-20210322024145-ba6a046aeb3d
 	github.com/anatol/luks.go v0.0.0-20210314231502-552c7e4aa186
 	github.com/insomniacslk/dhcp v0.0.0-20210315110227-c51060810aaa
 	github.com/lestrrat-go/jwx v1.1.5 // indirect

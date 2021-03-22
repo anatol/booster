@@ -25,6 +25,7 @@ const (
 )
 
 const (
+	// TOTHINK rename to debug/info/warning
 	levelSevere = iota
 	levelWarning
 	levelDebug
@@ -94,9 +95,9 @@ var (
 	addedDevicesMutex sync.Mutex
 )
 
-// devAdd is called upon receiving a uevent from the kernel with action “add”
+// addBlockDevice is called upon receiving a uevent from the kernel with action “add”
 // from subsystem “block”.
-func devAdd(syspath, devname string) error {
+func addBlockDevice(devname string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these node twice by tracking what has been added already
 	addedDevicesMutex.Lock()
@@ -107,67 +108,53 @@ func devAdd(syspath, devname string) error {
 	addedDevices[devname] = true
 	addedDevicesMutex.Unlock()
 
-	debug("found a new device with path=%v and name=%v", syspath, devname)
+	debug("found a new device %s", devname)
 
 	cmdroot := cmdline["root"]
 
 	devpath := path.Join("/dev", devname)
-	if devpath == cmdroot {
-		return mountRootFs(devpath)
-	}
-
-	if strings.HasPrefix(devname, "dm-") {
-		// TODO: check if we can use API similar to what
-		// 'sudo dmsetup info -c --noheadings -o name dm-0' does
-		dmNameFile := filepath.Join("/sys", syspath, "dm", "name")
-		content, err := os.ReadFile(dmNameFile)
-		if err != nil {
-			return err
-		}
-		mapperName := string(bytes.TrimSpace(content))
-		dmPath := "/dev/mapper/" + mapperName
-
-		// setup symlink /dev/mapper/NAME -> /dev/dm-NN
-		if err := os.Symlink(devpath, dmPath); err != nil {
-			return err
-		}
-		devpath = dmPath // later we use /dev/mapper/NAME as a mount point
-
-		if err := writeUdevDb(mapperName); err != nil {
-			return err
-		}
-
-		if dmPath == cmdroot {
-			return mountRootFs(dmPath)
-		}
-	}
-
 	info, err := readBlkInfo(devpath)
-	if err != nil {
+	if err == errUnknownBlockType {
+		// provide a fake blkid with fs type specified by user
+		info = &blkInfo{
+			format: cmdline["rootfstype"],
+			isFs:   true,
+		}
+		debug("unable to detect fs type for %s, using one specified by rootfstype boot param %s", devpath)
+	} else if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
-	if strings.HasPrefix(cmdroot, "UUID=") && info.uuid == strings.TrimPrefix(cmdroot, "UUID=") {
-		return mountRootFs(devpath)
-	}
-	if strings.HasPrefix(cmdroot, "LABEL=") && info.label == strings.TrimPrefix(cmdroot, "LABEL=") {
-		return mountRootFs(devpath)
+	matchesRoot := devpath == cmdroot || blkIdMatches(cmdroot, info)
+
+	if matchesRoot {
+		if !info.isFs {
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", cmdroot, info.format)
+		}
+		if info.format == "" {
+			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", devpath)
+		}
+		return mountRootFs(devpath, info.format)
 	}
 
-	if cmdline["rd.luks.name"] != "" {
-		parts := strings.Split(cmdline["rd.luks.name"], "=")
-		if len(parts) != 2 {
-			return fmt.Errorf("Invalid rd.luks.name kernel parameter. Got: %v   Expected: rd.luks.name=<UUID>=<Name>", cmdline["rd.luks.name"])
-		}
-		if parts[0] == info.uuid {
-			return luksOpen(devpath, parts[1])
-		}
-	}
-	if cmdline["rd.luks.uuid"] == info.uuid {
-		return luksOpen(devpath, "luks-"+info.uuid)
+	if info.format == "luks" {
+		return handleLuksBlockDevice(info, devpath)
 	}
 
 	return nil
+}
+
+func blkIdMatches(blkId string, info *blkInfo) bool {
+	if strings.HasPrefix(blkId, "UUID=") {
+		uuid := strings.TrimPrefix(blkId, "UUID=")
+		return strings.EqualFold(uuid, info.uuid)
+	}
+	if strings.HasPrefix(blkId, "LABEL=") {
+		label := strings.TrimPrefix(blkId, "LABEL=")
+		return info.label == label
+	}
+
+	return false
 }
 
 func fsck(dev string) error {
@@ -194,22 +181,7 @@ func fsck(dev string) error {
 	return nil
 }
 
-func mountRootFs(dev string) error {
-	info, err := readBlkInfo(dev)
-	if err != nil {
-		return fmt.Errorf("%s: %v", dev, err)
-	}
-
-	fstype := cmdline["rootfstype"]
-	if fstype == "" {
-		// use detected filetype, but first let's check if it is a real filesystem
-		if !info.isFs {
-			return fmt.Errorf("%s: device you are trying to mount has type '%s' that does not look like a mountable filesystem", dev, info.format)
-		}
-
-		fstype = info.format
-	}
-
+func mountRootFs(dev, fstype string) error {
 	wg := loadModules(fstype)
 	wg.Wait()
 
@@ -309,7 +281,7 @@ func moveSlashRunMountpoint() error {
 	_, err := os.Stat(newRoot + "/run")
 	if os.IsNotExist(err) {
 		// let's print a warning and hope that the new root works without initrd udev state
-		warning("/run does not exist at the root filesystem")
+		warning("/run does not exist at the newly mounted root filesystem")
 
 		// unmount /run so its directory can be removed and reclaimed
 		if err := syscall.Unmount("/run", 0); err != nil {
@@ -511,10 +483,10 @@ func scanSysBlock() error {
 	}
 	for _, d := range devs {
 		target := filepath.Join("/sys/block/", d.Name())
-		if err := devAdd(target, d.Name()); err != nil {
+		if err := addBlockDevice(d.Name()); err != nil {
 			// even if it fails to find UUID here (e.g. in case of unsupported partition table)
 			// we still want to check its partitions
-			warning("devAdd: %v\n", err)
+			return err
 		}
 
 		// Probe all partitions of this block device, too:
@@ -527,9 +499,8 @@ func scanSysBlock() error {
 			if !strings.HasPrefix(p.Name(), d.Name()) {
 				continue
 			}
-			devpath := filepath.Join(target, p.Name())
-			if err := devAdd(devpath, p.Name()); err != nil {
-				warning("devAdd: %v\n", err)
+			if err := addBlockDevice(p.Name()); err != nil {
+				return err
 			}
 		}
 	}
@@ -556,7 +527,7 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 	if err := loadModalias(alias); err != nil {
-		debug("loadModalias: %v", err)
+		debug("%v", err)
 	}
 
 	return nil

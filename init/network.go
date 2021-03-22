@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -164,4 +166,16 @@ linkReadinessLoop:
 	}
 
 	return nil
+}
+
+func writeResolvConf(servers []net.IP) error {
+	var resolvConf bytes.Buffer
+	for _, ip := range servers {
+		resolvConf.WriteString("nameserver ")
+		resolvConf.WriteString(ip.String())
+		resolvConf.WriteByte('\n')
+	}
+	resolvConf.WriteString("search .\n")
+
+	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
 }

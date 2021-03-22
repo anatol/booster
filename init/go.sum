@@ -5,8 +5,9 @@ github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuy
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/anatol/clevis.go v0.0.0-20210303074313-5911702bb1fb h1:Vd4wnSRetfsMlWPMf+n5gf51VsygePHNExtNY2ebuXs=
 github.com/anatol/clevis.go v0.0.0-20210303074313-5911702bb1fb/go.mod h1:JBONny027EQWlQDzqe/lLPP2/WVMh9fr7xQw3Pms/VI=
-github.com/anatol/devmapper.go v0.0.0-20210309054337-e531cc1a9752 h1:i+gSapMrnO2kBwZVzR232OnGLteUbvv7OuYJzHfLa48=
 github.com/anatol/devmapper.go v0.0.0-20210309054337-e531cc1a9752/go.mod h1:5qHJYUjyhIxIAvqTYSeWtF2SZuIa+UEC628WzP9paNE=
+github.com/anatol/devmapper.go v0.0.0-20210322024145-ba6a046aeb3d h1:PgtFJC0jV3dRA7AYbE+jlILtRI+cCUO9dIi/5lB+jE0=
+github.com/anatol/devmapper.go v0.0.0-20210322024145-ba6a046aeb3d/go.mod h1:5qHJYUjyhIxIAvqTYSeWtF2SZuIa+UEC628WzP9paNE=
 github.com/anatol/luks.go v0.0.0-20210314231502-552c7e4aa186 h1:aGZviifGFT6SCgtZJvOdFZVng9AalacgYA65H0QmoCA=
 github.com/anatol/luks.go v0.0.0-20210314231502-552c7e4aa186/go.mod h1:zgmZOkQQXJ9MPCGAheVkT0xDpGBSKHp7D39983TFwVs=
 github.com/anatol/vmtest v0.0.0-20210225191124-26540db15d49 h1:WI65BVwIWBZqogBRSDRY3HqhJPkzKV1B8fbOV16LSCA=

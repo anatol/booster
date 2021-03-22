@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net"
+	"os"
+	"syscall"
 )
 
 func MemZeroBytes(bytes []byte) {
@@ -26,4 +29,20 @@ func macListContains(value net.HardwareAddr, list []net.HardwareAddr) bool {
 		}
 	}
 	return false
+}
+
+// deviceNo returns major/minor device number for the given device file
+func deviceNo(path string) (uint64, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+
+	}
+	sys, ok := stat.Sys().(*syscall.Stat_t)
+
+	if !ok {
+		return 0, fmt.Errorf("Cannot determine the device major and minor numbers for %s", path)
+	}
+
+	return sys.Rdev, nil
 }
