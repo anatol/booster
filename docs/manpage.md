@@ -86,6 +86,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.options=opt1,opt2` a comma-separated lists of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
+ * `resume={$PATH|UUID=$UUID|LABEL=$LABEL}` suspend-to-disk device. Like `root`, can be specified as a path to the block device, fs UUID, or a fs label.
  * `booster.debug` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
    The debug log is also printed to kernel kmsg buffer and available for reading either with `dmesg` or with `journalctl -b`. One caveat here is that kmsg uses message throttling and stops printing the messages quickly. To disable kmsg throttling add `printk.devkmsg=on` boot param.
  * `booster.disable_concurrent_module_loading` to disable parallel module loading. With this flag set booster will load modules one-by-one sequentially

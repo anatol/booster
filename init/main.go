@@ -137,6 +137,14 @@ func addBlockDevice(devname string) error {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
+	if cmdresume, ok := cmdline["resume"]; ok {
+		if cmdresume == devpath || blkIdMatches(cmdresume, info) {
+			if err := resume(devpath); err != nil {
+				return err
+			}
+		}
+	}
+
 	matchesRoot := devpath == cmdroot || blkIdMatches(cmdroot, info)
 
 	if matchesRoot {
@@ -172,6 +180,19 @@ func blkIdMatches(blkId string, info *blkInfo) bool {
 	}
 
 	return false
+}
+
+func resume(devpath string) error {
+	devNo, err := deviceNo(devpath)
+	if err != nil {
+		return err
+	}
+	major := unix.Major(devNo)
+	minor := unix.Minor(devNo)
+
+	debug("resuming device %s, devno=(%d,%d)", devpath, major, minor)
+	rd := fmt.Sprintf("%d:%d", major, minor)
+	return os.WriteFile("/sys/power/resume", []byte(rd), 0644)
 }
 
 func fsck(dev string) error {
