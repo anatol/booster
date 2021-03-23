@@ -218,7 +218,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		kernelArgs := opts.kernelArgs
 		if testing.Verbose() {
-			kernelArgs = append(kernelArgs, "booster.debug=1")
+			kernelArgs = append(kernelArgs, "booster.debug")
 		}
 
 		if opts.enableTangd {
