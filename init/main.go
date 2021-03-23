@@ -120,7 +120,7 @@ func addBlockDevice(devname string) error {
 			format: cmdline["rootfstype"],
 			isFs:   true,
 		}
-		debug("unable to detect fs type for %s, using one specified by rootfstype boot param %s", devpath)
+		debug("unable to detect fs type for %s, using one specified by rootfstype boot param %s", devpath, cmdline["rootfstype"])
 	} else if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
