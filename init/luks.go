@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -141,16 +142,24 @@ func handleLuksBlockDevice(info *blkInfo, devpath string) error {
 	if param, ok := cmdline["rd.luks.name"]; ok {
 		parts := strings.Split(param, "=")
 		if len(parts) != 2 {
-			return fmt.Errorf("Invalid rd.luks.name kernel parameter. Got: %v   Expected: rd.luks.name=<UUID>=<Name>", cmdline["rd.luks.name"])
+			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
 		}
-		if strings.EqualFold(parts[0], info.uuid) {
+		uuid, err := parseUUID(parts[0])
+		if err != nil {
+			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
+		}
+		if bytes.Equal(uuid, info.uuid) {
 			matches = true
 			name = parts[1]
 		}
 	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
-		if strings.EqualFold(uuid, info.uuid) {
+		u, err := parseUUID(uuid)
+		if err != nil {
+			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
+		}
+		if bytes.Equal(u, info.uuid) {
 			matches = true
-			name = "luks-" + info.uuid
+			name = "luks-" + uuid
 		}
 	}
 	if matches {

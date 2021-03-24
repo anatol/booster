@@ -12,7 +12,7 @@ import (
 type blkInfo struct {
 	format string // gpt, dos, ext4, btrfs, ...
 	isFs   bool   // specifies if the format a mountable filesystem
-	uuid   string
+	uuid   UUID
 	label  string
 }
 
@@ -31,7 +31,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	for _, fn := range probes {
 		info := fn(r)
 		if info != nil {
-			debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, info.format, info.uuid, info.label)
+			debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, info.format, info.uuid.toString(), info.label)
 			return info, nil
 		}
 	}
@@ -54,17 +54,15 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 		return nil
 	}
 
-	guid := make([]byte, 16)
-	if _, err := r.ReadAt(guid, tableHeaderOffset+guidOffset); err != nil {
+	d := make([]byte, 16)
+	if _, err := r.ReadAt(d, tableHeaderOffset+guidOffset); err != nil {
 		return nil
 	}
-	uuid := fmt.Sprintf(
-		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		guid[3], guid[2], guid[1], guid[0],
-		guid[5], guid[4],
-		guid[7], guid[6],
-		guid[8], guid[9],
-		guid[10], guid[11], guid[12], guid[13], guid[14], guid[15])
+	uuid := []byte{d[3], d[2], d[1], d[0],
+		d[5], d[4],
+		d[7], d[6],
+		d[8], d[9],
+		d[10], d[11], d[12], d[13], d[14], d[15]}
 	return &blkInfo{"gpt", false, uuid, ""}
 }
 
@@ -91,12 +89,12 @@ func probeMbr(r io.ReaderAt) *blkInfo {
 		return nil
 	}
 
-	idBytes := make([]byte, 4)
-	if _, err := r.ReadAt(idBytes, idOffset); err != nil {
+	b := make([]byte, 4)
+	if _, err := r.ReadAt(b, idOffset); err != nil {
 		return nil
 	}
-	id := binary.LittleEndian.Uint32(idBytes)
-	return &blkInfo{"mbr", false, fmt.Sprintf("%08x", id), ""}
+	id := []byte{b[3], b[2], b[1], b[0]} // little endian
+	return &blkInfo{"mbr", false, id, ""}
 }
 
 func probeLuks(r io.ReaderAt) *blkInfo {
@@ -120,8 +118,14 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 	}
 	version := int(buff[0])<<8 + int(buff[1])
 
-	uuid := make([]byte, 40)
-	if _, err := r.ReadAt(uuid, uuidOffset); err != nil {
+	data := make([]byte, 40)
+	if _, err := r.ReadAt(data, uuidOffset); err != nil {
+		return nil
+	}
+	uuidStr := string(data[:uuidLen])
+	uuid, err := parseUUID(uuidStr)
+	if err != nil {
+		warning("unable to parse luks uuid %s: %v", uuidStr, err)
 		return nil
 	}
 
@@ -135,7 +139,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 		label = fixedArrayToString(buff)
 	}
 
-	return &blkInfo{"luks", false, fixedArrayToString(uuid), label}
+	return &blkInfo{"luks", false, uuid, label}
 }
 
 func probeExt4(r io.ReaderAt) *blkInfo {
@@ -155,21 +159,14 @@ func probeExt4(r io.ReaderAt) *blkInfo {
 	if string(magic) != extMagic {
 		return nil
 	}
-	id := make([]byte, 16)
-	if _, err := r.ReadAt(id, extSuperblockOffset+extUUIDOffset); err != nil {
+	uuid := make([]byte, 16)
+	if _, err := r.ReadAt(uuid, extSuperblockOffset+extUUIDOffset); err != nil {
 		return nil
 	}
 	label := make([]byte, 16)
 	if _, err := r.ReadAt(label, extSuperblockOffset+extLabelOffset); err != nil {
 		return nil
 	}
-	uuid := fmt.Sprintf(
-		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		id[0], id[1], id[2], id[3],
-		id[4], id[5],
-		id[6], id[7],
-		id[8], id[9],
-		id[10], id[11], id[12], id[13], id[14], id[15])
 	return &blkInfo{"ext4", true, uuid, fixedArrayToString(label)}
 }
 
@@ -190,21 +187,14 @@ func probeBtrfs(r io.ReaderAt) *blkInfo {
 	if !bytes.Equal(magic, []byte(btrfsMagic)) {
 		return nil
 	}
-	id := make([]byte, 16)
-	if _, err := r.ReadAt(id, btrfsSuperblockOffset+btrfsUUIDOffset); err != nil {
+	uuid := make([]byte, 16)
+	if _, err := r.ReadAt(uuid, btrfsSuperblockOffset+btrfsUUIDOffset); err != nil {
 		return nil
 	}
 	label := make([]byte, 256)
 	if _, err := r.ReadAt(label, btrfsSuperblockOffset+btrfsLabelOffset); err != nil {
 		return nil
 	}
-	uuid := fmt.Sprintf(
-		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		id[0], id[1], id[2], id[3],
-		id[4], id[5],
-		id[6], id[7],
-		id[8], id[9],
-		id[10], id[11], id[12], id[13], id[14], id[15])
 	return &blkInfo{"btrfs", true, uuid, fixedArrayToString(label)}
 }
 
@@ -233,14 +223,7 @@ func probeXfs(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(label, xfsSuperblockOffset+xfsLabelOffset); err != nil {
 		return nil
 	}
-	uuid := fmt.Sprintf(
-		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		id[0], id[1], id[2], id[3],
-		id[4], id[5],
-		id[6], id[7],
-		id[8], id[9],
-		id[10], id[11], id[12], id[13], id[14], id[15])
-	return &blkInfo{"xfs", true, uuid, fixedArrayToString(label)}
+	return &blkInfo{"xfs", true, id, fixedArrayToString(label)}
 }
 
 func probeF2fs(r io.ReaderAt) *blkInfo {
@@ -260,8 +243,8 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 	if !bytes.Equal(magic, []byte(f2fsMagic)) {
 		return nil
 	}
-	id := make([]byte, 16)
-	if _, err := r.ReadAt(id, f2fsSuperblockOffset+f2fsUUIDOffset); err != nil {
+	uuid := make([]byte, 16)
+	if _, err := r.ReadAt(uuid, f2fsSuperblockOffset+f2fsUUIDOffset); err != nil {
 		return nil
 	}
 	buf := make([]byte, 512)
@@ -281,12 +264,5 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 		}
 	}
 	label := string(utf16.Decode(runes))
-	uuid := fmt.Sprintf(
-		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		id[0], id[1], id[2], id[3],
-		id[4], id[5],
-		id[6], id[7],
-		id[8], id[9],
-		id[10], id[11], id[12], id[13], id[14], id[15])
 	return &blkInfo{"f2fs", true, uuid, label}
 }

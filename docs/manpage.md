@@ -78,6 +78,15 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `booster.debug` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
  * `quiet` option is opposite of `booster.debug` and reduces verbosity of the tool. It hides boot-time booster warnings. This option is ignored if `booster.debug` is set.
 
+## NOTES
+
+### UUID parameters
+Boot parameters such as `root=UUID=$UUID` and `rd.luks.uuid=$UUID` allow to specify the block device by its UUID.
+The UUID format is `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` where `x` is a hexadecimal symbol either in lower of upper case.
+UUID parameter can optionally be enclosed with quote symbol `"` though it is not recommended. Following examples show correct paramers format:
+`root=UUID=ac8299a8-91ce-4bf6-a524-55a62844b787`, `root=UUID="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended),
+`rd.luks.uuid=ac8299a8-91ce-4bf6-a524-55a62844b787`, `rd.luks.uuid="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended).
+
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
 information about what is going on. Just add `booster.debug` kernel parameter and booster

@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
+	"regexp"
+	"strings"
 	"syscall"
 )
 
@@ -45,4 +48,34 @@ func deviceNo(path string) (uint64, error) {
 	}
 
 	return sys.Rdev, nil
+}
+
+type UUID []byte
+
+const uuidLen = 36
+
+var uuidRe = regexp.MustCompile(`[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}`)
+
+// parseUUID parses input string that provides UUID in format that matches uuidRe
+func parseUUID(uuid string) (UUID, error) {
+	if len(uuid) != uuidLen {
+		return nil, fmt.Errorf("expected input length is %d, got length %d", uuidLen, len(uuid))
+	}
+
+	if !uuidRe.MatchString(uuid) {
+		return nil, fmt.Errorf("invalid UUID format")
+	}
+
+	noDashes := strings.Replace(uuid, "-", "", -1)
+	return hex.DecodeString(noDashes)
+}
+
+func (uuid UUID) toString() string {
+	if len(uuid) == 16 {
+		// UUID version 4
+		return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
+	} else {
+		// a regular non-UUID id (e.g. MSDOS id)
+		return hex.EncodeToString(uuid)
+	}
 }
