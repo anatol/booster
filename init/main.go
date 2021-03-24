@@ -698,6 +698,12 @@ func checkIfInitrd() error {
 	return nil
 }
 
+func reboot() {
+	fmt.Println("Press ENTER to reboot")
+	_, _ = fmt.Scanln()
+	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+}
+
 func main() {
 	readStartTime()
 
@@ -713,4 +719,8 @@ func main() {
 		severe("%v", err)
 	}
 	emergencyShell()
+
+	// if we are here then emergency shell did not launch
+	// in this case suggest user to reboot the computer
+	reboot()
 }
