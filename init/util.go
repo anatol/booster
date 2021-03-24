@@ -79,3 +79,13 @@ func (uuid UUID) toString() string {
 		return hex.EncodeToString(uuid)
 	}
 }
+
+// stripQuotes removes leading and trailing quote symbols if they wrap the given sentence
+func stripQuotes(in string) string {
+	l := len(in)
+	if in[0] == '"' && in[l-1] == '"' {
+		return in[1 : l-1]
+	}
+
+	return in
+}

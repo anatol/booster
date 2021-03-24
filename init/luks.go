@@ -144,7 +144,7 @@ func handleLuksBlockDevice(info *blkInfo, devpath string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
 		}
-		uuid, err := parseUUID(parts[0])
+		uuid, err := parseUUID(stripQuotes(parts[0]))
 		if err != nil {
 			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
 		}
@@ -153,13 +153,14 @@ func handleLuksBlockDevice(info *blkInfo, devpath string) error {
 			name = parts[1]
 		}
 	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
-		u, err := parseUUID(uuid)
+		stripped := stripQuotes(uuid)
+		u, err := parseUUID(stripped)
 		if err != nil {
 			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
 		}
 		if bytes.Equal(u, info.uuid) {
 			matches = true
-			name = "luks-" + uuid
+			name = "luks-" + stripped
 		}
 	}
 	if matches {

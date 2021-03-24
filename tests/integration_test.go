@@ -502,6 +502,11 @@ func TestBooster(t *testing.T) {
 		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
 		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
 	}))
+	t.Run("LUKS2.WithQuotesOverUUID", boosterTest(Opts{
+		disk:       "assets/luks2.img",
+		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
+		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
+	}))
 
 	t.Run("LUKS1.Clevis.Tang", boosterTest(Opts{
 		disk:        "assets/luks1.clevis.tang.img",

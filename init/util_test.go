@@ -84,3 +84,20 @@ func TestFormatUUID(t *testing.T) {
 		t.Fatalf("incorrect uuid formatting: expected %s, got %s", expected, uuid.toString())
 	}
 }
+
+func TestStripQuotes(t *testing.T) {
+	check := func(in, out string) {
+		str := stripQuotes(in)
+		if str != out {
+			t.Fatalf("Stripping failed: expected out is %s, got %s", out, str)
+		}
+	}
+
+	check("Hello", "Hello")
+	check("He\"llo", "He\"llo")
+	check("Hell o", "Hell o")
+	check("\"Hello", "\"Hello")
+	check("Hello\"", "Hello\"")
+	check("\"Hello\"", "Hello")
+	check("\"\"He   llo\"", "\"He   llo")
+}

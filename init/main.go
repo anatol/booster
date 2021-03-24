@@ -147,7 +147,7 @@ func addBlockDevice(devname string) error {
 func blkIdMatches(blkId string, info *blkInfo) bool {
 	if strings.HasPrefix(blkId, "UUID=") {
 		uuid := strings.TrimPrefix(blkId, "UUID=")
-		u, err := parseUUID(uuid)
+		u, err := parseUUID(stripQuotes(uuid))
 		if err != nil {
 			warning("unable to parse UUID parameter %s: %v", blkId, err)
 			return false
