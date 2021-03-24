@@ -54,6 +54,9 @@ Booster advantages:
   * `vconsole` is a flag that enables early-user console configuration. If it set to `true` then booster reads configuration from `/etc/vconsole.conf` and `/etc/locale.conf` and adds required keymap and fonts to the generated image.
     following config properties are taken into account: `KEYMAP`, `KEYMAP_TOGGLE`, `FONT`, `FONT_MAP`, `FONT_UNIMAP`. See also [man vconsole.conf](https://man.archlinux.org/man/vconsole.conf.5.en).
 
+Once you done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
+It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
+
 ## COMMAND-LINE FLAGS
   `booster` command accepts following flags:
 
