@@ -27,7 +27,8 @@ func loadModalias(alias string) error {
 		return fmt.Errorf("unable to match modalias %s: %v", alias, err)
 	}
 	if len(mods) == 0 {
-		return fmt.Errorf("no match found for alias %s", alias)
+		debug("no match found for alias %s", alias)
+		return nil
 	}
 	_ = loadModules(mods...)
 	return nil
