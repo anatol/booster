@@ -387,6 +387,21 @@ func testSoftDependencies(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "booster.alias")
 }
 
+func testComplexPatterns(t *testing.T) {
+	opts := options{
+		prepareModulesAt: []string{"kernel/fs/k1.ko", "k2.ko", "zzz/ee/k3.ko", "zzz/k4.ko", "zzz/k5.ko", "k6.ko", "k7-1.ko"},
+		hostModules:      []string{"foo", "k1"},
+		builtin:          []string{"kernel/arch/x86/kernel/abuiltinfoo.ko"},
+		extraModules:     []string{"-*", "abuiltinfoo", "zzz/", "-zzz/ee/", "k7_1"},
+		unpackImage:      true,
+	}
+
+	createTestInitRamfs(t, &opts)
+
+	// all except kernel/testfoo.ko need to be in the image
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "booster.alias", "k4.ko", "k5.ko", "k7_1.ko")
+}
+
 func testHostMode(t *testing.T) {
 	opts := options{
 		universal:        false,
@@ -551,6 +566,7 @@ func TestGenerator(t *testing.T) {
 	t.Run("Lz4ImageCompression", testLz4ImageCompression)
 	t.Run("UniversalMode", testUniversalMode)
 	t.Run("HostMode", testHostMode)
+	t.Run("ComplexPatterns", testComplexPatterns)
 	t.Run("SoftDepenencies", testSoftDependencies)
 	t.Run("ExtraFiles", testExtraFiles)
 	t.Run("InvalidExtraFiles", testInvalidExtraFiles)

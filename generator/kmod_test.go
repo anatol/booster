@@ -44,12 +44,28 @@ func TestModuleNames(t *testing.T) {
 		if fn != path.Clean(fn) {
 			t.Fatalf("filepath %s is not clean", fn)
 		}
+		if _, ok := kmod.builtinModules[name]; ok {
+			continue // skip builtin modules
+		}
 
 		wg.Add(1)
 		go checkModuleName(name, path.Join(kmod.hostModulesDir, fn), &wg, ch)
 	}
 
-	wg.Wait()
+	// waitGroup as a channel
+	w := make(chan struct{})
+	go func() {
+		defer close(w)
+		wg.Wait()
+	}()
+
+	select {
+	case err := <-ch:
+		t.Fatal(err)
+	case <-w:
+		// wg is Done()
+		break
+	}
 }
 
 func checkModuleName(modname, filename string, wg *sync.WaitGroup, ch chan error) {

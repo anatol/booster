@@ -40,18 +40,28 @@ type Kmod struct {
 }
 
 func NewKmod(conf *generatorConfig) (*Kmod, error) {
-	nameToPathMapping, err := scanModulesDir(conf.modulesDir)
-	if err != nil {
+	kmod := &Kmod{
+		universal:         conf.universal,
+		kernelVersion:     conf.kernelVersion,
+		hostModulesDir:    conf.modulesDir,
+		nameToPathMapping: NewBimap(),
+		builtinModules:    make(set),
+		requiredModules:   make(set),
+		aliases:           nil,
+		extraDep:          make(map[string][]string),
+		loadModules:       nil,
+		hostModules:       make(set),
+	}
+
+	if err := kmod.scanModulesDir(); err != nil {
 		return nil, err
 	}
 
-	builtinModules, err := readModuleBuiltin(conf.modulesDir)
-	if err != nil {
+	if err := kmod.readModuleBuiltin(); err != nil {
 		return nil, err
 	}
 
-	aliases, err := readKernelAliases(conf.modulesDir)
-	if err != nil {
+	if err := kmod.readKernelAliases(); err != nil {
 		return nil, err
 	}
 
@@ -60,19 +70,8 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 	if err != nil {
 		return nil, err
 	}
+	kmod.hostModules = hostModules
 
-	kmod := &Kmod{
-		universal:         conf.universal,
-		kernelVersion:     conf.kernelVersion,
-		hostModulesDir:    conf.modulesDir,
-		nameToPathMapping: nameToPathMapping,
-		builtinModules:    builtinModules,
-		requiredModules:   make(set),
-		aliases:           aliases,
-		extraDep:          make(map[string][]string),
-		loadModules:       make([]string, 0),
-		hostModules:       hostModules,
-	}
 	return kmod, nil
 
 }
@@ -81,15 +80,33 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 	filter = filter && !k.universal // filtering works only if we in host (non-universal) mode
 
 	for _, m := range mods {
-		if pattern := m; strings.HasSuffix(pattern, "/") {
+		activate := true
+		if m[0] == '-' {
+			m = m[1:]
+			activate = false // i.e. remove modules from the list
+		}
+		if m == "" {
+			return fmt.Errorf("invalid modules pattern %s", m)
+		}
+
+		if pattern := m; pattern == "*" || strings.HasSuffix(pattern, "/") {
 			// trailing '/' means we match path recursively
 			for mod, modPath := range k.nameToPathMapping.forward {
 				if filter && !k.hostModules[mod] {
 					continue
 				}
-				if strings.HasPrefix(modPath, pattern) {
-					debug("activate module %s", mod)
-					k.requiredModules[mod] = true
+				if pattern == "*" || strings.HasPrefix(modPath, pattern) {
+					if activate {
+						if !k.requiredModules[mod] {
+							debug("activate module %s", mod)
+							k.requiredModules[mod] = true
+						}
+					} else {
+						if k.requiredModules[mod] {
+							debug("deactivate module %s", mod)
+							delete(k.requiredModules, mod)
+						}
+					}
 				}
 			}
 		} else {
@@ -97,19 +114,30 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 				continue
 			}
 
-			if k.builtinModules[m] {
-				k.requiredModules[m] = true
-			} else if _, ok := k.nameToPathMapping.forward[m]; ok {
-				debug("activate module %s", m)
-				k.requiredModules[m] = true
+			var mod string
+			if _, ok := k.nameToPathMapping.forward[m]; ok {
+				// matched
+				mod = m
 			} else if name, ok := k.nameToPathMapping.reverse[m]; ok {
 				// m is a filename that contains the module
-				debug("activate module %s", name)
-				k.requiredModules[name] = true
+				mod = name
 			} else {
 				debug("requested module %s is missing", m)
 				if failIfMissing {
 					return fmt.Errorf("module %s does not exist", m)
+				}
+				continue
+			}
+
+			if activate {
+				if !k.requiredModules[mod] {
+					debug("activate module %s", mod)
+					k.requiredModules[mod] = true
+				}
+			} else {
+				if k.requiredModules[mod] {
+					debug("deactivate module %s", mod)
+					delete(k.requiredModules, mod)
 				}
 			}
 		}
@@ -168,14 +196,13 @@ func (k *Kmod) resolveDependencies() error {
 	return nil
 }
 
-func readKernelAliases(dir string) ([]alias, error) {
-	f, err := os.Open(path.Join(dir, "modules.alias"))
+func (k *Kmod) readKernelAliases() error {
+	f, err := os.Open(path.Join(k.hostModulesDir, "modules.alias"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
 
-	var aliases []alias
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		line := s.Text()
@@ -185,14 +212,14 @@ func readKernelAliases(dir string) ([]alias, error) {
 		line = strings.TrimPrefix(line, "alias ")
 		idx := strings.LastIndexByte(line, ' ')
 		if idx == -1 {
-			return nil, fmt.Errorf("modules.alias line has no space: %q", line)
+			return fmt.Errorf("modules.alias line has no space: %q", line)
 		}
 		pattern := line[:idx]
 		module := line[idx+1:]
-		aliases = append(aliases, alias{pattern, module})
+		k.aliases = append(k.aliases, alias{pattern, module})
 	}
 
-	return aliases, s.Err()
+	return s.Err()
 }
 
 // readBuiltinModinfo reads builtin modules properties and returns a map of
@@ -315,15 +342,14 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 	}
 }
 
-func scanModulesDir(dir string) (*Bimap, error) {
-	nameToPathMapping := NewBimap()
+func (k *Kmod) scanModulesDir() error {
 	// go through modulesDir and extract all module names to build a map name <-> path
-	err := filepath.Walk(dir, func(filename string, info os.FileInfo, err error) error {
+	return filepath.Walk(k.hostModulesDir, func(filename string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
-			if info.Name() == "build" && filename == path.Join(dir, "build") {
+			if info.Name() == "build" && filename == path.Join(k.hostModulesDir, "build") {
 				// skip header files under ./build dir
 				return filepath.SkipDir
 			} else {
@@ -341,7 +367,7 @@ func scanModulesDir(dir string) (*Bimap, error) {
 		// There seems a convention to keep module name consistent with its filename
 		// TODO: find out where is in Linux kernel sources this rule set
 		modName := normalizeModuleName(parts[0])
-		relativePath := filename[len(dir)+1:]
+		relativePath := filename[len(k.hostModulesDir)+1:]
 
 		// In addition tracking modname->pathname add (possible) filename aliases.
 		// A filename alias is the filename without archive extension, i.e. for kernel/foo.ko.xz an alias would be
@@ -353,35 +379,34 @@ func scanModulesDir(dir string) (*Bimap, error) {
 			aliases = []string{strings.TrimSuffix(relativePath, compressionSuffix)}
 		}
 
-		return nameToPathMapping.Add(modName, relativePath, aliases...)
+		return k.nameToPathMapping.Add(modName, relativePath, aliases...)
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return nameToPathMapping, err
 }
 
-func readModuleBuiltin(dir string) (set, error) {
-	f, err := os.Open(path.Join(dir, "modules.builtin"))
+func (k *Kmod) readModuleBuiltin() error {
+	f, err := os.Open(path.Join(k.hostModulesDir, "modules.builtin"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
 
-	result := make(set)
 	for s := bufio.NewScanner(f); s.Scan(); {
 		filename := s.Text()
 		module := path.Base(filename)
 
 		if !strings.HasSuffix(module, ".ko") {
-			return nil, fmt.Errorf("modules.builtin contains module filename that does not have *.ko extension: %s", filename)
+			return fmt.Errorf("modules.builtin contains module filename that does not have *.ko extension: %s", filename)
 		}
 
-		result[normalizeModuleName(module[:len(module)-3])] = true
+		modName := normalizeModuleName(module[:len(module)-3])
+
+		k.builtinModules[modName] = true
+		if err := k.nameToPathMapping.Add(modName, filename); err != nil {
+			return err
+		}
 	}
 
-	return result, nil
+	return nil
 }
 
 // TODO: read modules.bin file using following logic https://github.com/vadmium/module-init-tools/blob/master/index.c#L253
@@ -502,17 +527,11 @@ func firstExactAliasMatch(needle string, aliases []alias) string {
 // resolveModname tries to resolve and normalize to its canonical name
 // return empty stream if cannot normalize it
 func (k *Kmod) resolveModname(name string) string {
-	if k.builtinModules[name] {
-		return name
-	}
 	if _, exists := k.nameToPathMapping.forward[name]; exists {
 		return name
 	}
 
 	normalizedMod := normalizeModuleName(name)
-	if k.builtinModules[normalizedMod] {
-		return normalizedMod
-	}
 	if _, exists := k.nameToPathMapping.forward[normalizedMod]; exists {
 		return normalizedMod
 	}

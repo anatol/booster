@@ -23,7 +23,7 @@ Booster advantages:
       gateway: 10.0.2.255
       dns_servers: 192.168.1.1,8.8.8.8
     universal: false
-    modules: hid_apple,kernel/sound/usb/,kernel/fs/btrfs/btrfs.ko,kernel/lib/crc4.ko.xz
+    modules: -*,hid_apple,kernel/sound/usb/,kernel/fs/btrfs/btrfs.ko,kernel/lib/crc4.ko.xz
     compression: zstd
     mount_timeout: 5m6s
     strip: true
@@ -39,7 +39,13 @@ Booster advantages:
 
   * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
-  * `modules` is a comma-separates list of extra modules to add to the generated image. One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION). The compression algorithm suffix (e.g. ".xz", ".gz) can be omitted from the module filename. If the path ends with slash symbol (/) then it considered a directory and all modules from this directory needs to be added recursively. booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
+  * `modules` is a comma-separates list of extra modules to add to or remove from the generated image.
+    One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION).
+    The compression algorithm suffix (e.g. ".xz", ".gz) can be omitted from the module filename.
+    If the element starts with minus sign (`-`) then it means "do not add it to the image", otherwise modules are added.
+    If the path ends with slash symbol (/) then it considered a directory and all modules from this directory needs to be added recursively.
+    A special symbol `*` (star) means all modules. It can be used for example to add all modules or remove all predefined modules from the image.
+    Booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
 
   * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 
@@ -89,6 +95,34 @@ The UUID format is `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` where `x` is a hexadec
 UUID parameter can optionally be enclosed with quote symbol `"` though it is not recommended. Following examples show correct paramers format:
 `root=UUID=ac8299a8-91ce-4bf6-a524-55a62844b787`, `root=UUID="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended),
 `rd.luks.uuid=ac8299a8-91ce-4bf6-a524-55a62844b787`, `rd.luks.uuid="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended).
+
+### Modules selection
+It is a note to summarize the algorithm that computes what modules are going to end up in the generated booster image.
+Initial module list for booster is `defaultModulesList` - a set of predefined hard-coded modules defined at `generator.go`.
+These are selected modules  that most likely cover most system boot needs - disk, filesystem, keyboard, tpm, ethernet, usb drivers.
+
+If `universal` config option is set to false (default value) then so-called host mode is used.
+I.e. image is generated with the drivers needed for current host hardware only.
+To achieve it booster fetches all currently loaded modules from `/sys/module/` and computes intersection with the `defaultModulesList`.
+
+Then booster looks at `modules` config option, a comma-separated list of elements. It iterates over all the elements left-to-right.
+The host mode filtering rule does not apply to this list of manually specified modules.
+
+If the element starts with minus sign `-` then it removes given modules from the image, otherwise modules are added to the image.
+
+If the element is a module name then this module added/removed. Note that by convention a kernel module name can be computed from its filename by replacing all dashes to underscore, e.g.
+for module `hid-apple.ko.gz` the name will be `hid_apple`.
+
+If the element is a path to module file relative to `/usr/lib/modules/$KERNEL_VERSION` then the module is added/removed. Note that the compression algorithm suffix can be omitted from the module filename.
+
+If the element ends with slash symbol `/` then this element considered a directory relative to `/usr/lib/modules/$KERNEL_VERSION`.
+Booster goes over this directory recursively and adds/removes the modules to the image. Minus sign can be used with the directories.
+
+Star symbol `*` is a shortcut for "all modules", it can be used to add all modules or remove all modules from the image.
+
+At the final step booster computes dependency graph between modules and all required dependencies.
+For example if a user manually added `ext4` and kernel build system says `ext` module requires `mbcache` and `jbd2` then both
+`mbcache` and `jbd2` automatically added to the image.
 
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
