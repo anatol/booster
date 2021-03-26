@@ -36,6 +36,7 @@ var (
 	verbosityLevel          = levelWarning // by default show warnings and errors
 	rootMounted             sync.WaitGroup // waits until the root partition is mounted
 	concurrentModuleLoading = true
+	kmsg                    *os.File
 )
 
 func getKernelVersion() (string, error) {
@@ -77,21 +78,31 @@ func parseCmdline() error {
 	return nil
 }
 
+func printMessage(format string, kLevel int, v ...interface{}) {
+	msg := fmt.Sprintf(format, v...)
+	fmt.Println(msg)
+	// %+v formatting for Uevent struct returns NUL symbol at the end of the Header field for some reason
+	// kmsg does not like NUL symbols and cuts the string. Remove such NUL symbols to fix it.
+	// TODO figure out how NUL symbol ends up in the output of fmt.Sprintf().
+	msg = strings.ReplaceAll(msg, "\x00", "")
+	_, _ = fmt.Fprint(kmsg, "<", kLevel, ">booster: ", msg)
+}
+
 func debug(format string, v ...interface{}) {
 	if verbosityLevel >= levelDebug {
-		fmt.Printf(format+"\n", v...)
+		printMessage(format, 7, v...)
 	}
 }
 
 func warning(format string, v ...interface{}) {
 	if verbosityLevel >= levelWarning {
-		fmt.Printf(format+"\n", v...)
+		printMessage(format, 6, v...)
 	}
 }
 
 func severe(format string, v ...interface{}) {
 	if verbosityLevel >= levelSevere {
-		fmt.Printf(format+"\n", v...)
+		printMessage(format, 4, v...)
 	}
 }
 
@@ -544,6 +555,27 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 }
 
 func boost() error {
+	debug("Starting booster initramfs")
+
+	var err error
+	if err := mount("dev", "/dev", "devtmpfs", syscall.MS_NOSUID, "mode=0755"); err != nil {
+		return err
+	}
+	kmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+
+	if err := mount("sys", "/sys", "sysfs", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
+		return err
+	}
+	if err := mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
+		return err
+	}
+	if err := mount("run", "/run", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_STRICTATIME, "mode=755"); err != nil {
+		return err
+	}
+
 	if err := os.Setenv("PATH", "/usr/bin"); err != nil {
 		return err
 	}
@@ -564,19 +596,6 @@ func boost() error {
 	}
 
 	if err := readAliases(); err != nil {
-		return err
-	}
-
-	if err := mount("dev", "/dev", "devtmpfs", syscall.MS_NOSUID, "mode=0755"); err != nil {
-		return err
-	}
-	if err := mount("sys", "/sys", "sysfs", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
-		return err
-	}
-	if err := mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
-		return err
-	}
-	if err := mount("run", "/run", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_STRICTATIME, "mode=755"); err != nil {
 		return err
 	}
 
@@ -715,8 +734,6 @@ func main() {
 	if err := checkIfInitrd(); err != nil {
 		panic(err)
 	}
-
-	debug("Starting booster initramfs")
 
 	// function boost() should never return
 	if err := boost(); err != nil {

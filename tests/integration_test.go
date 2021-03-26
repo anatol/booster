@@ -219,10 +219,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			params = append(params, "-enable-kvm", "-cpu", "host")
 		}
 
-		kernelArgs := opts.kernelArgs
-		if testing.Verbose() {
-			kernelArgs = append(kernelArgs, "booster.debug")
-		}
+		kernelArgs := append(opts.kernelArgs, "booster.debug", "printk.devkmsg=on")
 
 		if opts.enableTangd {
 			tangd, err := NewTangServer("assets/tang")
@@ -600,7 +597,6 @@ func TestBooster(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer sess2.Close()
-			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
 			out, err = sess2.CombinedOutput("ls /sys/module")
 			if err != nil {
 				t.Fatal(err)
@@ -609,6 +605,20 @@ func TestBooster(t *testing.T) {
 				if !strings.Contains(string(out), m) {
 					t.Fatalf("expected to see modules %s loaded", m)
 				}
+			}
+
+			// check writing to kmesg works
+			sess3, err := conn.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess3.Close()
+			out, err = sess3.CombinedOutput("dmesg | grep -i booster")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), "Switching to the new userspace now") {
+				t.Fatalf("expected to see debug output from booster")
 			}
 
 			sessShutdown, err := conn.NewSession()

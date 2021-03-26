@@ -77,9 +77,10 @@ func udevListener() {
 	for {
 		ev, err := dec.Decode() // TODO: there is a race condition with closing udevReader that causes panic in bufio.go
 		if err != nil {
-			log.Fatalf("uevent: %v", err)
+			severe("uevent: %v", err)
+			return
 		}
-		debug("udev event %+v", ev)
+		debug("udev event %+v", *ev)
 
 		if modalias, ok := ev.Vars["MODALIAS"]; ok {
 			err = loadModalias(modalias)
