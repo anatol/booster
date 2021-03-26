@@ -165,7 +165,7 @@ func handleLuksBlockDevice(info *blkInfo, devpath string) error {
 	}
 	if matches {
 		go func() {
-			// opening a luks device is a is a slow operation, run it in a separate goroutine
+			// opening a luks device is a slow operation, run it in a separate goroutine
 			if err := luksOpen(devpath, name); err != nil {
 				severe("%v", err)
 			}
