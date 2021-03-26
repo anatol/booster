@@ -91,6 +91,12 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			}
 			delete(loadingModules, mod)
 			loadedModules[mod] = true
+
+			// post deps
+			var postDepsWg sync.WaitGroup
+			if deps, ok := config.ModuleDependencies[mod]; ok {
+				loadModuleUnlocked(&postDepsWg, deps...)
+			}
 		}(module)
 	}
 }

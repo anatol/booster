@@ -32,7 +32,8 @@ type Kmod struct {
 	nameToPathMapping *Bimap // kernel module name to path (relative to modulesDir)
 	builtinModules    set
 	requiredModules   set                 // set of modules that we need to be added to the image
-	dependencies      map[string][]string // dependency list for non-builtin modules
+	dependencies      map[string][]string // dependency list for modules
+	postDependencies  map[string][]string // post dependency list formodules
 	aliases           []alias
 	extraDep          map[string][]string // extra dependencies added by the generator
 	loadModules       []string            // force modules to load in init
@@ -152,7 +153,7 @@ func (k *Kmod) resolveDependencies() error {
 		return err
 	}
 
-	modulesSoftDep, err := k.readModulesSoftDep(k.hostModulesDir)
+	softPreDeps, softPostDeps, err := k.readModulesSoftDep(k.hostModulesDir)
 	if err != nil {
 		return err
 	}
@@ -163,6 +164,7 @@ func (k *Kmod) resolveDependencies() error {
 	}
 
 	k.dependencies = make(map[string][]string)
+	k.postDependencies = make(map[string][]string)
 
 	depsVisited := make(set)
 	for e := depsToVisit.Front(); e != nil; e = e.Next() {
@@ -178,7 +180,7 @@ func (k *Kmod) resolveDependencies() error {
 		if d, exist := modulesDep[name]; exist {
 			deps = append(deps, d...)
 		}
-		if d, exist := modulesSoftDep[name]; exist {
+		if d, exist := softPreDeps[name]; exist {
 			deps = append(deps, d...)
 		}
 		if d, exist := k.extraDep[name]; exist {
@@ -187,6 +189,13 @@ func (k *Kmod) resolveDependencies() error {
 
 		if len(deps) > 0 {
 			k.dependencies[name] = deps
+			for _, d := range deps {
+				depsToVisit.PushBack(d)
+			}
+		}
+
+		if deps, exist := softPostDeps[name]; exist {
+			k.postDependencies[name] = deps
 			for _, d := range deps {
 				depsToVisit.PushBack(d)
 			}
@@ -448,15 +457,16 @@ func (k *Kmod) readModulesDep(dir string, nameToPathMapping *Bimap) (map[string]
 	return modules, scanner.Err()
 }
 
-func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
+func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, map[string][]string, error) {
 	f, err := os.Open(path.Join(dir, "modules.softdep"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	modules := make(map[string][]string)
+	pre := make(map[string][]string)
+	post := make(map[string][]string)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -466,31 +476,47 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, error) {
 
 		parts := strings.Split(line, " ")
 		if parts[0] != "softdep" {
-			return nil, fmt.Errorf("Invalid softdep line: %s", line)
+			return nil, nil, fmt.Errorf("Invalid softdep line: %s", line)
 		}
 		modname := parts[1]
 		modname = k.resolveModname(modname)
 		if modname == "" {
-			return nil, fmt.Errorf("unable to resolve modname %s", modname)
+			return nil, nil, fmt.Errorf("unable to resolve modname %s", modname)
 		}
 
 		parts = parts[2:]
 
-		var deps []string
+		preDeps := true // some softdeps do not have "pre:" part, assume that elements are modules
+		postDeps := false
 		for _, d := range parts {
-			if d != "pre:" && d != "post:" {
-				if n := k.resolveModname(d); n != "" {
-					deps = append(deps, n)
+			if d == "pre:" {
+				preDeps = true
+				postDeps = false
+				continue
+			}
+			if d == "post:" {
+				preDeps = false
+				postDeps = true
+				continue
+			}
+
+			if n := k.resolveModname(d); n != "" {
+				if preDeps {
+					pre[modname] = append(pre[modname], n)
+				} else if postDeps {
+					post[modname] = append(post[modname], n)
 				} else {
-					debug("softdep: unable to resolve module name %s", d)
+					return nil, nil, fmt.Errorf("unable parse dependencies for a softdep: %s", line)
 				}
+			} else {
+				// this is not the error as some existing softdeps are weird, e.g. there is a dependency 'aead2'
+				// but there is no such module
+				debug("softdep: unable to resolve module name %s", d)
 			}
 		}
-		if len(deps) > 0 {
-			modules[modname] = deps
-		}
 	}
-	return modules, scanner.Err()
+
+	return pre, post, scanner.Err()
 }
 
 // this function may return multiple matches for the input match, e.g.

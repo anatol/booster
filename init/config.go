@@ -21,12 +21,13 @@ type VirtualConsole struct {
 }
 
 type InitConfig struct {
-	Network            *InitNetworkConfig  `yaml:",omitempty"`
-	ModuleDependencies map[string][]string `yaml:",omitempty"`
-	ModulesForceLoad   []string            `yaml:",omitempty"`
-	Kernel             string              `yaml:",omitempty"` // kernel version this image was built for
-	MountTimeout       int                 `yaml:",omitempty"` // mount timeout in seconds
-	VirtualConsole     *VirtualConsole     `yaml:",omitempty"`
+	Network                *InitNetworkConfig  `yaml:",omitempty"`
+	ModuleDependencies     map[string][]string `yaml:",omitempty"`
+	ModulePostDependencies map[string][]string `yaml:",omitempty"`
+	ModulesForceLoad       []string            `yaml:",omitempty"`
+	Kernel                 string              `yaml:",omitempty"` // kernel version this image was built for
+	MountTimeout           int                 `yaml:",omitempty"` // mount timeout in seconds
+	VirtualConsole         *VirtualConsole     `yaml:",omitempty"`
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

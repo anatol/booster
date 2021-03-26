@@ -375,16 +375,16 @@ cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 
 func testSoftDependencies(t *testing.T) {
 	opts := options{
-		prepareModulesAt: []string{"kernel/fs/foo.ko"},
+		prepareModulesAt: []string{"kernel/fs/foo.ko", "a.ko", "b.ko", "c.ko", "d.ko"},
 		hostModules:      []string{"foo"},
-		softDeps:         []string{"foo abuiltinfoo"},
+		softDeps:         []string{"foo abuiltinfoo pre: a b post: c d"},
 		builtin:          []string{"kernel/arch/x86/kernel/abuiltinfoo.ko"},
 		unpackImage:      true,
 	}
 	createTestInitRamfs(t, &opts)
 
 	// all except kernel/testfoo.ko need to be in the image
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "booster.alias")
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "a.ko", "b.ko", "c.ko", "d.ko", "booster.alias")
 }
 
 func testComplexPatterns(t *testing.T) {

@@ -108,7 +108,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
-	if err := img.appendInitConfig(conf, kmod.dependencies, vconsole); err != nil {
+	if err := img.appendInitConfig(conf, kmod.dependencies, kmod.postDependencies, vconsole); err != nil {
 		return err
 	}
 
@@ -156,12 +156,13 @@ func (img *Image) appendFirmwareFiles(modName string, fws []string) error {
 	return nil
 }
 
-func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string, vconsole *VirtualConsole) error {
+func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string, kmodPostDeps map[string][]string, vconsole *VirtualConsole) error {
 	var initConfig InitConfig // config for init stored to /etc/booster.init.yaml
 
 	initConfig.MountTimeout = int(conf.timeout.Seconds())
 	initConfig.Kernel = conf.kernelVersion
 	initConfig.ModuleDependencies = kmodDeps
+	initConfig.ModulePostDependencies = kmodPostDeps
 	initConfig.VirtualConsole = vconsole
 
 	if conf.networkConfigType == netDhcp {
