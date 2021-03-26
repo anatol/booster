@@ -87,6 +87,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.options=opt1,opt2` a comma-separated lists of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `booster.debug` enable booster debug output. It is printed to console at the boot time. This feature might be useful to debug booster issues.
+ * `booster.disable_concurrent_module_loading` to disable parallel module loading. With this flag set booster will load modules one-by-one sequentially
  * `quiet` option is opposite of `booster.debug` and reduces verbosity of the tool. It hides boot-time booster warnings. This option is ignored if `booster.debug` is set.
 
 ## NOTES

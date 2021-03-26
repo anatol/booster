@@ -54,6 +54,33 @@ func readAliases() error {
 }
 
 func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
+	loadModule := func(mod string, depsWg *sync.WaitGroup) {
+		depsWg.Wait()
+		debug("loading module %s", mod)
+		if err := finitModule(mod); err != nil {
+			severe("%v", err)
+			return
+		}
+
+		if concurrentModuleLoading {
+			modulesMutex.Lock()
+			defer modulesMutex.Unlock()
+		}
+
+		for _, w := range loadingModules[mod] {
+			// signal waiters that the module is loaded
+			w.Done()
+		}
+		delete(loadingModules, mod)
+		loadedModules[mod] = true
+
+		// post deps
+		var postDepsWg sync.WaitGroup
+		if deps, ok := config.ModuleDependencies[mod]; ok {
+			loadModuleUnlocked(&postDepsWg, deps...)
+		}
+	}
+
 	for _, module := range modules {
 		if _, ok := loadedModules[module]; ok {
 			continue // the module is already loaded
@@ -74,30 +101,11 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			loadModuleUnlocked(&depsWg, deps...)
 		}
 
-		go func(mod string) {
-			depsWg.Wait()
-			debug("loading module %s", mod)
-			if err := finitModule(mod); err != nil {
-				severe("%v", err)
-				return
-			}
-
-			modulesMutex.Lock()
-			defer modulesMutex.Unlock()
-
-			for _, w := range loadingModules[mod] {
-				// signal waiters that the module is loaded
-				w.Done()
-			}
-			delete(loadingModules, mod)
-			loadedModules[mod] = true
-
-			// post deps
-			var postDepsWg sync.WaitGroup
-			if deps, ok := config.ModuleDependencies[mod]; ok {
-				loadModuleUnlocked(&postDepsWg, deps...)
-			}
-		}(module)
+		if concurrentModuleLoading {
+			go loadModule(module, &depsWg)
+		} else {
+			loadModule(module, &depsWg)
+		}
 	}
 }
 

@@ -32,9 +32,10 @@ const (
 )
 
 var (
-	cmdline        = make(map[string]string)
-	verbosityLevel = levelWarning // by default show warnings and errors
-	rootMounted    sync.WaitGroup // waits until the root partition is mounted
+	cmdline                 = make(map[string]string)
+	verbosityLevel          = levelWarning // by default show warnings and errors
+	rootMounted             sync.WaitGroup // waits until the root partition is mounted
+	concurrentModuleLoading = true
 )
 
 func getKernelVersion() (string, error) {
@@ -67,6 +68,10 @@ func parseCmdline() error {
 		verbosityLevel = levelDebug
 	} else if _, ok := cmdline["quiet"]; ok {
 		verbosityLevel = levelSevere
+	}
+
+	if _, ok := cmdline["booster.disable_concurrent_module_loading"]; ok {
+		concurrentModuleLoading = false
 	}
 
 	return nil
