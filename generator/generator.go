@@ -19,6 +19,7 @@ type generatorConfig struct {
 	networkActiveInterfaces []net.HardwareAddr
 	universal               bool
 	modules                 []string // extra modules to add
+	modulesForceLoad        []string // extra modules to load at the boot time
 	compression             string
 	timeout                 time.Duration
 	extraFiles              []string
@@ -163,6 +164,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]
 	initConfig.Kernel = conf.kernelVersion
 	initConfig.ModuleDependencies = kmodDeps
 	initConfig.ModulePostDependencies = kmodPostDeps
+	initConfig.ModulesForceLoad = conf.modulesForceLoad
 	initConfig.VirtualConsole = vconsole
 
 	if conf.networkConfigType == netDhcp {
@@ -198,6 +200,9 @@ func (img *Image) appendModules(conf *generatorConfig) (*Kmod, error) {
 		return nil, err
 	}
 	if err := kmod.activateModules(false, true, conf.modules...); err != nil {
+		return nil, err
+	}
+	if err := kmod.activateModules(false, true, conf.modulesForceLoad...); err != nil {
 		return nil, err
 	}
 

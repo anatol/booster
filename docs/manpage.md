@@ -47,6 +47,8 @@ Booster advantages:
     A special symbol `*` (star) means all modules. It can be used for example to add all modules or remove all predefined modules from the image.
     Booster also takes modules dependencies into account, all dependencies of the specified modules will be added to the image as well.
 
+  * `modules_force_load` list of module names that are forcibly loaded at the beginning of the boot process. Any module in this list automatically added to the image so there is no need to duplicate it at `modules` property.
+
   * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 
   * `mount_timeout` timeout for waiting for root filesystem to appear. The field format is a decimal number and then unit number. Valid units are "s", "m", "h". If no value specified then default timeout (3 minutes) is used. To disable the timeout completely specify "0s".
@@ -119,6 +121,9 @@ If the element ends with slash symbol `/` then this element considered a directo
 Booster goes over this directory recursively and adds/removes the modules to the image. Minus sign can be used with the directories.
 
 Star symbol `*` is a shortcut for "all modules", it can be used to add all modules or remove all modules from the image.
+
+Next booster moves to `modules_force_load` option that consists of module names to load at the boot time.
+All these modules are also added to the image.
 
 At the final step booster computes dependency graph between modules and all required dependencies.
 For example if a user manually added `ext4` and kernel build system says `ext` module requires `mbcache` and `jbd2` then both

@@ -114,6 +114,7 @@ type GeneratorConfig struct {
 	Network              *NetworkConfig `yaml:",omitempty"`
 	Universal            bool           `yaml:",omitempty"`
 	Modules              string         `yaml:",omitempty"`
+	ModulesForceLoad     string         `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
 	Compression          string         `yaml:",omitempty"`
 	MountTimeout         string         `yaml:"mount_timeout,omitempty"`
 	ExtraFiles           string         `yaml:"extra_files,omitempty"`
@@ -147,6 +148,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.ExtraFiles = opts.extraFiles
 	conf.StripBinaries = opts.stripBinaries
 	conf.EnableVirtualConsole = opts.enableVirtualConsole
+	conf.ModulesForceLoad = opts.modulesForceLoad
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
@@ -166,6 +168,7 @@ type Opts struct {
 	compression          string
 	prompt               string
 	password             string
+	modulesForceLoad     string
 	enableTangd          bool
 	useDhcp              bool
 	activeNetIfaces      string
@@ -585,21 +588,39 @@ func TestBooster(t *testing.T) {
 				t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
 			}
 
+			// check force modules are loaded
 			sess2, err := conn.NewSession()
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer sess2.Close()
 			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-			_, _ = sess2.CombinedOutput("shutdown now")
+			out, err = sess2.CombinedOutput("ls /sys/module")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range []string{"vfio_pci", "vfio", "vfio_iommu_type1", "vfio_virqfd"} { // this includes pre and post dependencies
+				if !strings.Contains(string(out), m) {
+					t.Fatalf("expected to see modules %s loaded", m)
+				}
+			}
+
+			sessShutdown, err := conn.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sessShutdown.Close()
+			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
+			_, _ = sessShutdown.CombinedOutput("shutdown now")
 		}
 
 		// simple ext4 image
 		t.Run("ArchLinux.ext4."+pkg, boosterTest(Opts{
-			kernelVersion: ver,
-			compression:   compression,
-			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+			kernelVersion:    ver,
+			compression:      compression,
+			modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
+			params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:            []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
 			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
 			kernelArgs:   []string{"root=/dev/sda", "rw"},
 			checkVmState: checkVmState,
@@ -607,14 +628,15 @@ func TestBooster(t *testing.T) {
 
 		// more complex setup with LUKS and btrfs subvolumes
 		t.Run("ArchLinux.btrfs."+pkg, boosterTest(Opts{
-			kernelVersion: ver,
-			compression:   compression,
-			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
-			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
-			prompt:        "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
-			password:      "hello",
-			checkVmState:  checkVmState,
+			kernelVersion:    ver,
+			compression:      compression,
+			modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
+			params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:            []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
+			kernelArgs:       []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
+			prompt:           "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
+			password:         "hello",
+			checkVmState:     checkVmState,
 		}))
 	}
 }

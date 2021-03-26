@@ -25,12 +25,13 @@ type UserConfig struct {
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
 	}
 	Universal            bool   `yaml:",omitempty"`
-	Modules              string `yaml:",omitempty"`              // comma separated list of extra modules to add to initramfs
-	Compression          string `yaml:",omitempty"`              // output file compression
-	MountTimeout         string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
-	ExtraFiles           string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
-	StripBinaries        bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
-	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
+	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
+	ModulesForceLoad     string `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
+	Compression          string `yaml:",omitempty"`                   // output file compression
+	MountTimeout         string `yaml:"mount_timeout,omitempty"`      // timeout for waiting for the rootfs mounted
+	ExtraFiles           string `yaml:"extra_files,omitempty"`        // comma-separated list of files to add to image
+	StripBinaries        bool   `yaml:"strip,omitempty"`              // if strip symbols from the binaries, shared libraries and kernel modules
+	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`           // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -91,6 +92,9 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.universal = u.Universal || *universal
 	if u.Modules != "" {
 		conf.modules = strings.Split(u.Modules, ",")
+	}
+	if u.ModulesForceLoad != "" {
+		conf.modulesForceLoad = strings.Split(u.ModulesForceLoad, ",")
 	}
 	conf.compression = u.Compression
 	if u.ExtraFiles != "" {
