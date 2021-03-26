@@ -71,7 +71,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		if u.Network.Interfaces != "" {
 			// get MAC addresses for the specified interface names
 			for _, i := range strings.Split(u.Network.Interfaces, ",") {
-				// user can either provice the mac addr itself
+				// user can either provide the mac addr itself
 				if hwAddr, err := net.ParseMAC(i); err == nil {
 					conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, hwAddr)
 					continue

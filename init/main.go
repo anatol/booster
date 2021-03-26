@@ -346,7 +346,7 @@ func deleteContent(path string, rootDev uint64) error {
 	return nil
 }
 
-// Once we completed rootfs identification/mount it is time to remove the ramfs and reclaime some mempry back
+// Once we completed rootfs identification/mount it is time to remove the ramfs and reclaime some memory back
 // to the system.
 // IT IS A DANGEROUS OPERATION
 // We need to be *extra* careful here and do not remove user's content from the root filesystem.
