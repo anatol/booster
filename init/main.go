@@ -81,10 +81,6 @@ func parseCmdline() error {
 func printMessage(format string, kLevel int, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
 	fmt.Println(msg)
-	// %+v formatting for Uevent struct returns NUL symbol at the end of the Header field for some reason
-	// kmsg does not like NUL symbols and cuts the string. Remove such NUL symbols to fix it.
-	// TODO figure out how NUL symbol ends up in the output of fmt.Sprintf().
-	msg = strings.ReplaceAll(msg, "\x00", "")
 	_, _ = fmt.Fprint(kmsg, "<", kLevel, ">booster: ", msg)
 }
 

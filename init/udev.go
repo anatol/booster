@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/anatol/devmapper.go"
-	"github.com/s-urbaniak/uevent"
+	"github.com/anatol/uevent.go"
 	"golang.org/x/sys/unix"
 )
 
