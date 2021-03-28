@@ -16,7 +16,7 @@ import (
 // UserConfig is a format for /etc/booster.yaml config that is interface between user and booster generator
 type UserConfig struct {
 	Network *struct {
-		Interfaces string `yaml:",omitempty"` // comma-separaed list of interfaces to initialize at early-userspace
+		Interfaces string `yaml:",omitempty"` // comma-separated list of interfaces to initialize at early-userspace
 
 		Dhcp bool `yaml:",omitempty"`
 

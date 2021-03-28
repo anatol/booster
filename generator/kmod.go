@@ -345,7 +345,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 
 	select {
 	case err := <-errCh:
-		return err // return the fist error in the channel
+		return err // return the first error in the channel
 	default:
 		return nil
 	}
