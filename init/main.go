@@ -24,19 +24,10 @@ const (
 	newInitBin = "/sbin/init"
 )
 
-const (
-	// TOTHINK rename to debug/info/warning
-	levelSevere = iota
-	levelWarning
-	levelDebug
-)
-
 var (
 	cmdline                 = make(map[string]string)
-	verbosityLevel          = levelWarning // by default show warnings and errors
 	rootMounted             sync.WaitGroup // waits until the root partition is mounted
 	concurrentModuleLoading = true
-	kmsg                    *os.File
 )
 
 func getKernelVersion() (string, error) {
@@ -83,30 +74,6 @@ func parseCmdline() error {
 	}
 
 	return nil
-}
-
-func printMessage(format string, kLevel int, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	fmt.Println(msg)
-	_, _ = fmt.Fprint(kmsg, "<", kLevel, ">booster: ", msg)
-}
-
-func debug(format string, v ...interface{}) {
-	if verbosityLevel >= levelDebug {
-		printMessage(format, 7, v...)
-	}
-}
-
-func warning(format string, v ...interface{}) {
-	if verbosityLevel >= levelWarning {
-		printMessage(format, 6, v...)
-	}
-}
-
-func severe(format string, v ...interface{}) {
-	if verbosityLevel >= levelSevere {
-		printMessage(format, 4, v...)
-	}
 }
 
 var (
@@ -576,12 +543,6 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 	}
 
 	return nil
-}
-
-const sysKmsgFile = "/proc/sys/kernel/printk_devkmsg"
-
-func disableKmsgThrottling() error {
-	return os.WriteFile(sysKmsgFile, []byte("on\n"), 0644)
 }
 
 func boost() error {
