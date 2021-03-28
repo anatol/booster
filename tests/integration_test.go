@@ -219,7 +219,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			params = append(params, "-enable-kvm", "-cpu", "host")
 		}
 
-		kernelArgs := append(opts.kernelArgs, "booster.debug", "printk.devkmsg=on")
+		kernelArgs := append(opts.kernelArgs, "booster.debug")
 
 		if opts.enableTangd {
 			tangd, err := NewTangServer("assets/tang")

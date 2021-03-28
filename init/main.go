@@ -67,6 +67,13 @@ func parseCmdline() error {
 
 	if _, ok := cmdline["booster.debug"]; ok {
 		verbosityLevel = levelDebug
+
+		// booster debug generates a lot of kmsg logs, to be able to preserve all these logs we disable kmsg throttling
+		if err := disableKmsgThrottling(); err != nil {
+			// user might set 'printk.devkmsg' param and it disables changing the throttling level
+			// in this case ignore the error
+			debug("%v", err)
+		}
 	} else if _, ok := cmdline["quiet"]; ok {
 		verbosityLevel = levelSevere
 	}
@@ -569,6 +576,12 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 	}
 
 	return nil
+}
+
+const sysKmsgFile = "/proc/sys/kernel/printk_devkmsg"
+
+func disableKmsgThrottling() error {
+	return os.WriteFile(sysKmsgFile, []byte("on\n"), 0644)
 }
 
 func boost() error {
