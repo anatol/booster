@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"github.com/tych0/go-losetup" // fork of github.com/freddierice/go-losetup
+	"golang.org/x/sys/unix"
 )
 
 var id = flag.String("id", "", "unique id for the build invocation, the output image file will be called $id.img")
@@ -154,10 +154,10 @@ func run() error {
 	}
 	defer os.Remove(mountPoint)
 
-	if err := syscall.Mount(fsDev, mountPoint, "ext4", syscall.MS_NOATIME, ""); err != nil {
+	if err := unix.Mount(fsDev, mountPoint, "ext4", unix.MS_NOATIME, ""); err != nil {
 		return err
 	}
-	defer syscall.Unmount(mountPoint, 0)
+	defer unix.Unmount(mountPoint, 0)
 
 	// copy our init to the image
 	if err := os.Mkdir(mountPoint+"/sbin", 0755); err != nil {

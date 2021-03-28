@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -76,7 +75,7 @@ func loadKmap(fd uintptr, file string) error {
 			ke.kb_value = *(*uint16)(unsafe.Pointer(&blob[curr]))
 			curr += 2
 
-			if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, KDSKBENT, uintptr(unsafe.Pointer(&ke))); errno != 0 {
+			if _, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, KDSKBENT, uintptr(unsafe.Pointer(&ke))); errno != 0 {
 				return os.NewSyscallError(fmt.Sprintf("ioctl (cmd=0x%x)", KDSKBENT), errno)
 			}
 		}

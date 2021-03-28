@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -45,7 +44,7 @@ func deviceNo(path string) (uint64, error) {
 		return 0, err
 
 	}
-	sys, ok := stat.Sys().(*syscall.Stat_t)
+	sys, ok := stat.Sys().(*unix.Stat_t)
 
 	if !ok {
 		return 0, fmt.Errorf("Cannot determine the device major and minor numbers for %s", path)

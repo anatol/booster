@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -11,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/yookoala/realpath"
@@ -286,13 +286,13 @@ func moveSlashRunMountpoint() error {
 		warning("/run does not exist at the newly mounted root filesystem")
 
 		// unmount /run so its directory can be removed and reclaimed
-		if err := syscall.Unmount("/run", 0); err != nil {
+		if err := unix.Unmount("/run", 0); err != nil {
 			return fmt.Errorf("unmount(/run): %v", err)
 		}
 		return nil
 	}
 
-	if err := syscall.Mount("/run", newRoot+"/run", "", syscall.MS_MOVE, ""); err != nil {
+	if err := unix.Mount("/run", newRoot+"/run", "", unix.MS_MOVE, ""); err != nil {
 		return fmt.Errorf("move /run to new root: %v", err)
 	}
 
@@ -302,21 +302,17 @@ func moveSlashRunMountpoint() error {
 // deleteContent deletes content of the path recursively but without crossing mountpoints.
 // It checks that deleted files belong to the same device id (i.e. not a mountpoint).
 func deleteContent(path string, rootDev uint64) error {
-	st, err := os.Lstat(path)
-	if err != nil {
+	var stat unix.Stat_t
+	if err := unix.Lstat(path, &stat); err != nil {
 		return err
 	}
 
-	stat, ok := st.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fmt.Errorf("expected stat_t structure for '%s'", path)
-	}
 	if stat.Dev != rootDev {
 		// we crossed the fs boundary, it is time to stop deleting files
 		return nil
 	}
 
-	if st.IsDir() {
+	if fs.FileMode(stat.Mode).IsDir() {
 		dirEntries, err := os.ReadDir(path)
 		if err != nil {
 			return err
@@ -355,44 +351,30 @@ func deleteRamfs() error {
 		return fmt.Errorf("init PID is not 1")
 	}
 
-	rootStat, err := os.Stat("/")
-	if err != nil {
+	var stat, newStat unix.Stat_t
+	if err := unix.Stat("/", &stat); err != nil {
 		return err
 	}
-	s, ok := rootStat.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fmt.Errorf("expected stat_t structure for '/' mountpoint")
-	}
-	rootDev := s.Dev
+	rootDev := stat.Dev
 
-	newStat, err := os.Stat(newRoot)
-	if err != nil {
+	if err := unix.Stat(newRoot, &newStat); err != nil {
 		return err
 	}
-	n, ok := newStat.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fmt.Errorf("expected stat_t structure for '.' mountpoint")
-	}
-	if n.Dev == rootDev {
+	if newStat.Dev == rootDev {
 		return fmt.Errorf("new root fs is the same device as initramfs")
 	}
 
 	// extra sanity check that we really at booster initramfs
 	for _, f := range []string{"/init", "/etc/booster.init.yaml", "/etc/initrd-release"} {
-		st, err := os.Stat(f)
-		if err != nil {
+		var st unix.Stat_t
+		if err := unix.Stat(f, &st); err != nil {
 			return err
 		}
 
-		if st.IsDir() {
+		if fs.FileMode(st.Mode).IsDir() {
 			return fmt.Errorf("expected that %s is a file", f)
 		}
-
-		n, ok := st.Sys().(*syscall.Stat_t)
-		if !ok {
-			return fmt.Errorf("expected stat_t structure for '%s' file", f)
-		}
-		if n.Dev != rootDev {
+		if st.Dev != rootDev {
 			return fmt.Errorf("file %s is not at the initramfs", f)
 		}
 	}
@@ -418,7 +400,7 @@ func switchRoot() error {
 	// note that /run has been unmounted earlier
 	for _, m := range []string{"/dev", "/proc", "/sys"} {
 		// some drivers (e.g. GPU) might use these filesystems, unmount it lazily
-		if err := syscall.Unmount(m, syscall.MNT_DETACH); err != nil {
+		if err := unix.Unmount(m, unix.MNT_DETACH); err != nil {
 			return fmt.Errorf("unmount(%s): %v", m, err)
 		}
 	}
@@ -429,10 +411,10 @@ func switchRoot() error {
 	if err := os.Chdir(newRoot); err != nil {
 		return fmt.Errorf("chdir: %v", err)
 	}
-	if err := syscall.Mount(".", "/", "", syscall.MS_MOVE, ""); err != nil {
+	if err := unix.Mount(".", "/", "", unix.MS_MOVE, ""); err != nil {
 		return fmt.Errorf("mount dir to root: %v", err)
 	}
-	if err := syscall.Chroot("."); err != nil {
+	if err := unix.Chroot("."); err != nil {
 		return fmt.Errorf("chroot: %v", err)
 	}
 	if err := os.Chdir("."); err != nil {
@@ -463,7 +445,7 @@ func switchRoot() error {
 
 	// Run the OS init
 	debug("Switching to the new userspace now. Да пабачэння!")
-	if err := syscall.Exec(newInitBin, initArgs, nil); err != nil {
+	if err := unix.Exec(newInitBin, initArgs, nil); err != nil {
 		return fmt.Errorf("Can't run the rootfs init (%v): %v", newInitBin, err)
 	}
 	return nil // unreachable
@@ -539,7 +521,7 @@ func boost() error {
 	debug("Starting booster initramfs")
 
 	var err error
-	if err := mount("dev", "/dev", "devtmpfs", syscall.MS_NOSUID, "mode=0755"); err != nil {
+	if err := mount("dev", "/dev", "devtmpfs", unix.MS_NOSUID, "mode=0755"); err != nil {
 		return err
 	}
 	kmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0600)
@@ -547,13 +529,13 @@ func boost() error {
 		return err
 	}
 
-	if err := mount("sys", "/sys", "sysfs", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
+	if err := mount("sys", "/sys", "sysfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
 		return err
 	}
-	if err := mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_NODEV, ""); err != nil {
+	if err := mount("proc", "/proc", "proc", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
 		return err
 	}
-	if err := mount("run", "/run", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_STRICTATIME, "mode=755"); err != nil {
+	if err := mount("run", "/run", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_STRICTATIME, "mode=755"); err != nil {
 		return err
 	}
 
@@ -636,7 +618,7 @@ func mount(source, target, fstype string, flags uintptr, options string) error {
 		return err
 	}
 	debug("mounting %s->%s, fs=%s, flags=0x%x, options=%s", source, target, fstype, flags, options)
-	if err := syscall.Mount(source, target, fstype, flags, options); err != nil {
+	if err := unix.Mount(source, target, fstype, flags, options); err != nil {
 		return fmt.Errorf("mount(%v): %v", source, err)
 	}
 	return nil
@@ -658,7 +640,7 @@ func readStartTime() {
 
 func emergencyShell() {
 	if _, err := os.Stat("/usr/bin/busybox"); !os.IsNotExist(err) {
-		if err := syscall.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
+		if err := unix.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
 			severe("Unable to start an emergency shell: %v\n", err)
 		}
 	}
