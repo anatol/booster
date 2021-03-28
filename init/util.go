@@ -8,7 +8,11 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func MemZeroBytes(bytes []byte) {
@@ -88,4 +92,53 @@ func stripQuotes(in string) string {
 	}
 
 	return in
+}
+
+func getKernelVersion() (string, error) {
+	var uts unix.Utsname
+	if err := unix.Uname(&uts); err != nil {
+		return "", err
+	}
+	release := uts.Release
+	length := bytes.IndexByte(release[:], 0)
+	return string(uts.Release[:length]), nil
+}
+
+// waitTimeout waits for the waitgroup for the specified max timeout.
+// Returns true if waiting timed out.
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		return false // completed normally
+	case <-time.After(timeout):
+		return true // timed out
+	}
+}
+
+// readClock returns value of the clock in usec units
+func readClock(clockId int32) (uint64, error) {
+	var t unix.Timespec
+	err := unix.ClockGettime(clockId, &t)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(t.Sec)*1000000 + uint64(t.Nsec)/1000, nil
+}
+
+// checkIfInitrd checks whether this binary run in a prepared initrd environment
+func checkIfInitrd() error {
+	if os.Getpid() != 1 {
+		return fmt.Errorf("Booster init binary does not run as PID 1")
+	}
+
+	if _, err := os.Stat("/etc/initrd-release"); os.IsNotExist(err) {
+		return fmt.Errorf("initrd-release cannot be found")
+	}
+
+	return nil
 }
