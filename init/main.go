@@ -25,7 +25,10 @@ const (
 )
 
 var (
-	cmdline                 = make(map[string]string)
+	cmdline = make(map[string]string)
+	// all boot params (from cmdline) that look like module.name=value considered as potential module parameters for 'module'
+	// it preserved to moduleParams for later use. cmdline is not modified.
+	moduleParams            = make(map[string][]string)
 	rootMounted             sync.WaitGroup // waits until the root partition is mounted
 	concurrentModuleLoading = true
 )
@@ -40,7 +43,15 @@ func parseCmdline() error {
 		// separate key/value based on the first = character;
 		// there may be multiple (e.g. in rd.luks.name)
 		if idx := strings.IndexByte(part, '='); idx > -1 {
-			cmdline[part[:idx]] = part[idx+1:]
+			key, val := part[:idx], part[idx+1:]
+			cmdline[key] = val
+
+			if dot := strings.IndexByte(key, '.'); dot != -1 {
+				// this param looks like a module options
+				mod, param := key[:dot], key[dot+1:]
+				mod = normalizeModuleName(mod)
+				moduleParams[mod] = append(moduleParams[mod], param+"="+val)
+			}
 		} else {
 			cmdline[part] = ""
 		}

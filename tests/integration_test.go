@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -391,6 +392,21 @@ func createAssets() error {
 	return os.Chdir(cwd)
 }
 
+func runSshCommand(t *testing.T, conn *ssh.Client, command string) string {
+	sessAnalyze, err := conn.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sessAnalyze.Close()
+
+	out, err := sessAnalyze.CombinedOutput(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return string(out)
+}
+
 func TestBooster(t *testing.T) {
 	var err error
 	kernelVersions, err = detectKernelVersion()
@@ -431,6 +447,42 @@ func TestBooster(t *testing.T) {
 		disk:       "assets/luks2.img",
 		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
 		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385", "booster.disable_concurrent_module_loading"},
+	}))
+
+	// verifies module force loading + modprobe command-line parameters
+	t.Run("Vfio", boosterTest(Opts{
+		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
+		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+		disks:            []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
+
+		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
+			config := &ssh.ClientConfig{
+				User:            "root",
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			}
+
+			conn, err := ssh.Dial("tcp", ":10022", config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+
+			dmesg := runSshCommand(t, conn, "dmesg")
+			if !strings.Contains(dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"") {
+				t.Fatal("expecting vfio_pci module loading")
+			}
+			if !strings.Contains(dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000") {
+				t.Fatal("expecting vfio_pci 1002:67df device")
+			}
+			if !strings.Contains(dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000") {
+				t.Fatal("expecting vfio_pci 1002:aaf0 device")
+			}
+			re := regexp.MustCompile(`booster: udev event {Header:add@/bus/pci/drivers/vfio-pci Action:add Devpath:/bus/pci/drivers/vfio-pci Subsystem:drivers Seqnum:\d+ Vars:map\[ACTION:add DEVPATH:/bus/pci/drivers/vfio-pci SEQNUM:\d+ SUBSYSTEM:drivers]}`)
+			if !re.MatchString(dmesg) {
+				t.Fatal("expecting vfio_pci module loading udev event")
+			}
+		},
 	}))
 
 	t.Run("NonFormattedDrive", boosterTest(Opts{
@@ -591,22 +643,6 @@ func TestBooster(t *testing.T) {
 				t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
 			}
 
-			// check force modules are loaded
-			sess2, err := conn.NewSession()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer sess2.Close()
-			out, err = sess2.CombinedOutput("ls /sys/module")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, m := range []string{"vfio_pci", "vfio", "vfio_iommu_type1", "vfio_virqfd"} { // this includes pre and post dependencies
-				if !strings.Contains(string(out), m) {
-					t.Fatalf("expected to see modules %s loaded", m)
-				}
-			}
-
 			// check writing to kmesg works
 			sess3, err := conn.NewSession()
 			if err != nil {
@@ -632,11 +668,10 @@ func TestBooster(t *testing.T) {
 
 		// simple ext4 image
 		t.Run("ArchLinux.ext4."+pkg, boosterTest(Opts{
-			kernelVersion:    ver,
-			compression:      compression,
-			modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
-			params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:            []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+			kernelVersion: ver,
+			compression:   compression,
+			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:         []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
 			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
 			kernelArgs:   []string{"root=/dev/sda", "rw"},
 			checkVmState: checkVmState,
@@ -644,15 +679,14 @@ func TestBooster(t *testing.T) {
 
 		// more complex setup with LUKS and btrfs subvolumes
 		t.Run("ArchLinux.btrfs."+pkg, boosterTest(Opts{
-			kernelVersion:    ver,
-			compression:      compression,
-			modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
-			params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:            []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
-			kernelArgs:       []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
-			prompt:           "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
-			password:         "hello",
-			checkVmState:     checkVmState,
+			kernelVersion: ver,
+			compression:   compression,
+			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+			disks:         []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
+			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
+			prompt:        "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
+			password:      "hello",
+			checkVmState:  checkVmState,
 		}))
 	}
 }

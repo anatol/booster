@@ -33,7 +33,8 @@ type Kmod struct {
 	builtinModules    set
 	requiredModules   set                 // set of modules that we need to be added to the image
 	dependencies      map[string][]string // dependency list for modules
-	postDependencies  map[string][]string // post dependency list formodules
+	postDependencies  map[string][]string // post dependency list for modules
+	modprobeOptions   map[string]string   // module options parsed from modprobe.d
 	aliases           []alias
 	extraDep          map[string][]string // extra dependencies added by the generator
 	loadModules       []string            // force modules to load in init
@@ -66,15 +67,19 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 		return nil, err
 	}
 
+	var err error
 	// find all modules currently used at the host
-	hostModules, err := conf.readHostModules()
+	kmod.hostModules, err = conf.readHostModules()
 	if err != nil {
 		return nil, err
 	}
-	kmod.hostModules = hostModules
+
+	kmod.modprobeOptions, err = conf.readModprobeOptions()
+	if err != nil {
+		return nil, err
+	}
 
 	return kmod, nil
-
 }
 
 func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error {
@@ -702,4 +707,102 @@ func readModuleFirmwareRequirements(ef *elf.File) ([]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// parseModprobeFunction parses the content of modprobe.d file and appends found module options to the input map
+// the map represents modname->[]options
+func parseModprobe(content string, options map[string][]string) error {
+	s := bufio.NewScanner(strings.NewReader(content))
+	var (
+		multiLine bool         // if true means that we are processing multiline directive
+		b         bytes.Buffer // multiline buffer
+	)
+	for s.Scan() {
+		line := s.Text()
+		if len(line) == 0 || line[0] == '#' {
+			if multiLine {
+				return fmt.Errorf("multiline directive contains an empty or comment line")
+			}
+			continue
+		}
+
+		line = strings.TrimSpace(line)
+
+		if line[len(line)-1] == '\\' {
+			multiLine = true
+			b.WriteString(line[:len(line)-1])
+			b.WriteByte(' ')
+			continue
+		}
+
+		if multiLine {
+			// we are in multiline more and the current line is the end of it
+			b.WriteString(line)
+			line = b.String()
+			multiLine = false
+			b.Reset()
+		}
+
+		const prefix = "options "
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+
+		line = line[len(prefix):]
+
+		sep := strings.IndexByte(line, ' ')
+		if sep == -1 {
+			return fmt.Errorf("option line format needs to have 'options modname params'")
+		}
+
+		modname := normalizeModuleName(line[:sep]) // currently it does not handle aliases, do we need it?
+		params := line[sep+1:]
+
+		options[modname] = append(options[modname], params)
+	}
+	return nil
+}
+
+func readModprobeOptions() (map[string]string, error) {
+	dirs := []string{
+		"/lib/modprobe.d/",
+		"/etc/modprobe.d/",
+		"/run/modprobe.d/",
+	}
+
+	options := make(map[string][]string)
+	for _, d := range dirs {
+		dir, err := os.ReadDir(d)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		for _, e := range dir {
+			content, err := os.ReadFile(path.Join(d, e.Name()))
+			if err != nil {
+				return nil, err
+			}
+			if err := parseModprobe(string(content), options); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	result := make(map[string]string)
+	for m, o := range options {
+		result[m] = strings.Join(o, " ")
+	}
+
+	return result, nil
+}
+
+func (k *Kmod) filterModprobeForRequiredModules() {
+	for m, _ := range k.modprobeOptions {
+		if _, ok := k.requiredModules[m]; !ok {
+			delete(k.modprobeOptions, m)
+		}
+	}
 }

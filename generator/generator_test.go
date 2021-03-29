@@ -8,9 +8,12 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func prepareAssets(t *testing.T) {
@@ -61,6 +64,7 @@ type options struct {
 	softDeps                     []string
 	builtin                      []string
 	extraFiles                   []string
+	modprobeOptions              map[string]string
 	expectError                  string
 	stripBinaries                bool
 	enableVirtualConsole         bool
@@ -183,6 +187,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		output:               wd + "/booster.img",
 		readDeviceAliases:    listAsFunc(opts.hostAliases),
 		readHostModules:      listAsFunc(opts.hostModules),
+		readModprobeOptions:  func() (map[string]string, error) { return opts.modprobeOptions, nil },
 		extraFiles:           opts.extraFiles,
 		modules:              opts.extraModules,
 		stripBinaries:        opts.stripBinaries,
@@ -553,6 +558,45 @@ func testEnableVirtualConsole(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
 }
 
+func testModprobeOptions(t *testing.T) {
+	opts := options{
+		prepareModulesAt: []string{"kernel/fs/test1.ko", "test2.ko", "test3.ko", "test4.ko"},
+		modprobeOptions: map[string]string{
+			"test1": "foo=1 bar=2",
+			"test2": "bazz=foo",
+			"test3": "hello=world world=hello",
+			"test4": "ee=aaa debug",
+		},
+		unpackImage:  true,
+		hostModules:  []string{"test1", "test2", "test3"},
+		extraModules: []string{"test2"},
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/etc/booster.init.yaml")
+
+	c, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := struct {
+		ModprobeOptions map[string]string `yaml:",omitempty"`
+	}{}
+
+	if err := yaml.Unmarshal(c, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	expect := map[string]string{
+		"test1": "foo=1 bar=2",
+		"test2": "bazz=foo",
+	}
+	if !reflect.DeepEqual(expect, cfg.ModprobeOptions) {
+		t.Fatalf("incorrect modprobe options saved, expected %v, got %v", expect, cfg.ModprobeOptions)
+	}
+}
+
 func TestGenerator(t *testing.T) {
 	*debugEnabled = testing.Verbose()
 
@@ -574,4 +618,5 @@ func TestGenerator(t *testing.T) {
 	t.Run("ModuleNameAliases", testModuleNameAliases)
 	t.Run("StripBinaries", testStripBinaries)
 	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
+	t.Run("ModprobeOptions", testModprobeOptions)
 }

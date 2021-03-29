@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -24,11 +25,12 @@ func TestModuleNames(t *testing.T) {
 	}
 
 	conf := &generatorConfig{
-		universal:         true,
-		kernelVersion:     ver,
-		modulesDir:        "/usr/lib/modules/" + ver,
-		readHostModules:   readHostModules,
-		readDeviceAliases: readDeviceAliases,
+		universal:           true,
+		kernelVersion:       ver,
+		modulesDir:          "/usr/lib/modules/" + ver,
+		readHostModules:     readHostModules,
+		readDeviceAliases:   readDeviceAliases,
+		readModprobeOptions: readModprobeOptions,
 	}
 	kmod, err := NewKmod(conf)
 	if err != nil {
@@ -164,4 +166,38 @@ func TestReadBuiltinModinfo(t *testing.T) {
 	}
 
 	_ = fws
+}
+
+func TestParseModprobe(t *testing.T) {
+	check := func(content string, expected map[string][]string) {
+		got := make(map[string][]string)
+		if err := parseModprobe(content, got); err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(expected, got) {
+			t.Fatalf("invalid options generated: expected %v, got %v", expected, got)
+		}
+	}
+
+	check("# use \"reset=1\" as default, since it should be safe for recent devices and\n# solves all kind of problems.\noptions btusb reset=1",
+		map[string][]string{
+			"btusb": {"reset=1"},
+		})
+	check("install libnvdimm /usr/bin/ndctl load-keys ; /sbin/modprobe --ignore-install libnvdimm $CMDLINE_OPTS\n", map[string][]string{})
+	check("# When bonding module is loaded, it creates bond0 by default due to max_bonds\n# option default value 1. This interferes with the network configuration\n# management / networkd, as it is not possible to detect whether this bond0 was\n# intentionally configured by the user, or should be managed by\n# networkd/NM/etc. Therefore disable bond0 creation.\n\noptions bonding max_bonds=0\n\n# Do the same for dummy0.\n\noptions dummy numdummies=0\n",
+		map[string][]string{
+			"bonding": {"max_bonds=0"},
+			"dummy":   {"numdummies=0"},
+		})
+}
+
+func TestReadModprobeOptions(t *testing.T) {
+	opts, err := readModprobeOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts == nil {
+		t.Fatal("expect non-nil options map")
+	}
 }

@@ -131,6 +131,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.debug = *debugEnabled
 	conf.readDeviceAliases = readDeviceAliases
 	conf.readHostModules = readHostModules
+	conf.readModprobeOptions = readModprobeOptions
 	conf.stripBinaries = u.StripBinaries || *strip
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {

@@ -56,7 +56,6 @@ func readAliases() error {
 func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 	loadModule := func(mod string, depsWg *sync.WaitGroup) {
 		depsWg.Wait()
-		debug("loading module %s", mod)
 		if err := finitModule(mod); err != nil {
 			severe("%v", err)
 			return
@@ -116,7 +115,22 @@ func finitModule(module string) error {
 	}
 	defer f.Close()
 
-	if err := unix.FinitModule(int(f.Fd()), "", 0); err != nil {
+	// these are module parameters coming from modprobe
+	var opts []string
+	// I am not sure if ordering is important but we add modprobe params first and then cmdline
+	if v, ok := config.ModprobeOptions[module]; ok {
+		opts = append(opts, v)
+	}
+	opts = append(opts, moduleParams[module]...)
+
+	params := strings.Join(opts, " ")
+
+	if params == "" {
+		debug("loading module %s", module)
+	} else {
+		debug("loading module %s params=\"%s\"", module, params)
+	}
+	if err := unix.FinitModule(int(f.Fd()), params, 0); err != nil {
 		return fmt.Errorf("finit(%v): %v", module, err)
 	}
 

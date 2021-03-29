@@ -31,6 +31,7 @@ type generatorConfig struct {
 	debug                   bool
 	readDeviceAliases       func() (set, error)
 	readHostModules         func() (set, error)
+	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
 
 	// virtual console configs
@@ -109,7 +110,9 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
-	if err := img.appendInitConfig(conf, kmod.dependencies, kmod.postDependencies, vconsole); err != nil {
+	kmod.filterModprobeForRequiredModules()
+
+	if err := img.appendInitConfig(conf, kmod.dependencies, kmod.postDependencies, vconsole, kmod.modprobeOptions); err != nil {
 		return err
 	}
 
@@ -157,7 +160,7 @@ func (img *Image) appendFirmwareFiles(modName string, fws []string) error {
 	return nil
 }
 
-func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string, kmodPostDeps map[string][]string, vconsole *VirtualConsole) error {
+func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]string, kmodPostDeps map[string][]string, vconsole *VirtualConsole, modprobeOptions map[string]string) error {
 	var initConfig InitConfig // config for init stored to /etc/booster.init.yaml
 
 	initConfig.MountTimeout = int(conf.timeout.Seconds())
@@ -165,6 +168,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmodDeps map[string][]
 	initConfig.ModuleDependencies = kmodDeps
 	initConfig.ModulePostDependencies = kmodPostDeps
 	initConfig.ModulesForceLoad = conf.modulesForceLoad
+	initConfig.ModprobeOptions = modprobeOptions
 	initConfig.VirtualConsole = vconsole
 
 	if conf.networkConfigType == netDhcp {

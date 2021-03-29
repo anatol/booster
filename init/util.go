@@ -37,6 +37,10 @@ func macListContains(value net.HardwareAddr, list []net.HardwareAddr) bool {
 	return false
 }
 
+func normalizeModuleName(mod string) string {
+	return strings.ReplaceAll(mod, "-", "_")
+}
+
 // deviceNo returns major/minor device number for the given device file
 func deviceNo(path string) (uint64, error) {
 	stat, err := os.Stat(path)
