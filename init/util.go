@@ -43,18 +43,13 @@ func normalizeModuleName(mod string) string {
 
 // deviceNo returns major/minor device number for the given device file
 func deviceNo(path string) (uint64, error) {
-	stat, err := os.Stat(path)
-	if err != nil {
+	var stat unix.Stat_t
+	if err := unix.Stat(path, &stat); err != nil {
 		return 0, err
 
 	}
-	sys, ok := stat.Sys().(*unix.Stat_t)
 
-	if !ok {
-		return 0, fmt.Errorf("Cannot determine the device major and minor numbers for %s", path)
-	}
-
-	return sys.Rdev, nil
+	return stat.Rdev, nil
 }
 
 type UUID []byte

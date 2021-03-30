@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestMemZeroBytes(t *testing.T) {
@@ -100,4 +104,28 @@ func TestStripQuotes(t *testing.T) {
 	check("Hello\"", "Hello\"")
 	check("\"Hello\"", "Hello")
 	check("\"\"He   llo\"", "\"He   llo")
+}
+
+func TestDeviceNo(t *testing.T) {
+	dir, err := os.ReadDir("/sys/block")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range dir {
+		dev, err := deviceNo("/dev/" + d.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expected, err := os.ReadFile("/sys/block/" + d.Name() + "/dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got := fmt.Sprintf("%d:%d\n", unix.Major(dev), unix.Minor(dev))
+
+		if string(expected) != got {
+			t.Fatalf("incorrect device number: expected %s, got %s", string(expected), got)
+		}
+	}
 }
