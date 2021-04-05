@@ -1,0 +1,16 @@
+[Trigger]
+Type = Path
+Operation = Remove
+Target = usr/lib/modules/*/vmlinuz
+
+[Trigger]
+Type = Package
+Operation = Remove
+Target = booster
+Target = booster-git
+
+[Action]
+Description = Removing linux booster images...
+When = PreTransaction
+Exec = /usr/share/libalpm/scripts/booster-remove
+NeedsTargets
