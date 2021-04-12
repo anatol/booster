@@ -719,14 +719,13 @@ func parseModprobe(content string, options map[string][]string) error {
 	)
 	for s.Scan() {
 		line := s.Text()
+		line = strings.TrimSpace(line)
 		if len(line) == 0 || line[0] == '#' {
 			if multiLine {
 				return fmt.Errorf("multiline directive contains an empty or comment line")
 			}
 			continue
 		}
-
-		line = strings.TrimSpace(line)
 
 		if line[len(line)-1] == '\\' {
 			multiLine = true

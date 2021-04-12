@@ -184,6 +184,10 @@ func TestParseModprobe(t *testing.T) {
 		map[string][]string{
 			"btusb": {"reset=1"},
 		})
+	check("# use \"reset=1\" as default, since it should be safe for recent devices and\n  \t  \n# solves all kind of problems.\noptions btusb reset=1",
+		map[string][]string{
+			"btusb": {"reset=1"},
+		})
 	check("install libnvdimm /usr/bin/ndctl load-keys ; /sbin/modprobe --ignore-install libnvdimm $CMDLINE_OPTS\n", map[string][]string{})
 	check("# When bonding module is loaded, it creates bond0 by default due to max_bonds\n# option default value 1. This interferes with the network configuration\n# management / networkd, as it is not possible to detect whether this bond0 was\n# intentionally configured by the user, or should be managed by\n# networkd/NM/etc. Therefore disable bond0 creation.\n\noptions bonding max_bonds=0\n\n# Do the same for dummy0.\n\noptions dummy numdummies=0\n",
 		map[string][]string{
