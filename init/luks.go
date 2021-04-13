@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -109,7 +107,7 @@ func luksOpen(dev string, name string) error {
 	// tokens did not work, let's unlock with a password
 	for {
 		fmt.Print("Enter passphrase for ", name, ":")
-		password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		password, err := readPassword()
 		if err != nil {
 			return err
 		}
