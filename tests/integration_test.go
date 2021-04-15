@@ -222,6 +222,21 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		kernelArgs := append(opts.kernelArgs, "booster.debug")
 
+		if opts.disk != "" && len(opts.disks) != 0 {
+			t.Fatal("Opts.disk and Opts.disks cannot be specified together")
+		}
+		var disks []vmtest.QemuDisk
+		if opts.disk != "" {
+			disks = []vmtest.QemuDisk{{opts.disk, "raw"}}
+		} else {
+			disks = opts.disks
+		}
+		for _, d := range disks {
+			if err := checkAsset(d.Path); err != nil {
+				t.Fatal(err)
+			}
+		}
+
 		if opts.enableTangd {
 			tangd, err := NewTangServer("assets/tang")
 			if err != nil {
@@ -245,6 +260,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 				t.Fatal(err)
 			}
 			defer cmd.Process.Kill()
+			defer os.Remove("assets/swtpm-sock") // sometimes process crash leaves this file
 
 			// wait till swtpm really starts
 			if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
@@ -256,16 +272,6 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		// to enable network dump
 		// params = append(params, "-object", "filter-dump,id=f1,netdev=n1,file=network.dat")
-
-		if opts.disk != "" && len(opts.disks) != 0 {
-			t.Fatal("Opts.disk and Opts.disks cannot be specified together")
-		}
-		var disks []vmtest.QemuDisk
-		if opts.disk != "" {
-			disks = []vmtest.QemuDisk{{opts.disk, "raw"}}
-		} else {
-			disks = opts.disks
-		}
 
 		params = append(params, opts.params...)
 
@@ -358,40 +364,6 @@ func compileBinaries(dir string) error {
 	return os.Chdir(cwd)
 }
 
-func createAssets() error {
-	if _, err := os.Stat("assets"); !os.IsNotExist(err) {
-		return err
-	}
-	fmt.Println("Creating test assets and disk image files, sudo may be required")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Chdir("assets_generator"); err != nil {
-		return err
-	}
-	if err := exec.Command("go", "build").Run(); err != nil {
-		return err
-	}
-
-	args := []string{}
-	if testing.Verbose() {
-		args = append(args, "-verbose")
-	}
-	generator := exec.Command("./assets_generator", args...)
-	if testing.Verbose() {
-		generator.Stdout = os.Stdout
-		generator.Stderr = os.Stderr
-	}
-	if err := generator.Run(); err != nil {
-		return err
-	}
-
-	return os.Chdir(cwd)
-}
-
 func runSshCommand(t *testing.T, conn *ssh.Client, command string) string {
 	sessAnalyze, err := conn.NewSession()
 	if err != nil {
@@ -407,6 +379,82 @@ func runSshCommand(t *testing.T, conn *ssh.Client, command string) string {
 	return string(out)
 }
 
+type assetGenerator struct {
+	script string
+	env    []string
+}
+
+var assetGenerators = make(map[string]assetGenerator)
+
+func initAssetsGenerators() error {
+	_ = os.Mkdir("assets", 0755)
+
+	if exists := fileExists("assets/init"); !exists {
+		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {
+			return err
+		}
+	}
+
+	if exists := fileExists("assets/tang/adv.jwk"); !exists {
+		if err := shell("generate_asset_tang.sh"); err != nil {
+			return err
+		}
+	}
+
+	if exists := fileExists("assets/tpm2/tpm2-00.permall"); !exists {
+		if err := shell("generate_asset_swtpm.sh"); err != nil {
+			return err
+		}
+	}
+
+	assetGenerators["assets/ext4.img"] = assetGenerator{"generate_asset_ext4.sh", []string{"OUTPUT=assets/ext4.img", "FS_UUID=5c92fc66-7315-408b-b652-176dc554d370", "FS_LABEL=atestlabel12"}}
+	assetGenerators["assets/luks1.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "FS_UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"}}
+	assetGenerators["assets/luks2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=639b8fdd-36ba-443e-be3e-e5b335935502", "FS_UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"}}
+	assetGenerators["assets/luks1.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tpm2.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=28c2e412-ab72-4416-b224-8abd116d6f2f", "FS_UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
+	assetGenerators["assets/luks1.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tang.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "FS_UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
+	assetGenerators["assets/luks2.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tpm2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
+	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
+	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
+	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
+
+	return nil
+}
+
+func checkAsset(file string) error {
+	if !strings.HasPrefix(file, "assets/") {
+		return nil
+	}
+
+	gen, ok := assetGenerators[file]
+	if !ok {
+		return fmt.Errorf("no generator for asset %s", file)
+	}
+	if exists := fileExists(file); exists {
+		return nil
+	}
+
+	if testing.Verbose() {
+		fmt.Printf("Generating asset %s\n", file)
+	}
+	return shell(gen.script, gen.env...)
+}
+
+func shell(script string, env ...string) error {
+	sh := exec.Command("bash", "-o", "errexit", script)
+	sh.Env = append(os.Environ(), env...)
+
+	if testing.Verbose() {
+		sh.Stdout = os.Stdout
+		sh.Stderr = os.Stderr
+	}
+	return sh.Run()
+}
+
+func fileExists(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
+}
+
 func TestBooster(t *testing.T) {
 	var err error
 	kernelVersions, err = detectKernelVersion()
@@ -419,7 +467,7 @@ func TestBooster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := createAssets(); err != nil {
+	if err := initAssetsGenerators(); err != nil {
 		t.Fatal(err)
 	}
 
