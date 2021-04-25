@@ -682,7 +682,11 @@ func readHostModules() (set, error) {
 }
 
 func (k *Kmod) addExtraDep(mod string, deps ...string) {
-	k.extraDep[mod] = append(k.extraDep[mod], deps...)
+	for _, dep := range deps {
+		if !k.builtinModules[dep] {
+			k.extraDep[mod] = append(k.extraDep[mod], dep)
+		}
+	}
 }
 
 func (k *Kmod) forceLoad(mods ...string) {
