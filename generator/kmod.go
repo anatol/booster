@@ -37,7 +37,6 @@ type Kmod struct {
 	modprobeOptions   map[string]string   // module options parsed from modprobe.d
 	aliases           []alias
 	extraDep          map[string][]string // extra dependencies added by the generator
-	loadModules       []string            // force modules to load in init
 	hostModules       set
 }
 
@@ -51,7 +50,6 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 		requiredModules:   make(set),
 		aliases:           nil,
 		extraDep:          make(map[string][]string),
-		loadModules:       nil,
 		hostModules:       make(set),
 	}
 
@@ -574,20 +572,6 @@ func normalizeModuleName(mod string) string {
 	return strings.ReplaceAll(mod, "-", "_")
 }
 
-func (k *Kmod) forceLoadModules() []string {
-	result := k.loadModules
-
-	if !k.universal {
-		for m := range k.hostModules {
-			if k.requiredModules[m] {
-				result = append(result, m)
-			}
-		}
-	}
-
-	return result
-}
-
 // filter only those aliases that match activated modules and, if host mode enabled,
 // active devices aliases
 func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, error) {
@@ -682,15 +666,7 @@ func readHostModules() (set, error) {
 }
 
 func (k *Kmod) addExtraDep(mod string, deps ...string) {
-	for _, dep := range deps {
-		if !k.builtinModules[dep] {
-			k.extraDep[mod] = append(k.extraDep[mod], dep)
-		}
-	}
-}
-
-func (k *Kmod) forceLoad(mods ...string) {
-	k.loadModules = append(k.loadModules, mods...)
+	k.extraDep[mod] = append(k.extraDep[mod], k.selectNonBuiltinModules(deps)...)
 }
 
 // readModuleFirmwareRequirements parses given module file .modinfo section
@@ -808,4 +784,14 @@ func (k *Kmod) filterModprobeForRequiredModules() {
 			delete(k.modprobeOptions, m)
 		}
 	}
+}
+
+func (k *Kmod) selectNonBuiltinModules(mods []string) []string {
+	var result []string
+	for _, m := range mods {
+		if !k.builtinModules[m] {
+			result = append(result, m)
+		}
+	}
+	return result
 }
