@@ -116,6 +116,7 @@ func luksOpen(dev string, name string) error {
 			continue
 		}
 
+		fmt.Println("   Unlocking...")
 		for _, s := range d.Slots() {
 			err = d.Unlock(s, password, name)
 			if err == luks.ErrPassphraseDoesNotMatch {
@@ -129,7 +130,7 @@ func luksOpen(dev string, name string) error {
 		MemZeroBytes(password)
 
 		// retry password
-		fmt.Println("   incorrect passphrase, please try again")
+		fmt.Println("   Incorrect passphrase, please try again")
 	}
 }
 
