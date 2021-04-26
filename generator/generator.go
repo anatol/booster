@@ -33,6 +33,7 @@ type generatorConfig struct {
 	readHostModules         func() (set, error)
 	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
+	enableLVM               bool
 
 	// virtual console configs
 	enableVirtualConsole     bool
@@ -95,6 +96,14 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendExtraFiles(conf.extraFiles); err != nil {
 		return err
+	}
+
+	if conf.enableLVM {
+		conf.modules = append(conf.modules, "dm_mod", "dm_snapshot", "dm_mirror", "dm_cache", "dm_cache_smq", "dm_thin_pool")
+		conf.modulesForceLoad = append(conf.modulesForceLoad, "dm_mod")
+		if err := img.appendExtraFiles([]string{"lvm"}); err != nil {
+			return err
+		}
 	}
 
 	kmod, err := img.appendModules(conf)
@@ -170,6 +179,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.ModulesForceLoad = kmod.selectNonBuiltinModules(conf.modulesForceLoad)
 	initConfig.ModprobeOptions = kmod.modprobeOptions
 	initConfig.VirtualConsole = vconsole
+	initConfig.EnableLVM = conf.enableLVM
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

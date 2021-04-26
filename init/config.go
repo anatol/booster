@@ -29,6 +29,7 @@ type InitConfig struct {
 	Kernel                 string              `yaml:",omitempty"` // kernel version this image was built for
 	MountTimeout           int                 `yaml:",omitempty"` // mount timeout in seconds
 	VirtualConsole         *VirtualConsole     `yaml:",omitempty"`
+	EnableLVM              bool                `yaml:",omitempty"`
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

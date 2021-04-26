@@ -32,6 +32,7 @@ type UserConfig struct {
 	ExtraFiles           string `yaml:"extra_files,omitempty"`        // comma-separated list of files to add to image
 	StripBinaries        bool   `yaml:"strip,omitempty"`              // if strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`           // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
+	EnableLVM            bool   `yaml:"enable_lvm"`
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -133,6 +134,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readHostModules = readHostModules
 	conf.readModprobeOptions = readModprobeOptions
 	conf.stripBinaries = u.StripBinaries || *strip
+	conf.enableLVM = u.EnableLVM
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {
 		conf.vconsolePath = "/etc/vconsole.conf"

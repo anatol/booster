@@ -29,6 +29,7 @@ Booster advantages:
     strip: true
     extra_files: vim,/usr/share/vim/vim82/,fsck,fsck.ext4
     vconsole: true
+    enable_lvm: true
 
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
@@ -61,6 +62,8 @@ Booster advantages:
 
  * `vconsole` is a flag that enables early-user console configuration. If it is set to `true` then booster reads configuration from `/etc/vconsole.conf` and `/etc/locale.conf` and adds required keymap and fonts to the generated image.
     The following config properties are taken into account: `KEYMAP`, `KEYMAP_TOGGLE`, `FONT`, `FONT_MAP`, `FONT_UNIMAP`. See also [man vconsole.conf](https://man.archlinux.org/man/vconsole.conf.5.en).
+
+ * `enable_lvm` is a flag that enables LVM volume assembly at the boot time. This flag also makes sure all the required modules/binaries are added to the image.
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.

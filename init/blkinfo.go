@@ -27,7 +27,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	defer r.Close()
 
 	type probeFn func(r io.ReaderAt) *blkInfo
-	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs}
+	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv}
 	for _, fn := range probes {
 		info := fn(r)
 		if info != nil {
@@ -265,4 +265,43 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 	}
 	label := string(utf16.Decode(runes))
 	return &blkInfo{"f2fs", true, uuid, label}
+}
+
+func probeLvmPv(r io.ReaderAt) *blkInfo {
+	// https://github.com/libyal/libvslvm/blob/main/documentation/Logical%20Volume%20Manager%20(LVM)%20format.asciidoc
+	const (
+		lvmHeaderOffset     = 0x200
+		lvmMagicOffset      = 0x0
+		lvmMagic            = "LABELONE"
+		lvmTypeMagicOffset  = 0x18
+		lvmTypeMagic        = "LVM2 001"
+		lvmHeaderSizeOffset = 0x14
+		lvmUUIDOffset       = 0x0 // offset wrt volume header
+	)
+
+	magic := make([]byte, 8)
+	if _, err := r.ReadAt(magic, lvmHeaderOffset+lvmMagicOffset); err != nil {
+		return nil
+	}
+	if !bytes.Equal(magic, []byte(lvmMagic)) {
+		return nil
+	}
+	if _, err := r.ReadAt(magic, lvmHeaderOffset+lvmTypeMagicOffset); err != nil {
+		return nil
+	}
+	if !bytes.Equal(magic, []byte(lvmTypeMagic)) {
+		return nil
+	}
+
+	buf := make([]byte, 4)
+	if _, err := r.ReadAt(buf, lvmHeaderOffset+lvmHeaderSizeOffset); err != nil {
+		return nil
+	}
+	headerSize := binary.LittleEndian.Uint32(buf)
+
+	uuid := make([]byte, 32)
+	if _, err := r.ReadAt(uuid, int64(lvmHeaderOffset+headerSize+lvmUUIDOffset)); err != nil {
+		return nil
+	}
+	return &blkInfo{"lvm", true, uuid, ""}
 }

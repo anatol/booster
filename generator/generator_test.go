@@ -68,6 +68,7 @@ type options struct {
 	expectError                  string
 	stripBinaries                bool
 	enableVirtualConsole         bool
+	enableLVM                    bool
 	vConsoleConfig, localeConfig string
 }
 
@@ -192,6 +193,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		modules:              opts.extraModules,
 		stripBinaries:        opts.stripBinaries,
 		enableVirtualConsole: opts.enableVirtualConsole,
+		enableLVM:            opts.enableLVM,
 	}
 	if opts.enableVirtualConsole {
 		conf.vconsolePath = wd + "/vconsole.conf"

@@ -47,6 +47,8 @@ func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script
 	var uuid []byte
 	if fstype == "mbr" {
 		uuid, err = hex.DecodeString(uuidStr)
+	} else if fstype == "lvm" {
+		uuid = []byte(strings.ReplaceAll(uuidStr, "-", ""))
 	} else {
 		uuid, err = parseUUID(uuidStr)
 	}
@@ -86,4 +88,11 @@ func TestBlkInfo(t *testing.T) {
 	check(t, "luks2", "luks", "51df71ed-8e4a-4a7a-956d-b782706a52d1", "bazz", 10, "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=$UUID --label=$LABEL $OUTPUT <<< 'tetspassphrase'")
 	check(t, "gpt", "gpt", "c26fcabe-8010-4bff-a066-8c73e76dbb32", "", 1, "fdisk $OUTPUT <<< 'g\nx\ni\n$UUID\nr\nw\n'")
 	check(t, "mbr", "mbr", "2beab180", "", 1, "fdisk $OUTPUT <<< 'o\nx\ni\n0x$UUID\nr\nw\n'")
+
+	createLVM := `
+trap 'sudo losetup -d $lodev' EXIT
+
+lodev=$(sudo losetup -f --show $OUTPUT)
+sudo pvcreate -u $UUID --norestorefile $lodev`
+	check(t, "lvm", "lvm", "Iy3Z8K-49rL-KK4W-NE9C-FZe5-5qWL-lCg9hj", "", 10, createLVM)
 }

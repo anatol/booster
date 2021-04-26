@@ -136,7 +136,26 @@ func addBlockDevice(devname string) error {
 		return handleLuksBlockDevice(info, devpath)
 	}
 
+	if info.format == "lvm" {
+		return handleLvmBlockDevice(devpath)
+	}
+
 	return nil
+}
+
+func handleLvmBlockDevice(devpath string) error {
+	if config.EnableLVM {
+		debug("scanning lvm physical volume %s", devpath)
+		cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", devpath)
+		if verbosityLevel >= levelDebug {
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
+		}
+		return cmd.Run()
+	} else {
+		debug("LVM support is disabled, ignoring lvm physical volume %s", devpath)
+		return nil
+	}
 }
 
 func blkIdMatches(blkId string, info *blkInfo) bool {

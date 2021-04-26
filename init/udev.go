@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 
@@ -137,19 +138,19 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	devName := ev.Vars["DEVNAME"]
 
 	if strings.HasPrefix(devName, "dm-") {
-		dmPath, err := handleMapperDeviceUevent(ev)
+		err := handleMapperDeviceUevent(ev)
 		if err == errIgnoredMapperEvent {
-			return nil //
-		} else if err != nil {
-			return err
+			err = nil
 		}
 
-		devName = dmPath // devName gets replaced from "dm-X" to "mapper/somename"
-	} else if ev.Action != "add" {
-		return nil
+		return err
 	}
 
-	return addBlockDevice(devName)
+	if ev.Action == "add" {
+		return addBlockDevice(devName)
+	}
+
+	return nil
 }
 
 var errIgnoredMapperEvent = fmt.Errorf("ignored device mapper event")
@@ -157,36 +158,57 @@ var errIgnoredMapperEvent = fmt.Errorf("ignored device mapper event")
 // handleMapperDeviceUevent handles device mapper related uevent
 // if udev event is valid then it return non-empty string that contains
 // new mapper device name (e.g. /dev/mapper/name)
-func handleMapperDeviceUevent(ev *uevent.Uevent) (string, error) {
+func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 	if !isValidDmEvent(ev) {
-		return "", errIgnoredMapperEvent
+		return errIgnoredMapperEvent
 	}
 
 	devName := ev.Vars["DEVNAME"]
 
 	major, err := strconv.Atoi(ev.Vars["MAJOR"])
 	if err != nil {
-		return "", fmt.Errorf("udev['MAJOR']: %v", err)
+		return fmt.Errorf("udev['MAJOR']: %v", err)
 	}
 	minor, err := strconv.Atoi(ev.Vars["MINOR"])
 	if err != nil {
-		return "", fmt.Errorf("udev['MAJOR']: %v", err)
+		return fmt.Errorf("udev['MAJOR']: %v", err)
 	}
 	devNo := unix.Mkdev(uint32(major), uint32(minor))
 
 	info, err := devmapper.InfoByDevno(devNo)
 	if err != nil {
-		return "", fmt.Errorf("devmapper.Info(%s): %v", devName, err)
+		return fmt.Errorf("devmapper.Info(%s): %v", devName, err)
+	}
+
+	if err := devMapperUpdateUdevDb(major, minor); err != nil {
+		return err
 	}
 
 	dmBlockDev := "mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
-
 	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
 	if err := os.Symlink("/dev/"+devName, "/dev/"+dmBlockDev); err != nil {
-		return "", err
+		return err
+	}
+	if err := addBlockDevice(dmBlockDev); err != nil {
+		return err
 	}
 
-	return dmBlockDev, devMapperUpdateUdevDb(major, minor)
+	if strings.HasPrefix(info.UUID, "LVM-") {
+		// for LVM there is a special case - add /dev/VG/LG symlink
+		lvmDmName := strings.ReplaceAll(info.Name, "-", "/")
+		linkName := "/dev/" + lvmDmName
+		if err := os.MkdirAll(path.Dir(linkName), 0755); err != nil {
+			return err
+		}
+		if err := os.Symlink("/dev/"+devName, linkName); err != nil {
+			return err
+		}
+		if err := addBlockDevice(lvmDmName); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // devMapperUpdateUdevDb writes Udev state to the database.
