@@ -70,6 +70,8 @@ type options struct {
 	enableVirtualConsole         bool
 	enableLVM                    bool
 	vConsoleConfig, localeConfig string
+	enableMdraid                 bool
+	mdraidConfigPath             string
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -194,6 +196,8 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		stripBinaries:        opts.stripBinaries,
 		enableVirtualConsole: opts.enableVirtualConsole,
 		enableLVM:            opts.enableLVM,
+		enableMdraid:         opts.enableMdraid,
+		mdraidConfigPath:     opts.mdraidConfigPath,
 	}
 	if opts.enableVirtualConsole {
 		conf.vconsolePath = wd + "/vconsole.conf"

@@ -101,14 +101,24 @@ func addBlockDevice(devname string) error {
 
 	devpath := path.Join("/dev", devname)
 	info, err := readBlkInfo(devpath)
-	if err == errUnknownBlockType {
+	if err == nil {
+		// check non-mountable types that require extra processing
+		switch info.format {
+		case "luks":
+			return handleLuksBlockDevice(info, devpath)
+		case "lvm":
+			return handleLvmBlockDevice(devpath)
+		case "mdraid":
+			return handleMdraidBlockDevice(info, devpath)
+		}
+	} else if err == errUnknownBlockType {
 		// provide a fake blkid with fs type specified by user
 		info = &blkInfo{
 			format: cmdline["rootfstype"],
 			isFs:   true,
 		}
 		debug("unable to detect fs type for %s, using one specified by rootfstype boot param %s", devpath, cmdline["rootfstype"])
-	} else if err != nil {
+	} else {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
@@ -132,15 +142,41 @@ func addBlockDevice(devname string) error {
 		return mountRootFs(devpath, info.format)
 	}
 
-	if info.format == "luks" {
-		return handleLuksBlockDevice(info, devpath)
-	}
-
-	if info.format == "lvm" {
-		return handleLvmBlockDevice(devpath)
-	}
-
 	return nil
+}
+
+var raidModules = map[uint32]string{
+	levelMultipath: "multipath",
+	levelLinear:    "linear",
+	levelRaid0:     "raid0",
+	levelRaid1:     "raid1",
+	levelRaid4:     "raid456",
+	levelRaid5:     "raid456",
+	levelRaid6:     "raid456",
+	levelRaid10:    "raid10",
+}
+
+func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
+	if config.EnableMdraid {
+		debug("trying to assemble mdraid array %s", info.uuid.toString())
+
+		if mod, ok := raidModules[info.data.(mdraidData).level]; ok {
+			wg := loadModules(mod)
+			wg.Wait()
+		} else {
+			return fmt.Errorf("unknown raid level for device %s", devpath)
+		}
+
+		cmd := exec.Command("mdadm", "--incremental", devpath)
+		if verbosityLevel >= levelDebug {
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
+		}
+		return cmd.Run()
+	} else {
+		debug("MdRaid support is disabled, ignoring mdraid device %s", devpath)
+		return nil
+	}
 }
 
 func handleLvmBlockDevice(devpath string) error {

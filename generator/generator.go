@@ -34,6 +34,8 @@ type generatorConfig struct {
 	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
 	enableLVM               bool
+	enableMdraid            bool
+	mdraidConfigPath        string
 
 	// virtual console configs
 	enableVirtualConsole     bool
@@ -106,9 +108,36 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
+	if conf.enableMdraid {
+		// preload md_mod for speed. Level-specific drivers (e.g. raid1, raid456) are going to be detected loaded at boot-time
+		conf.modulesForceLoad = append(conf.modulesForceLoad, "md_mod")
+
+		if err := img.appendExtraFiles([]string{"mdadm"}); err != nil {
+			return err
+		}
+
+		mdadmConf := conf.mdraidConfigPath
+		if mdadmConf == "" {
+			mdadmConf = "/etc/mdadm.conf"
+		}
+		content, err := os.ReadFile(mdadmConf)
+		if err != nil {
+			return err
+		}
+		if err := img.AppendContent(content, 0644, "/etc/mdadm.conf"); err != nil {
+			return err
+		}
+	}
+
 	kmod, err := img.appendModules(conf)
 	if err != nil {
 		return err
+	}
+
+	if conf.enableMdraid {
+		if err := kmod.activateModules(true, true, "kernel/drivers/md/"); err != nil {
+			return err
+		}
 	}
 
 	var vconsole *VirtualConsole
@@ -180,6 +209,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.ModprobeOptions = kmod.modprobeOptions
 	initConfig.VirtualConsole = vconsole
 	initConfig.EnableLVM = conf.enableLVM
+	initConfig.EnableMdraid = conf.enableMdraid
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

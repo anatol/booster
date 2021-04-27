@@ -14,6 +14,7 @@ type blkInfo struct {
 	isFs   bool   // specifies if the format a mountable filesystem
 	uuid   UUID
 	label  string
+	data   interface{} // type specific data
 }
 
 var errUnknownBlockType = fmt.Errorf("cannot detect block device type")
@@ -27,7 +28,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	defer r.Close()
 
 	type probeFn func(r io.ReaderAt) *blkInfo
-	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv}
+	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
 	for _, fn := range probes {
 		info := fn(r)
 		if info != nil {
@@ -63,7 +64,7 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 		d[7], d[6],
 		d[8], d[9],
 		d[10], d[11], d[12], d[13], d[14], d[15]}
-	return &blkInfo{"gpt", false, uuid, ""}
+	return &blkInfo{format: "gpt", uuid: uuid}
 }
 
 func probeMbr(r io.ReaderAt) *blkInfo {
@@ -94,7 +95,7 @@ func probeMbr(r io.ReaderAt) *blkInfo {
 		return nil
 	}
 	id := []byte{b[3], b[2], b[1], b[0]} // little endian
-	return &blkInfo{"mbr", false, id, ""}
+	return &blkInfo{format: "mbr", uuid: id}
 }
 
 func probeLuks(r io.ReaderAt) *blkInfo {
@@ -139,7 +140,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 		label = fixedArrayToString(buff)
 	}
 
-	return &blkInfo{"luks", false, uuid, label}
+	return &blkInfo{format: "luks", uuid: uuid, label: label}
 }
 
 func probeExt4(r io.ReaderAt) *blkInfo {
@@ -167,7 +168,7 @@ func probeExt4(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(label, extSuperblockOffset+extLabelOffset); err != nil {
 		return nil
 	}
-	return &blkInfo{"ext4", true, uuid, fixedArrayToString(label)}
+	return &blkInfo{format: "ext4", isFs: true, uuid: uuid, label: fixedArrayToString(label)}
 }
 
 func probeBtrfs(r io.ReaderAt) *blkInfo {
@@ -195,7 +196,7 @@ func probeBtrfs(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(label, btrfsSuperblockOffset+btrfsLabelOffset); err != nil {
 		return nil
 	}
-	return &blkInfo{"btrfs", true, uuid, fixedArrayToString(label)}
+	return &blkInfo{format: "btrfs", isFs: true, uuid: uuid, label: fixedArrayToString(label)}
 }
 
 func probeXfs(r io.ReaderAt) *blkInfo {
@@ -223,7 +224,7 @@ func probeXfs(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(label, xfsSuperblockOffset+xfsLabelOffset); err != nil {
 		return nil
 	}
-	return &blkInfo{"xfs", true, id, fixedArrayToString(label)}
+	return &blkInfo{format: "xfs", isFs: true, uuid: id, label: fixedArrayToString(label)}
 }
 
 func probeF2fs(r io.ReaderAt) *blkInfo {
@@ -264,7 +265,7 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 		}
 	}
 	label := string(utf16.Decode(runes))
-	return &blkInfo{"f2fs", true, uuid, label}
+	return &blkInfo{format: "f2fs", isFs: true, uuid: uuid, label: label}
 }
 
 func probeLvmPv(r io.ReaderAt) *blkInfo {
@@ -303,5 +304,63 @@ func probeLvmPv(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(uuid, int64(lvmHeaderOffset+headerSize+lvmUUIDOffset)); err != nil {
 		return nil
 	}
-	return &blkInfo{"lvm", true, uuid, ""}
+	return &blkInfo{format: "lvm", isFs: true, uuid: uuid}
+}
+
+const (
+	levelMultipath = 0xfffffffc
+	levelLinear    = 0xffffffff
+	levelRaid0     = 0
+	levelRaid1     = 1
+	levelRaid4     = 4
+	levelRaid5     = 5
+	levelRaid6     = 6
+	levelRaid10    = 10
+)
+
+type mdraidData struct {
+	level uint32
+}
+
+func probeMdraid(r io.ReaderAt) *blkInfo {
+	// https://raid.wiki.kernel.org/index.php/RAID_superblock_formats
+	const (
+		mdraidHeaderOffset = 0x1000
+		mdraidMagicOffset  = 0x0
+		mdraidMagic        = 0xa92b4efc
+		mdraidVersioOffset = 0x4
+		mdraidUUIDOffset   = 0x10
+		mdraidLevelOffset  = 0x48
+	)
+
+	magic := make([]byte, 4)
+	if _, err := r.ReadAt(magic, mdraidHeaderOffset+mdraidMagicOffset); err != nil {
+		return nil
+	}
+	if binary.LittleEndian.Uint32(magic) != mdraidMagic {
+		return nil
+	}
+
+	version := make([]byte, 4)
+	if _, err := r.ReadAt(version, mdraidHeaderOffset+mdraidVersioOffset); err != nil {
+		return nil
+	}
+	if binary.LittleEndian.Uint32(version) != 1 {
+		return nil
+	}
+
+	uuid := make([]byte, 16)
+	if _, err := r.ReadAt(uuid, int64(mdraidHeaderOffset+mdraidUUIDOffset)); err != nil {
+		return nil
+	}
+
+	levelBuff := make([]byte, 4)
+	if _, err := r.ReadAt(levelBuff, int64(mdraidHeaderOffset+mdraidLevelOffset)); err != nil {
+		return nil
+	}
+	level := binary.LittleEndian.Uint32(levelBuff)
+
+	data := mdraidData{level: level}
+
+	return &blkInfo{format: "mdraid", isFs: true, uuid: uuid, data: data}
 }

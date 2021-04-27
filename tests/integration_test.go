@@ -122,6 +122,8 @@ type GeneratorConfig struct {
 	StripBinaries        bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool           `yaml:"vconsole,omitempty"`
 	EnableLVM            bool           `yaml:"enable_lvm"`
+	EnableMdraid         bool           `yaml:"enable_mdraid"`
+	MdraidConfigPath     string         `yaml:"mdraid_config_path"`
 }
 
 func generateBoosterConfig(opts Opts) (string, error) {
@@ -151,6 +153,8 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.StripBinaries = opts.stripBinaries
 	conf.EnableVirtualConsole = opts.enableVirtualConsole
 	conf.EnableLVM = opts.enableLVM
+	conf.EnableMdraid = opts.enableMdraid
+	conf.MdraidConfigPath = opts.mdraidConf
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
 	data, err := yaml.Marshal(&conf)
@@ -187,6 +191,8 @@ type Opts struct {
 	stripBinaries        bool
 	enableVirtualConsole bool
 	enableLVM            bool
+	enableMdraid         bool
+	mdraidConf           string
 }
 
 func boosterTest(opts Opts) func(*testing.T) {
@@ -205,6 +211,18 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 	return func(t *testing.T) {
 		// TODO: make this test run in parallel
+
+		if opts.disk != "" {
+			if err := checkAsset(opts.disk); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			for _, disk := range opts.disks {
+				if err := checkAsset(disk.Path); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 
 		if kernel, ok := kernelVersions["linux"]; ok {
 			opts.kernelVersion = kernel
@@ -418,6 +436,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/luks2.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tpm2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
 	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
 	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
+	assetGenerators["assets/mdraid.img"] = assetGenerator{"generate_asset_mdraid.sh", []string{"OUTPUT=assets/mdraid.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
 
@@ -671,6 +690,19 @@ func TestBooster(t *testing.T) {
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
 		kernelArgs: []string{"root=UUID=74c9e30c-506f-4106-9f61-a608466ef29c"},
+	}))
+
+	t.Run("MdRaid.Path", boosterTest(Opts{
+		enableMdraid: true,
+		mdraidConf:   "assets/mdraid.img.array",
+		disk:         "assets/mdraid.img",
+		kernelArgs:   []string{"root=/dev/md/BoosterTestArray"},
+	}))
+	t.Run("MdRaid.UUID", boosterTest(Opts{
+		enableMdraid: true,
+		mdraidConf:   "assets/mdraid.img.array",
+		disk:         "assets/mdraid.img",
+		kernelArgs:   []string{"root=UUID=e62c7dc0-5728-4571-b475-7745de2eef1e"},
 	}))
 
 	// boot Arch userspace (with systemd) against all installed linux packages

@@ -33,6 +33,8 @@ type UserConfig struct {
 	StripBinaries        bool   `yaml:"strip,omitempty"`              // if strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`           // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
 	EnableLVM            bool   `yaml:"enable_lvm"`
+	EnableMdraid         bool   `yaml:"enable_mdraid"`
+	MdraidConfigPath     string `yaml:"mdraid_config_path"`
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -135,6 +137,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readModprobeOptions = readModprobeOptions
 	conf.stripBinaries = u.StripBinaries || *strip
 	conf.enableLVM = u.EnableLVM
+	conf.enableMdraid = u.EnableMdraid
+	conf.mdraidConfigPath = u.MdraidConfigPath
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {
 		conf.vconsolePath = "/etc/vconsole.conf"

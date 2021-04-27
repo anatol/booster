@@ -30,6 +30,7 @@ type InitConfig struct {
 	MountTimeout           int                 `yaml:",omitempty"` // mount timeout in seconds
 	VirtualConsole         *VirtualConsole     `yaml:",omitempty"`
 	EnableLVM              bool                `yaml:",omitempty"`
+	EnableMdraid           bool                `yaml:",omitempty"`
 }
 
 const initConfigPath = "/etc/booster.init.yaml"
