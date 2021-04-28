@@ -85,6 +85,10 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			continue // the module is already loaded
 		}
 
+		if ok := config.BuiltinModules[module]; ok {
+			continue // no need to load builtin module
+		}
+
 		_, alreadyLoading := loadingModules[module]
 		wg.Add(1)
 		loadingModules[module] = append(loadingModules[module], wg)

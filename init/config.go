@@ -26,6 +26,7 @@ type InitConfig struct {
 	ModulePostDependencies map[string][]string `yaml:",omitempty"`
 	ModulesForceLoad       []string            `yaml:",omitempty"`
 	ModprobeOptions        map[string]string   `yaml:",omitempty"`
+	BuiltinModules         set                 `yaml:",omitempty"`
 	Kernel                 string              `yaml:",omitempty"` // kernel version this image was built for
 	MountTimeout           int                 `yaml:",omitempty"` // mount timeout in seconds
 	VirtualConsole         *VirtualConsole     `yaml:",omitempty"`

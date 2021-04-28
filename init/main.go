@@ -33,6 +33,8 @@ var (
 	concurrentModuleLoading = true
 )
 
+type set map[string]bool
+
 func parseCmdline() error {
 	b, err := os.ReadFile("/proc/cmdline")
 	if err != nil {

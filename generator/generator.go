@@ -207,6 +207,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.ModulePostDependencies = kmod.postDependencies
 	initConfig.ModulesForceLoad = kmod.selectNonBuiltinModules(conf.modulesForceLoad)
 	initConfig.ModprobeOptions = kmod.modprobeOptions
+	initConfig.BuiltinModules = kmod.builtinModules
 	initConfig.VirtualConsole = vconsole
 	initConfig.EnableLVM = conf.enableLVM
 	initConfig.EnableMdraid = conf.enableMdraid
