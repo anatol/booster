@@ -435,6 +435,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/luks1.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tang.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "FS_UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
 	assetGenerators["assets/luks2.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tpm2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
 	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
+	assetGenerators["assets/gpt.img"] = assetGenerator{"generate_asset_gpt.sh", []string{"OUTPUT=assets/gpt.img", "FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}}
 	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
 	assetGenerators["assets/mdraid.img"] = assetGenerator{"generate_asset_mdraid.sh", []string{"OUTPUT=assets/mdraid.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
@@ -703,6 +704,51 @@ func TestBooster(t *testing.T) {
 		mdraidConf:   "assets/mdraid.img.array",
 		disk:         "assets/mdraid.img",
 		kernelArgs:   []string{"root=UUID=e62c7dc0-5728-4571-b475-7745de2eef1e"},
+	}))
+
+	t.Run("Gpt.Path", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=/dev/sda3"},
+	}))
+	t.Run("Gpt.UUID", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
+	}))
+	t.Run("Gpt.LABEL", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=LABEL=newpart"},
+	}))
+	t.Run("Gpt.PARTUUID", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=PARTUUID=1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
+	}))
+	t.Run("Gpt.PARTLABEL", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=PARTLABEL=раздел3"},
+	}))
+	t.Run("Gpt.PARTNROFF", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=PARTUUID=78073a8b-bdf6-48cc-918e-edb926b25f64/PARTNROFF=2"},
+	}))
+
+	t.Run("Gpt.ByUUID", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=/dev/disk/by-uuid/e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
+	}))
+	t.Run("Gpt.ByLABEL", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=/dev/disk/by-label/newpart"},
+	}))
+	t.Run("Gpt.ByPARTUUID", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=/dev/disk/by-partuuid/1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
+	}))
+	t.Run("Gpt.ByPARTLABEL", boosterTest(Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
+	}))
+	t.Run("Gpt.Autodiscovery", boosterTest(Opts{
+		disk: "assets/gpt.img",
 	}))
 
 	// boot Arch userspace (with systemd) against all installed linux packages

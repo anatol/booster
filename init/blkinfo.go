@@ -39,12 +39,25 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	return nil, errUnknownBlockType
 }
 
+type gptPart struct {
+	num      int // index of the partition int the gpt table
+	typeGuid []byte
+	uuid     []byte
+	name     string
+}
+
+type gptData struct {
+	partitions []gptPart
+}
+
 func probeGpt(r io.ReaderAt) *blkInfo {
 	const (
 		// https://wiki.osdev.org/GPT
-		tableHeaderOffset = 0x200
-		signatureOffset   = 0x0
-		guidOffset        = 0x38
+		lbaSize            = 0x200
+		tableHeaderOffset  = 1 * lbaSize
+		signatureOffset    = 0x0
+		guidOffset         = 0x38
+		partLocationOffset = 0x48
 	)
 	signature := make([]byte, 8)
 	if _, err := r.ReadAt(signature, tableHeaderOffset+signatureOffset); err != nil {
@@ -54,16 +67,49 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 		return nil
 	}
 
-	d := make([]byte, 16)
-	if _, err := r.ReadAt(d, tableHeaderOffset+guidOffset); err != nil {
+	buff := make([]byte, 16)
+
+	if _, err := r.ReadAt(buff, tableHeaderOffset+guidOffset); err != nil {
 		return nil
 	}
-	uuid := []byte{d[3], d[2], d[1], d[0],
+	uuid := convertGptUuid(buff)
+
+	if _, err := r.ReadAt(buff[:16], tableHeaderOffset+partLocationOffset); err != nil {
+		return nil
+	}
+	partLba := binary.LittleEndian.Uint64(buff[0:8])
+	partNum := binary.LittleEndian.Uint32(buff[8:12])
+	partSize := binary.LittleEndian.Uint32(buff[12:16])
+	lbaOffset := partLba * lbaSize
+
+	var parts []gptPart
+	buf := make([]byte, partSize)
+	zeroUuid := make([]byte, 16) // zero UUID used as a marker for unused partitions
+	for i := uint32(0); i < partNum; i++ {
+		start := lbaOffset + uint64(i*partSize)
+		if _, err := r.ReadAt(buf, int64(start)); err != nil {
+			return nil
+		}
+		typeGuid := convertGptUuid(buf[0:0x10])
+		if bytes.Equal(typeGuid, zeroUuid) {
+			continue
+		}
+		partUuid := convertGptUuid(buf[0x10:0x20])
+		name := fromUnicode16(buf[0x38:], binary.LittleEndian)
+		part := gptPart{int(i), typeGuid, partUuid, name}
+
+		parts = append(parts, part)
+	}
+
+	return &blkInfo{format: "gpt", uuid: uuid, data: gptData{parts}}
+}
+
+func convertGptUuid(d []byte) []byte {
+	return []byte{d[3], d[2], d[1], d[0],
 		d[5], d[4],
 		d[7], d[6],
 		d[8], d[9],
 		d[10], d[11], d[12], d[13], d[14], d[15]}
-	return &blkInfo{format: "gpt", uuid: uuid}
 }
 
 func probeMbr(r io.ReaderAt) *blkInfo {
