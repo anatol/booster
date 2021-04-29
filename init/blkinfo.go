@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"unicode/utf16"
 )
 
 type blkInfo struct {
@@ -252,19 +251,7 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(buf, f2fsSuperblockOffset+f2fsLabelOffset); err != nil {
 		return nil
 	}
-	runes := make([]uint16, 256)
-	err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &runes)
-	if err != nil {
-		return nil
-	}
-	for i, r := range runes {
-		// find the first NUL symbol and trim the array to it
-		if r == 0 {
-			runes = runes[:i]
-			break
-		}
-	}
-	label := string(utf16.Decode(runes))
+	label := fromUnicode16(buf, binary.LittleEndian)
 	return &blkInfo{format: "f2fs", isFs: true, uuid: uuid, label: label}
 }
 

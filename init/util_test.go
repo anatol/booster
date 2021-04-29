@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"reflect"
@@ -143,4 +144,17 @@ func TestParseProperties(t *testing.T) {
 	if !reflect.DeepEqual(expect, got) {
 		t.Fatalf("expected %+v got %+v", expect, got)
 	}
+}
+
+func TestFromUnicode16(t *testing.T) {
+	check := func(in []byte, bo binary.ByteOrder, out string) {
+		s := fromUnicode16(in, bo)
+		if s != out {
+			t.Fatalf("unicode16 conversion failed, got %s, expected %s", s, out)
+		}
+	}
+	// examples are generated with 'iconv -f utf-8 -t utf-16le'
+	check([]byte{0x31, 00}, binary.LittleEndian, "1")
+	check([]byte{0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x04, 0x0, 0x0, 0x0, 0x0}, binary.LittleEndian, "привет")
+	check([]byte{0x04, 0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x0, 0x0}, binary.BigEndian, "привет")
 }
