@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,7 +8,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +34,8 @@ var (
 
 type set map[string]bool
 
-var cmdroot string
+var cmdRoot *deviceRef
+var cmdResume *deviceRef
 
 func parseCmdline() error {
 	b, err := os.ReadFile("/proc/cmdline")
@@ -79,7 +78,16 @@ func parseCmdline() error {
 		concurrentModuleLoading = false
 	}
 
-	cmdroot = cmdline["root"]
+	cmdRoot, err = parseDeviceRef("root", cmdline["root"], true)
+	if err != nil {
+		return err
+	}
+	if param, ok := cmdline["resume"]; ok {
+		cmdResume, err = parseDeviceRef("resume", param, false)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -116,7 +124,7 @@ func addBlockDevice(devname string) error {
 		case "mdraid":
 			return handleMdraidBlockDevice(info, devpath)
 		case "gpt":
-			return handleGptBlockDevice(info, devpath)
+			return handleGptBlockDevice(info, devname)
 		}
 	} else if err == errUnknownBlockType {
 		// provide a fake blkid with fs type specified by user
@@ -129,19 +137,19 @@ func addBlockDevice(devname string) error {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
-	if cmdresume, ok := cmdline["resume"]; ok {
-		if cmdresume == devpath || blkIdMatches(cmdresume, info) {
+	if cmdResume != nil {
+		if cmdResume.matchesName(devname) || cmdResume.matchesBlkInfo(info) {
 			if err := resume(devpath); err != nil {
 				return err
 			}
 		}
 	}
 
-	matchesRoot := devpath == cmdroot || blkIdMatches(cmdroot, info)
+	matchesRoot := cmdRoot.matchesName(devname) || cmdRoot.matchesBlkInfo(info)
 
 	if matchesRoot {
 		if !info.isFs {
-			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", cmdroot, info.format)
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, info.format)
 		}
 		if info.format == "" {
 			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", devpath)
@@ -152,106 +160,11 @@ func addBlockDevice(devname string) error {
 	return nil
 }
 
-var autodiscoveryGptTypes = map[string]string{
-	"amd64": "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
-	"386":   "44479540-f297-41b2-9af7-d131d5f0458a",
-	"arm":   "69dad710-2ce4-4e3c-b16c-21a1d49abed3",
-	"arm64": "b921b045-1df0-41c3-af44-4c6f280d3fae",
-	//"itanium": "993d8d3d-f80e-4225-855a-9daf8ed7ea97",
-}
-
 // handleGptBlockDevice accepts information about GPT partition table and tries to match
 // possible root= partition.
-func handleGptBlockDevice(info *blkInfo, devpath string) error {
+func handleGptBlockDevice(info *blkInfo, devname string) error {
 	gptParts := info.data.(gptData).partitions
-
-	newCmdRoot := devpath
-	if strings.HasPrefix(newCmdRoot, "/dev/nvme") || strings.HasPrefix(newCmdRoot, "/dev/mmcblk") {
-		newCmdRoot += "p" // some drivers use 'p' prefix for the partition number
-	}
-
-	if strings.HasPrefix(cmdroot, "PARTUUID=") {
-		uuid := strings.TrimPrefix(cmdroot, "PARTUUID=")
-
-		partnoff := 0
-		if idx := strings.Index(uuid, "/PARTNROFF="); idx != -1 {
-			param := uuid[idx+11:]
-			uuid = uuid[:idx]
-			var err error
-			partnoff, err = strconv.Atoi(param)
-			if err != nil {
-				return fmt.Errorf("unable to parse PARTNROFF= value %s", param)
-			}
-		}
-
-		u, err := parseUUID(stripQuotes(uuid))
-		if err != nil {
-			return fmt.Errorf("unable to parse UUID parameter %s: %v", cmdroot, err)
-		}
-		for _, p := range gptParts {
-			if bytes.Equal(p.uuid, u) {
-				newCmdRoot += strconv.Itoa(p.num + 1 + partnoff)
-				debug("root=%s resolved to %s", cmdroot, newCmdRoot)
-				cmdroot = newCmdRoot
-				return nil
-			}
-		}
-	}
-	if strings.HasPrefix(cmdroot, "/dev/disk/by-partuuid/") {
-		uuid := strings.TrimPrefix(cmdroot, "/dev/disk/by-partuuid/")
-		u, err := parseUUID(stripQuotes(uuid))
-		if err != nil {
-			return fmt.Errorf("unable to parse UUID parameter %s: %v", cmdroot, err)
-		}
-		for _, p := range gptParts {
-			if bytes.Equal(p.uuid, u) {
-				newCmdRoot += strconv.Itoa(p.num + 1)
-				debug("root=%s resolved to %s", cmdroot, newCmdRoot)
-				cmdroot = newCmdRoot
-				return nil
-			}
-		}
-	}
-	if strings.HasPrefix(cmdroot, "PARTLABEL=") {
-		label := strings.TrimPrefix(cmdroot, "PARTLABEL=")
-		for _, p := range gptParts {
-			if p.name == label {
-				newCmdRoot += strconv.Itoa(p.num + 1)
-				debug("root=%s resolved to %s", cmdroot, newCmdRoot)
-				cmdroot = newCmdRoot
-				return nil
-			}
-		}
-	}
-	if strings.HasPrefix(cmdroot, "/dev/disk/by-partlabel/") {
-		label := strings.TrimPrefix(cmdroot, "/dev/disk/by-partlabel/")
-		for _, p := range gptParts {
-			if p.name == label {
-				newCmdRoot += strconv.Itoa(p.num + 1)
-				debug("root=%s resolved to %s", cmdroot, newCmdRoot)
-				cmdroot = newCmdRoot
-				return nil
-			}
-		}
-	}
-	if cmdroot == "" {
-		// try to auto-discover gpt partition https://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/
-		if autodiscoveryGuid, ok := autodiscoveryGptTypes[runtime.GOARCH]; ok {
-			gptType, err := parseUUID(autodiscoveryGuid)
-			if err != nil {
-				return err
-			}
-			for _, p := range gptParts {
-				if bytes.Equal(p.typeGuid, gptType) {
-					newCmdRoot += strconv.Itoa(p.num + 1)
-					debug("root= param is not specified. Trying to autodiscover GPT partition, it matched %s", cmdroot)
-					cmdroot = newCmdRoot
-					return nil
-				}
-			}
-		}
-	}
-
+	cmdRoot = cmdRoot.resolveFromGptTable(devname, gptParts)
 	return nil
 }
 
@@ -302,38 +215,6 @@ func handleLvmBlockDevice(devpath string) error {
 		debug("LVM support is disabled, ignoring lvm physical volume %s", devpath)
 		return nil
 	}
-}
-
-func blkIdMatches(blkId string, info *blkInfo) bool {
-	if strings.HasPrefix(blkId, "UUID=") {
-		uuid := strings.TrimPrefix(blkId, "UUID=")
-		u, err := parseUUID(stripQuotes(uuid))
-		if err != nil {
-			warning("unable to parse UUID parameter %s: %v", blkId, err)
-			return false
-		}
-		return bytes.Equal(u, info.uuid)
-	}
-	if strings.HasPrefix(blkId, "LABEL=") {
-		label := strings.TrimPrefix(blkId, "LABEL=")
-		return info.label == label
-	}
-
-	if strings.HasPrefix(blkId, "/dev/disk/by-uuid/") {
-		uuid := strings.TrimPrefix(blkId, "/dev/disk/by-uuid/")
-		u, err := parseUUID(stripQuotes(uuid))
-		if err != nil {
-			warning("unable to parse UUID parameter %s: %v", blkId, err)
-			return false
-		}
-		return bytes.Equal(u, info.uuid)
-	}
-	if strings.HasPrefix(blkId, "/dev/disk/by-label/") {
-		label := strings.TrimPrefix(blkId, "/dev/disk/by-label/")
-		return info.label == label
-	}
-
-	return false
 }
 
 func resume(devpath string) error {
