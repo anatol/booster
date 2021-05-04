@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -40,6 +43,16 @@ type generatorConfig struct {
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
+
+	// UEFI stub config
+	uefi            bool
+	osRelease       string
+	cmdLine         string
+	extraInitRd     string
+	splash          string
+	uefiStub        string
+	uefiCertificate string
+	uefiKey         string
 }
 
 type networkStaticConfig struct {
@@ -86,11 +99,18 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return fmt.Errorf("File %v exists, please specify -force if you want to overwrite it", conf.output)
 	}
 
-	img, err := NewImage(conf.output, conf.compression, conf.stripBinaries)
+	dir, err := ioutil.TempDir("", "booster")
 	if err != nil {
 		return err
 	}
-	defer img.Cleanup()
+	defer os.RemoveAll(dir)
+
+	finalFile := dir + "/image"
+	img, err := NewImage(finalFile, conf.compression, conf.stripBinaries)
+	if err != nil {
+		return err
+	}
+	defer img.Close()
 
 	if err := img.appendInitBinary(conf.initBinary); err != nil {
 		return err
@@ -159,7 +179,127 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	return img.Close()
+	if err := img.Close(); err != nil {
+		return err
+	}
+
+	if conf.uefi {
+		osReleaseFile := findExistingFile(conf.osRelease, "/etc/os-release", "/usr/lib/os-release")
+		if osReleaseFile == "" {
+			return fmt.Errorf("unable to find os-release file, please specify uefi/osrelease config property")
+		}
+
+		cmdLineFile := findExistingFile(conf.cmdLine, "/etc/kernel/cmdline", "/usr/share/kernel/cmdline", "/proc/cmdline")
+		if cmdLineFile == "" {
+			return fmt.Errorf("unable to find cmdline file, please specify uefi/cmdline config property")
+		}
+
+		if conf.extraInitRd != "" {
+			finalFile = dir + "/joined.images"
+
+			temp, err := os.Create(finalFile)
+			if err != nil {
+				return err
+			}
+			defer os.Remove(temp.Name())
+
+			for _, f := range strings.Split(conf.extraInitRd, ",") {
+				img, err := os.Open(f)
+				if err != nil {
+					return err
+				}
+				defer img.Close()
+
+				if _, err := io.Copy(temp, img); err != nil {
+					return err
+				}
+			}
+
+			img, err := os.Open(dir + "/image")
+			if err != nil {
+				return err
+			}
+			defer img.Close()
+
+			if _, err := io.Copy(temp, img); err != nil {
+				return err
+			}
+
+			_ = temp.Close()
+		}
+
+		params := []string{
+			"--add-section", ".osrel=" + osReleaseFile, "--change-section-vma", ".osrel=0x20000",
+			"--add-section", ".cmdline=" + cmdLineFile, "--change-section-vma", ".cmdline=0x30000",
+			"--add-section", ".linux=" + kmod.hostModulesDir + "/vmlinuz", "--change-section-vma", ".linux=0x2000000",
+			"--add-section", ".initrd=" + finalFile, "--change-section-vma", ".initrd=0x3000000",
+		}
+
+		if conf.splash != "" {
+			params = append(params, "--add-section", ".splash="+conf.splash, "--change-section-vma", ".splash=0x40000")
+		}
+
+		uefiStub := findExistingFile(conf.uefiStub, "/usr/lib/systemd/boot/efi/linuxx64.efi.stub", "/usr/lib/systemd/boot/efi/linuxia32.efi.stub", "/usr/lib/gummiboot/linuxx64.efi.stub", "/usr/lib/gummiboot/linuxia32.efi.stub", "/lib/systemd/boot/efi/linuxx64.efi.stub", "/lib/systemd/boot/efi/linuxia32.efi.stub", "/lib/gummiboot/linuxx64.efi.stub", "/lib/gummiboot/linuxia32.efi.stub")
+		if uefiStub == "" {
+			return fmt.Errorf("unable to find uefi stub file, please specify uefi/stub config property")
+		}
+		params = append(params, uefiStub, dir+"/uefi")
+		finalFile = dir + "/uefi"
+
+		cmd := exec.Command("objcopy", params...)
+		if conf.debug {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+
+		// signing
+		if conf.uefiCertificate != "" && conf.uefiKey != "" {
+			cmd := exec.Command("sbsign", "--key", conf.uefiKey, "--cert", conf.uefiCertificate, "--output", dir+"/uefi.signed", dir+"/uefi")
+			if conf.debug {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+			if err := cmd.Run(); err != nil {
+				return err
+			}
+			finalFile = dir + "/uefi.signed"
+
+			/*
+				peFile, err := ioutil.ReadFile(conf.output)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				ctx := pecoff.PECOFFChecksum(peFile)
+				Cert := util.ReadCertFromFile(conf.uefiCertificate)
+				Key := util.ReadKeyFromFile(conf.uefiCertificate)
+
+				sig := pecoff.CreateSignature(ctx, Cert, Key)
+
+				b := pecoff.AppendToBinary(ctx, sig)
+				if err = ioutil.WriteFile(conf.output, b, 0644); err != nil {
+					log.Fatal(err)
+				}
+			*/
+		}
+	}
+
+	return os.Rename(finalFile, conf.output)
+}
+
+func findExistingFile(files ...string) string {
+	for _, f := range files {
+		if f == "" {
+			continue
+		}
+		if _, err := os.Stat(f); err == nil {
+			return f
+		}
+	}
+	return ""
 }
 
 func (img *Image) appendInitBinary(initBinary string) error {

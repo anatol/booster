@@ -35,6 +35,16 @@ type UserConfig struct {
 	EnableLVM            bool   `yaml:"enable_lvm"`
 	EnableMdraid         bool   `yaml:"enable_mdraid"`
 	MdraidConfigPath     string `yaml:"mdraid_config_path"`
+
+	Uefi *struct {
+		OsRelease   string `yaml:"osrelease,omitempty"`
+		CmdLine     string `yaml:"cmdline,omitempty"`
+		ExtraInitRd string `yaml:"extra_initrd,omitempty"` // comma-separated list of additional initramfs to add to the uefi binary. Useful to carry microcode.
+		Stub        string `yaml:",omitempty"`             // uefi stub file
+		Splash      string `yaml:",omitempty"`
+		Certificate string `yaml:",omitempty"`
+		Key         string `yaml:",omitempty"`
+	}
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -143,6 +153,18 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	if conf.enableVirtualConsole {
 		conf.vconsolePath = "/etc/vconsole.conf"
 		conf.localePath = "/etc/locale.conf"
+	}
+
+	if uefi := u.Uefi; uefi != nil {
+		conf.uefi = true
+		conf.osRelease = uefi.OsRelease
+		conf.cmdLine = uefi.CmdLine
+		conf.extraInitRd = uefi.ExtraInitRd
+		conf.splash = uefi.Splash
+		conf.uefiStub = uefi.Stub
+		conf.uefiCertificate = uefi.Certificate
+		conf.uefiKey = uefi.Key
+
 	}
 
 	return &conf, nil

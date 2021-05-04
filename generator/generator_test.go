@@ -72,6 +72,9 @@ type options struct {
 	vConsoleConfig, localeConfig string
 	enableMdraid                 bool
 	mdraidConfigPath             string
+	uefi                         bool
+	uefiCertificate              string
+	uefiKey                      string
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -198,6 +201,9 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		enableLVM:            opts.enableLVM,
 		enableMdraid:         opts.enableMdraid,
 		mdraidConfigPath:     opts.mdraidConfigPath,
+		uefi:                 opts.uefi,
+		uefiKey:              opts.uefiKey,
+		uefiCertificate:      opts.uefiCertificate,
 	}
 	if opts.enableVirtualConsole {
 		conf.vconsolePath = wd + "/vconsole.conf"
@@ -207,6 +213,15 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 
 		conf.localePath = wd + "/locale.conf"
 		if err := os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if opts.uefi {
+		ver, err := readKernelVersion()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(imageModulesDir+ver+"/vmlinuz", modulesDir+"/vmlinuz"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -223,8 +238,10 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		return
 	}
 
-	if err := verifyCompressedFile(compression, wd+"/booster.img"); err != nil {
-		t.Fatal(err)
+	if !opts.uefi {
+		if err := verifyCompressedFile(compression, wd+"/booster.img"); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if opts.unpackImage {
@@ -603,6 +620,32 @@ func testModprobeOptions(t *testing.T) {
 	}
 }
 
+func testUefiStub(t *testing.T) {
+	opts := options{
+		uefi: true,
+	}
+	createTestInitRamfs(t, &opts)
+}
+
+func testUefiStubSigned(t *testing.T) {
+	d := t.TempDir()
+	cmd := exec.Command("openssl", "req", "-newkey", "rsa:4096", "-nodes", "-keyout", d+"/PK.key", "-new", "-x509", "-sha256", "-days", "3650", "-subj", "/CN=my Platform Key/", "-out", d+"/PK.crt")
+	if testing.Verbose() {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := options{
+		uefi:            true,
+		uefiCertificate: d + "/PK.crt",
+		uefiKey:         d + "/PK.key",
+	}
+	createTestInitRamfs(t, &opts)
+}
+
 func TestGenerator(t *testing.T) {
 	*debugEnabled = testing.Verbose()
 
@@ -625,4 +668,6 @@ func TestGenerator(t *testing.T) {
 	t.Run("StripBinaries", testStripBinaries)
 	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
 	t.Run("ModprobeOptions", testModprobeOptions)
+	t.Run("UefiStub", testUefiStub)
+	t.Run("UefiStubSigned", testUefiStubSigned)
 }

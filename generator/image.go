@@ -14,7 +14,6 @@ import (
 	"sync"
 
 	"github.com/cavaliercoder/go-cpio"
-	"github.com/google/renameio"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4"
 	"github.com/ulikunitz/xz"
@@ -23,19 +22,16 @@ import (
 type Image struct {
 	m sync.Mutex // synchronizes access to shared mutable state
 
-	file          *renameio.PendingFile
+	file          *os.File
 	compressor    io.Closer
 	out           *cpio.Writer
 	contains      set // whether image contains the file
 	stripBinaries bool
 }
 
-func NewImage(path string, compression string, stripBinaries bool) (*Image, error) {
-	file, err := renameio.TempFile("", path)
+func NewImage(name string, compression string, stripBinaries bool) (*Image, error) {
+	file, err := os.Create(name)
 	if err != nil {
-		return nil, err
-	}
-	if err := file.Chmod(0644); err != nil {
 		return nil, err
 	}
 
@@ -72,14 +68,6 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 	}, nil
 }
 
-func (img *Image) Cleanup() {
-	_ = img.out.Close()
-	if img.compressor != img.file {
-		_ = img.compressor.Close()
-	}
-	_ = img.file.Cleanup()
-}
-
 func (img *Image) Close() error {
 	if err := img.out.Close(); err != nil {
 		return err
@@ -89,7 +77,10 @@ func (img *Image) Close() error {
 			return err
 		}
 	}
-	return img.file.CloseAtomicallyReplace()
+	if err := img.file.Sync(); err != nil {
+		return err
+	}
+	return img.file.Close()
 }
 
 // AppendDirEntry appends directory entry to the image (and its parent if it is needed).
