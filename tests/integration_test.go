@@ -435,6 +435,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/luks1.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tang.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "FS_UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
 	assetGenerators["assets/luks2.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tpm2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
 	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
+	assetGenerators["assets/luks2.clevis.yubikey.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.yubikey.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}}
 	assetGenerators["assets/gpt.img"] = assetGenerator{"generate_asset_gpt.sh", []string{"OUTPUT=assets/gpt.img", "FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}}
 	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
 	assetGenerators["assets/mdraid.img"] = assetGenerator{"generate_asset_mdraid.sh", []string{"OUTPUT=assets/mdraid.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
@@ -479,6 +480,38 @@ func fileExists(file string) bool {
 	return err == nil
 }
 
+type yubikey struct {
+	bus, device string
+}
+
+// detectYubikey checks if a yubikey is present and uses its slot #2 for tests
+func detectYubikey() (error, *yubikey) {
+	out, err := exec.Command("lsusb").CombinedOutput()
+	if err != nil {
+		return err, nil
+	}
+
+	for _, l := range strings.Split(string(out), "\n") {
+		if !strings.Contains(l, "Yubikey") {
+			continue
+		}
+
+		re, err := regexp.Compile(`Bus 0*(\d+) Device 0*(\d+):`)
+		if err != nil {
+			return err, nil
+		}
+
+		m := re.FindAllStringSubmatch(l, -1)
+		if m == nil {
+			return fmt.Errorf("lsusb does not match bus/device"), nil
+		}
+
+		return nil, &yubikey{m[0][1], m[0][2]}
+	}
+
+	return nil, nil
+}
+
 func TestBooster(t *testing.T) {
 	var err error
 	kernelVersions, err = detectKernelVersion()
@@ -492,6 +525,11 @@ func TestBooster(t *testing.T) {
 	}
 
 	if err := initAssetsGenerators(); err != nil {
+		t.Fatal(err)
+	}
+
+	err, yubikey := detectYubikey()
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -638,6 +676,14 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
 	}))
 
+	if yubikey != nil {
+		t.Run("LUKS2.Clevis.Yubikey", boosterTest(Opts{
+			disk:       "assets/luks2.clevis.yubikey.img",
+			kernelArgs: []string{"rd.luks.uuid=f2473f71-9a61-4b16-ae54-8f942b2daf52", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+			extraFiles: "ykchalresp",
+			params:     []string{"-usb", "-device", "usb-host,hostbus=" + yubikey.bus + ",hostaddr=" + yubikey.device},
+		}))
+	}
 	t.Run("LUKS1.Clevis.Tang", boosterTest(Opts{
 		disk:        "assets/luks1.clevis.tang.img",
 		enableTangd: true,
