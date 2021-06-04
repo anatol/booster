@@ -184,4 +184,3 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 
 	return nil, fmt.Errorf("unable to parse %s= parameter '%s'", name, param)
 }
-
