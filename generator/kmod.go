@@ -584,7 +584,7 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 	}
 
 	if !k.universal {
-		devAliases, err := conf.readDeviceAliases()
+		devAliases, err := conf.readDeviceAliases() // list of current host aliases as reported by /sys/devices
 		if err != nil {
 			return nil, err
 		}
@@ -635,6 +635,12 @@ func readDeviceAliases() (set, error) {
 
 		return nil
 	})
+
+	// Buses might have associated modaliases e.g. mmc bus sends an udev event modalias 'mmc:block' (see Linux drivers/mmc/core/bus.c)
+	// But it seems that this modalias is not reported anywhere under /sys/devices, see https://github.com/anatol/booster/issues/90
+
+	// insert implicit modaliases. TODO: find a more straightforward way to detect all buses modaliases
+	aliases["mmc:block"] = true
 
 	return aliases, err
 }
