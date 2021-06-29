@@ -348,23 +348,28 @@ func isSystemd(path string) (bool, error) {
 	return strings.HasSuffix(myRealpath, "/systemd"), nil
 }
 
-// moveSlashRunMountpoint moves some of the initramfs mounts into the main image
-func moveSlashRunMountpoint() error {
-	// remount root as it might contain udev state that we need to pass to the new root
-	_, err := os.Stat(newRoot + "/run")
-	if os.IsNotExist(err) {
-		// let's print a warning and hope that the new root works without initrd udev state
-		warning("/run does not exist at the newly mounted root filesystem")
+// moveMountpointsToHost moves some of the initramfs mounts into the host filesystem
+// it is needed for example in following cases:
+//    /run might contain some udev state that needs to be passed from initramfs to host
+//    runit expects that /dev/ is mounted at the moment runit starts
+func moveMountpointsToHost() error {
+	for _, m := range []string{"/run", "/dev", "/proc", "/sys"} {
+		// remount root as it might contain state that we need to pass to the new root
+		_, err := os.Stat(newRoot + m)
+		if os.IsNotExist(err) {
+			// let's print a warning and hope that host OS setup the filesystem if needed
+			warning("%s does not exist at the newly mounted root filesystem", m)
 
-		// unmount /run so its directory can be removed and reclaimed
-		if err := unix.Unmount("/run", 0); err != nil {
-			return fmt.Errorf("unmount(/run): %v", err)
+			// unmount the directory so its directory can be removed and reclaimed
+			if err := unix.Unmount(m, unix.MNT_DETACH); err != nil {
+				return fmt.Errorf("unmount(%s): %v", m, err)
+			}
+			continue
 		}
-		return nil
-	}
 
-	if err := unix.Mount("/run", newRoot+"/run", "", unix.MS_MOVE, ""); err != nil {
-		return fmt.Errorf("move /run to new root: %v", err)
+		if err := unix.Mount(m, newRoot+m, "", unix.MS_MOVE, ""); err != nil {
+			return fmt.Errorf("move %s to new root: %v", m, err)
+		}
 	}
 
 	return nil
@@ -464,16 +469,8 @@ func deleteRamfs() error {
 
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
-	if err := moveSlashRunMountpoint(); err != nil {
+	if err := moveMountpointsToHost(); err != nil {
 		return err
-	}
-
-	// note that /run has been unmounted earlier
-	for _, m := range []string{"/dev", "/proc", "/sys"} {
-		// some drivers (e.g. GPU) might use these filesystems, unmount it lazily
-		if err := unix.Unmount(m, unix.MNT_DETACH); err != nil {
-			return fmt.Errorf("unmount(%s): %v", m, err)
-		}
 	}
 
 	if err := deleteRamfs(); err != nil {
