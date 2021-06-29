@@ -441,6 +441,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/mdraid.img"] = assetGenerator{"generate_asset_mdraid.sh", []string{"OUTPUT=assets/mdraid.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
+	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.raw"}}
 
 	return nil
 }
@@ -795,6 +796,17 @@ func TestBooster(t *testing.T) {
 	}))
 	t.Run("Gpt.Autodiscovery", boosterTest(Opts{
 		disk: "assets/gpt.img",
+	}))
+
+	t.Run("VoidLinux", boosterTest(Opts{
+		disk:       "assets/voidlinux.img",
+		kernelArgs: []string{"root=/dev/sda"},
+		forceKill:  true,
+		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
+			if err := vm.ConsoleExpect("runsvchdir: default: current."); err != nil {
+				t.Fatal(err)
+			}
+		},
 	}))
 
 	// boot Arch userspace (with systemd) against all installed linux packages
