@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const imageModulesDir = "/usr/lib/modules/"
+const imageModulesDir = "/usr/lib/modules"
 
 type alias struct{ pattern, module string } // module alias info
 
