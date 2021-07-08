@@ -112,6 +112,7 @@ type NetworkConfig struct {
 	Gateway    string `yaml:",omitempty"` // e.g. 10.0.2.255
 	DNSServers string `yaml:"dns_servers,omitempty"`
 }
+
 type GeneratorConfig struct {
 	Network              *NetworkConfig `yaml:",omitempty"`
 	Universal            bool           `yaml:",omitempty"`
@@ -240,7 +241,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		var disks []vmtest.QemuDisk
 		if opts.disk != "" {
-			disks = []vmtest.QemuDisk{{opts.disk, "raw"}}
+			disks = []vmtest.QemuDisk{{Path: opts.disk, Format: "raw"}}
 		} else {
 			disks = opts.disks
 		}
@@ -529,7 +530,7 @@ func TestBooster(t *testing.T) {
 	t.Run("Vfio", boosterTest(Opts{
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-		disks:            []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+		disks:            []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
 		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
 
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
@@ -555,8 +556,8 @@ func TestBooster(t *testing.T) {
 	t.Run("NonFormattedDrive", boosterTest(Opts{
 		compression: "none",
 		disks: []vmtest.QemuDisk{
-			{ /* represents non-formatted drive */ "integration_test.go", "raw"},
-			{"assets/ext4.img", "raw"},
+			{ /* represents non-formatted drive */ Path: "integration_test.go", Format: "raw"},
+			{Path: "assets/ext4.img", Format: "raw"},
 		},
 		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	}))
@@ -804,7 +805,7 @@ func TestBooster(t *testing.T) {
 			kernelVersion: ver,
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{"assets/archlinux.ext4.raw", "raw"}},
+			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
 			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
 			kernelArgs:   []string{"root=/dev/sda", "rw"},
 			checkVmState: checkVmState,
@@ -815,7 +816,7 @@ func TestBooster(t *testing.T) {
 			kernelVersion: ver,
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{"assets/archlinux.btrfs.raw", "raw"}},
+			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.btrfs.raw", Format: "raw"}},
 			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "quiet", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
 			prompt:        "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
 			password:      "hello",
