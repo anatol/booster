@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anatol/vmtest"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
@@ -199,9 +200,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 	if opts.checkVmState == nil {
 		// default simple check
 		opts.checkVmState = func(vm *vmtest.Qemu, t *testing.T) {
-			if err := vm.ConsoleExpect("Hello, booster!"); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 		}
 	}
 	const defaultLuksPassword = "1234"
@@ -213,27 +212,21 @@ func boosterTest(opts Opts) func(*testing.T) {
 		// TODO: make this test run in parallel
 
 		if opts.disk != "" {
-			if err := checkAsset(opts.disk); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, checkAsset(opts.disk))
 		} else {
 			for _, disk := range opts.disks {
-				if err := checkAsset(disk.Path); err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, checkAsset(disk.Path))
 			}
 		}
 
 		if kernel, ok := kernelVersions["linux"]; ok {
 			opts.kernelVersion = kernel
 		} else {
-			t.Fatal("System does not have 'linux' package installed needed for the integration tests")
+			require.Fail(t, "System does not have 'linux' package installed needed for the integration tests")
 		}
 
 		initRamfs, err := generateInitRamfs(opts)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer os.Remove(initRamfs)
 
 		params := []string{"-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
@@ -243,9 +236,8 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		kernelArgs := append(opts.kernelArgs, "booster.debug")
 
-		if opts.disk != "" && len(opts.disks) != 0 {
-			t.Fatal("Opts.disk and Opts.disks cannot be specified together")
-		}
+		require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
+
 		var disks []vmtest.QemuDisk
 		if opts.disk != "" {
 			disks = []vmtest.QemuDisk{{opts.disk, "raw"}}
@@ -253,16 +245,12 @@ func boosterTest(opts Opts) func(*testing.T) {
 			disks = opts.disks
 		}
 		for _, d := range disks {
-			if err := checkAsset(d.Path); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, checkAsset(d.Path))
 		}
 
 		if opts.enableTangd {
 			tangd, err := NewTangServer("assets/tang")
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer tangd.Stop()
 			// using command directly like one below does not work as extra info is printed to stderr and QEMU incorrectly
 			// assumes it is a part of HTTP reply
@@ -277,16 +265,12 @@ func boosterTest(opts Opts) func(*testing.T) {
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 			}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, cmd.Start())
 			defer cmd.Process.Kill()
 			defer os.Remove("assets/swtpm-sock") // sometimes process crash leaves this file
 
 			// wait till swtpm really starts
-			if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, waitForFile("assets/swtpm-sock", 5*time.Second))
 
 			params = append(params, "-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0")
 		}
@@ -307,9 +291,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			Timeout:         40 * time.Second,
 		}
 		vm, err := vmtest.NewQemu(&options)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		if opts.forceKill {
 			defer vm.Kill()
 		} else {
@@ -317,12 +299,8 @@ func boosterTest(opts Opts) func(*testing.T) {
 		}
 
 		if opts.prompt != "" {
-			if err := vm.ConsoleExpect(opts.prompt); err != nil {
-				t.Fatal(err)
-			}
-			if err := vm.ConsoleWrite(opts.password + "\n"); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, vm.ConsoleExpect(opts.prompt))
+			require.NoError(t, vm.ConsoleWrite(opts.password+"\n"))
 		}
 		opts.checkVmState(vm, t)
 	}
@@ -387,15 +365,11 @@ func compileBinaries(dir string) error {
 
 func runSshCommand(t *testing.T, conn *ssh.Client, command string) string {
 	sessAnalyze, err := conn.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer sessAnalyze.Close()
 
 	out, err := sessAnalyze.CombinedOutput(command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	return string(out)
 }
@@ -486,10 +460,10 @@ type yubikey struct {
 }
 
 // detectYubikey checks if a yubikey is present and uses its slot #2 for tests
-func detectYubikey() (error, *yubikey) {
+func detectYubikey() (*yubikey, error) {
 	out, err := exec.Command("lsusb").CombinedOutput()
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	for _, l := range strings.Split(string(out), "\n") {
@@ -499,15 +473,15 @@ func detectYubikey() (error, *yubikey) {
 
 		re, err := regexp.Compile(`Bus 0*(\d+) Device 0*(\d+):`)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 
 		m := re.FindAllStringSubmatch(l, -1)
 		if m == nil {
-			return fmt.Errorf("lsusb does not match bus/device"), nil
+			return nil, fmt.Errorf("lsusb does not match bus/device")
 		}
 
-		return nil, &yubikey{m[0][1], m[0][2]}
+		return &yubikey{m[0][1], m[0][2]}, nil
 	}
 
 	return nil, nil
@@ -516,23 +490,14 @@ func detectYubikey() (error, *yubikey) {
 func TestBooster(t *testing.T) {
 	var err error
 	kernelVersions, err = detectKernelVersion()
-	if err != nil {
-		t.Fatalf("unable to detect current Linux version: %v", err)
-	}
+	require.NoError(t, err, "unable to detect current Linux version")
 
 	binariesDir = t.TempDir()
-	if err := compileBinaries(binariesDir); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, compileBinaries(binariesDir))
+	require.NoError(t, initAssetsGenerators())
 
-	if err := initAssetsGenerators(); err != nil {
-		t.Fatal(err)
-	}
-
-	err, yubikey := detectYubikey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	yubikey, err := detectYubikey()
+	require.NoError(t, err)
 
 	// TODO: add a test to verify the emergency shell functionality
 	// VmTest uses sockets for console and it seems does not like the shell we launch
@@ -574,25 +539,16 @@ func TestBooster(t *testing.T) {
 			}
 
 			conn, err := ssh.Dial("tcp", ":10022", config)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer conn.Close()
 
 			dmesg := runSshCommand(t, conn, "dmesg")
-			if !strings.Contains(dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"") {
-				t.Fatal("expecting vfio_pci module loading")
-			}
-			if !strings.Contains(dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000") {
-				t.Fatal("expecting vfio_pci 1002:67df device")
-			}
-			if !strings.Contains(dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000") {
-				t.Fatal("expecting vfio_pci 1002:aaf0 device")
-			}
+			require.Contains(t, dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"", "expecting vfio_pci module loading")
+			require.Contains(t, dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:67df device")
+			require.Contains(t, dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:aaf0 device")
+
 			re := regexp.MustCompile(`booster: udev event {Header:add@/bus/pci/drivers/vfio-pci Action:add Devpath:/bus/pci/drivers/vfio-pci Subsystem:drivers Seqnum:\d+ Vars:map\[ACTION:add DEVPATH:/bus/pci/drivers/vfio-pci SEQNUM:\d+ SUBSYSTEM:drivers]}`)
-			if !re.MatchString(dmesg) {
-				t.Fatal("expecting vfio_pci module loading udev event")
-			}
+			require.Regexp(t, re, dmesg, "expecting vfio_pci module loading udev event")
 		},
 	}))
 
@@ -626,9 +582,7 @@ func TestBooster(t *testing.T) {
 		mountTimeout: 1,
 		forceKill:    true,
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
-			if err := vm.ConsoleExpect("Timeout waiting for root filesystem"); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 		},
 	}))
 	t.Run("Fsck", boosterTest(Opts{
@@ -712,9 +666,7 @@ func TestBooster(t *testing.T) {
 		mountTimeout: 10,
 		forceKill:    true,
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
-			if err := vm.ConsoleExpect("Timeout waiting for root filesystem"); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 		},
 	}))
 
@@ -803,9 +755,7 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"root=/dev/sda"},
 		forceKill:  true,
 		checkVmState: func(vm *vmtest.Qemu, t *testing.T) {
-			if err := vm.ConsoleExpect("runsvchdir: default: current."); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, vm.ConsoleExpect("runsvchdir: default: current."))
 		},
 	}))
 
@@ -822,44 +772,28 @@ func TestBooster(t *testing.T) {
 			}
 
 			conn, err := ssh.Dial("tcp", ":10022", config)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer conn.Close()
 
 			sess, err := conn.NewSession()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer sess.Close()
 
 			out, err := sess.CombinedOutput("systemd-analyze")
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
-			if !strings.Contains(string(out), "(initrd)") {
-				t.Fatalf("expect initrd time stats in systemd-analyze, got '%s'", string(out))
-			}
+			require.Contains(t, string(out), "(initrd)", "expect initrd time stats in systemd-analyze")
 
 			// check writing to kmesg works
 			sess3, err := conn.NewSession()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer sess3.Close()
 			out, err = sess3.CombinedOutput("dmesg | grep -i booster")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(out), "Switching to the new userspace now") {
-				t.Fatalf("expected to see debug output from booster")
-			}
+			require.NoError(t, err)
+			require.Contains(t, string(out), "Switching to the new userspace now", "expected to see debug output from booster")
 
 			sessShutdown, err := conn.NewSession()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer sessShutdown.Close()
 			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
 			_, _ = sessShutdown.CombinedOutput("shutdown now")
