@@ -58,7 +58,7 @@ func (s *TangServer) serve() {
 				log.Println("accept error", err)
 			}
 		} else {
-			s.handleConection(conn)
+			s.handleConnection(conn)
 			if err := conn.Close(); err != nil {
 				log.Print(err)
 			}
@@ -66,7 +66,7 @@ func (s *TangServer) serve() {
 	}
 }
 
-func (s *TangServer) handleConection(conn net.Conn) {
+func (s *TangServer) handleConnection(conn net.Conn) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := conn.Read(buf)
