@@ -560,6 +560,11 @@ func scanSysBlock() error {
 
 func scanSysModaliases(path string, info os.FileInfo, err error) error {
 	if err != nil {
+		if os.IsNotExist(err) {
+			// /dev/sys has a number of ephemeral files (like 'waiting_for_supplier') that might be added/removed
+			// from the fs underneath us. Workaround it, ignore any errors for files that we listed but later unable to read.
+			return nil
+		}
 		return err
 	}
 	if info.IsDir() {
