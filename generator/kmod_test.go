@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/xi2/xz"
 )
 
@@ -93,6 +94,20 @@ func checkModuleName(modname, filename string, wg *sync.WaitGroup, ch chan error
 		defer f.Close()
 
 		x, err := xz.NewReader(f, 0)
+		if err != nil {
+			ch <- err
+			return
+		}
+		r = NewBufferedReaderAt(x)
+	} else if strings.HasSuffix(filename, ".ko.zst") {
+		f, err := os.Open(filename)
+		if err != nil {
+			ch <- err
+			return
+		}
+		defer f.Close()
+
+		x, err := zstd.NewReader(f)
 		if err != nil {
 			ch <- err
 			return
