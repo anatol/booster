@@ -78,7 +78,11 @@ func udevListener() {
 	dec := uevent.NewDecoder(udevReader)
 
 	for {
-		ev, err := dec.Decode() // TODO: there is a race condition with closing udevReader that causes panic in bufio.go
+		ev, err := dec.Decode()
+		if err == io.EOF {
+			// EOF is returned if uevent reader is closed concurrently
+			return
+		}
 		if err != nil {
 			severe("uevent: %v", err)
 			return
