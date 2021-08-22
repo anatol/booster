@@ -413,7 +413,8 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/luks2.clevis.yubikey.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.yubikey.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}}
 	assetGenerators["assets/gpt.img"] = assetGenerator{"generate_asset_gpt.sh", []string{"OUTPUT=assets/gpt.img", "FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}}
 	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
-	assetGenerators["assets/mdraid.img"] = assetGenerator{"generate_asset_mdraid.sh", []string{"OUTPUT=assets/mdraid.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
+	assetGenerators["assets/mdraid_raid1.img"] = assetGenerator{"generate_asset_mdraid_raid1.sh", []string{"OUTPUT=assets/mdraid_raid1.img", "FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}}
+	assetGenerators["assets/mdraid_raid5.img"] = assetGenerator{"generate_asset_mdraid_raid5.sh", []string{"OUTPUT=assets/mdraid_raid5.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
 	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.raw"}}
@@ -693,16 +694,29 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"root=UUID=74c9e30c-506f-4106-9f61-a608466ef29c"},
 	}))
 
-	t.Run("MdRaid.Path", boosterTest(Opts{
+	t.Run("MdRaid1.Path", boosterTest(Opts{
 		enableMdraid: true,
-		mdraidConf:   "assets/mdraid.img.array",
-		disk:         "assets/mdraid.img",
-		kernelArgs:   []string{"root=/dev/md/BoosterTestArray"},
+		mdraidConf:   "assets/mdraid_raid1.img.array",
+		disk:         "assets/mdraid_raid1.img",
+		kernelArgs:   []string{"root=/dev/md/BoosterTestArray1"},
 	}))
-	t.Run("MdRaid.UUID", boosterTest(Opts{
+	t.Run("MdRaid1.UUID", boosterTest(Opts{
 		enableMdraid: true,
-		mdraidConf:   "assets/mdraid.img.array",
-		disk:         "assets/mdraid.img",
+		mdraidConf:   "assets/mdraid_raid1.img.array",
+		disk:         "assets/mdraid_raid1.img",
+		kernelArgs:   []string{"root=UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd"},
+	}))
+
+	t.Run("MdRaid5.Path", boosterTest(Opts{
+		enableMdraid: true,
+		mdraidConf:   "assets/mdraid_raid5.img.array",
+		disk:         "assets/mdraid_raid5.img",
+		kernelArgs:   []string{"root=/dev/md/BoosterTestArray5"},
+	}))
+	t.Run("MdRaid5.UUID", boosterTest(Opts{
+		enableMdraid: true,
+		mdraidConf:   "assets/mdraid_raid5.img.array",
+		disk:         "assets/mdraid_raid5.img",
 		kernelArgs:   []string{"root=UUID=e62c7dc0-5728-4571-b475-7745de2eef1e"},
 	}))
 
