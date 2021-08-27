@@ -61,7 +61,7 @@ func luksOpen(dev string, name string) error {
 	if err != nil {
 		return err
 	}
-	for _, t := range tokens {
+	for tokenNum, t := range tokens {
 		if t.Type != luks.ClevisTokenType {
 			continue
 		}
@@ -81,16 +81,23 @@ func luksOpen(dev string, name string) error {
 			payload = node.Jwe
 		}
 
-		// in case of a (network) error retry it several times. or maybe retry logic needs to be inside the clevis itself?
 		var password []byte
-		for i := 0; i < 40; i++ {
+		const retryNum = 40
+		// in case of a (network) error retry it several times. or maybe retry logic needs to be inside the clevis itself?
+		for i := 0; i < retryNum; i++ {
 			password, err = clevis.Decrypt(payload)
 			if err == nil {
+				debug("recovered password from clevis token #%d", tokenNum)
 				break
 			} else {
-				warning("%v", err)
+				debug("%v", err)
 				time.Sleep(time.Second)
 			}
+		}
+
+		if password == nil {
+			debug("unable to recover password from clevis token #%d", tokenNum)
+			continue
 		}
 
 		for _, s := range t.Slots {
@@ -99,9 +106,13 @@ func luksOpen(dev string, name string) error {
 				continue
 			}
 			MemZeroBytes(password)
+			if err == nil {
+				debug("password from clevis token #%d matches", tokenNum)
+			}
 			return err
 		}
 		MemZeroBytes(password)
+		debug("password from clevis token #%d does not match", tokenNum)
 	}
 
 	// tokens did not work, let's unlock with a password
