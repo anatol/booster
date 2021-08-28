@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"path"
 	"regexp"
 	"strconv"
@@ -142,7 +141,6 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 
 var (
 	dmNameRe = regexp.MustCompile(`dm-\d+`)
-	mdNameRe = regexp.MustCompile(`md\d+`)
 )
 
 func handleBlockDeviceUevent(ev *uevent.Uevent) error {
@@ -157,37 +155,8 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 		return err
 	}
 
-	if mdNameRe.MatchString(devName) {
-		return handleMdRaidUevent(ev)
-	}
-
 	if ev.Action == "add" {
 		return addBlockDevice(devName)
-	}
-
-	return nil
-}
-
-func handleMdRaidUevent(ev *uevent.Uevent) error {
-	devName := ev.Vars["DEVNAME"]
-
-	if err := addBlockDevice(devName); err != nil {
-		return err
-	}
-
-	// for mdraid there is a special case - add /dev/md/ArrayName symlink
-	out, err := exec.Command("mdadm", "--export", "--detail", "/dev/"+devName).CombinedOutput()
-	if err != nil {
-		return err
-	}
-
-	props := parseProperties(string(out))
-	if n, ok := props["MD_DEVNAME"]; ok {
-		if err := addBlockDevice("md/" + n); err != nil {
-			return err
-		}
-	} else {
-		return fmt.Errorf("mdraid array %s does not have a MD_DEVNAME property", devName)
 	}
 
 	return nil

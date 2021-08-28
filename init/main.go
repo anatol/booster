@@ -101,7 +101,7 @@ var (
 // from subsystem “block”.
 func addBlockDevice(devname string) error {
 	// Some devices might receive multiple udev add events
-	// Avoid processing these node twice by tracking what has been added already
+	// Avoid processing these nodes twice by tracking what has been added already
 	addedDevicesMutex.Lock()
 	if _, ok := addedDevices[devname]; ok {
 		addedDevicesMutex.Unlock()
@@ -190,12 +190,23 @@ func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
 			return fmt.Errorf("unknown raid level for device %s", devpath)
 		}
 
-		cmd := exec.Command("mdadm", "--incremental", devpath)
-		if verbosityLevel >= levelDebug {
-			cmd.Stderr = os.Stderr
-			cmd.Stdout = os.Stdout
+		out, err := exec.Command("mdadm", "--export", "--incremental", devpath).CombinedOutput()
+		if err != nil {
+			return err
 		}
-		return cmd.Run()
+
+		props := parseProperties(string(out))
+		arrayName, hasArrayName := props["MD_DEVNAME"]
+		if !hasArrayName {
+			return fmt.Errorf("mdraid array at %s does not have a MD_DEVNAME property", info.uuid.toString())
+		}
+
+		if started, ok := props["MD_STARTED"]; !ok || started != "yes" {
+			debug("mdraid array %s is not complete, ignore it", arrayName)
+			return nil
+		}
+
+		return addBlockDevice("md/" + arrayName)
 	} else {
 		debug("MdRaid support is disabled, ignoring mdraid device %s", devpath)
 		return nil
