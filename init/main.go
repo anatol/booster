@@ -178,52 +178,51 @@ var raidModules = map[uint32]string{
 }
 
 func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
-	if config.EnableMdraid {
-		debug("trying to assemble mdraid array %s", info.uuid.toString())
-
-		if mod, ok := raidModules[info.data.(mdraidData).level]; ok {
-			wg := loadModules(mod)
-			wg.Wait()
-		} else {
-			return fmt.Errorf("unknown raid level for device %s", devpath)
-		}
-
-		out, err := exec.Command("mdadm", "--export", "--incremental", devpath).CombinedOutput()
-		if err != nil {
-			return err
-		}
-
-		props := parseProperties(string(out))
-		arrayName, hasArrayName := props["MD_DEVNAME"]
-		if !hasArrayName {
-			return fmt.Errorf("mdraid array at %s does not have a MD_DEVNAME property", info.uuid.toString())
-		}
-
-		if started, ok := props["MD_STARTED"]; !ok || started != "yes" {
-			debug("mdraid array %s is not complete, ignore it", arrayName)
-			return nil
-		}
-
-		return addBlockDevice("md/" + arrayName)
-	} else {
+	if !config.EnableMdraid {
 		debug("MdRaid support is disabled, ignoring mdraid device %s", devpath)
 		return nil
 	}
+	debug("trying to assemble mdraid array %s", info.uuid.toString())
+
+	if mod, ok := raidModules[info.data.(mdraidData).level]; ok {
+		wg := loadModules(mod)
+		wg.Wait()
+	} else {
+		return fmt.Errorf("unknown raid level for device %s", devpath)
+	}
+
+	out, err := exec.Command("mdadm", "--export", "--incremental", devpath).CombinedOutput()
+	if err != nil {
+		return err
+	}
+
+	props := parseProperties(string(out))
+	arrayName, hasArrayName := props["MD_DEVNAME"]
+	if !hasArrayName {
+		return fmt.Errorf("mdraid array at %s does not have a MD_DEVNAME property", info.uuid.toString())
+	}
+
+	if started, ok := props["MD_STARTED"]; !ok || started != "yes" {
+		debug("mdraid array %s is not complete, ignore it", arrayName)
+		return nil
+	}
+
+	return addBlockDevice("md/" + arrayName)
 }
 
 func handleLvmBlockDevice(devpath string) error {
-	if config.EnableLVM {
-		debug("scanning lvm physical volume %s", devpath)
-		cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", devpath)
-		if verbosityLevel >= levelDebug {
-			cmd.Stderr = os.Stderr
-			cmd.Stdout = os.Stdout
-		}
-		return cmd.Run()
-	} else {
+	if !config.EnableLVM {
 		debug("LVM support is disabled, ignoring lvm physical volume %s", devpath)
 		return nil
 	}
+
+	debug("scanning lvm physical volume %s", devpath)
+	cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", devpath)
+	if verbosityLevel >= levelDebug {
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+	}
+	return cmd.Run()
 }
 
 func resume(devpath string) error {
