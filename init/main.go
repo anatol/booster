@@ -126,6 +126,7 @@ func addBlockDevice(devpath string) error {
 	} else if err == errUnknownBlockType {
 		// provide a fake blkid with fs type specified by user
 		info = &blkInfo{
+			path:   devpath,
 			format: cmdline["rootfstype"],
 			isFs:   true,
 		}
@@ -134,17 +135,13 @@ func addBlockDevice(devpath string) error {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
 
-	if cmdResume != nil {
-		if cmdResume.matchesName(devpath) || cmdResume.matchesBlkInfo(info) {
-			if err := resume(devpath); err != nil {
-				return err
-			}
+	if cmdResume != nil && cmdResume.matchesBlkInfo(info) {
+		if err := resume(devpath); err != nil {
+			return err
 		}
 	}
 
-	matchesRoot := cmdRoot.matchesName(devpath) || cmdRoot.matchesBlkInfo(info)
-
-	if matchesRoot {
+	if cmdRoot.matchesBlkInfo(info) {
 		if !info.isFs {
 			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, info.format)
 		}

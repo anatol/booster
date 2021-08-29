@@ -32,12 +32,10 @@ type gptPartoffData struct {
 	offset int
 }
 
-func (d *deviceRef) matchesName(name string) bool {
-	return d.format == refName && d.data.(string) == name
-}
-
 func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 	switch d.format {
+	case refName:
+		return d.data.(string) == info.path
 	case refFsUuid:
 		return bytes.Equal(d.data.(UUID), info.uuid)
 	case refFsLabel:

@@ -9,6 +9,7 @@ import (
 )
 
 type blkInfo struct {
+	path   string
 	format string // gpt, dos, ext4, btrfs, ...
 	isFs   bool   // specifies if the format a mountable filesystem
 	uuid   UUID
@@ -32,6 +33,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 		info := fn(r)
 		if info != nil {
 			debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, info.format, info.uuid.toString(), info.label)
+			info.path = path
 			return info, nil
 		}
 	}
