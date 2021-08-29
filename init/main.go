@@ -95,8 +95,7 @@ func parseCmdline() error {
 }
 
 var (
-	addedDevices      = map[string]bool{}
-	addedDevicesMutex sync.Mutex
+	addedDevices sync.Map
 )
 
 // addBlockDevice is called upon receiving a uevent from the kernel with action “add”
@@ -104,13 +103,10 @@ var (
 func addBlockDevice(devname string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these nodes twice by tracking what has been added already
-	addedDevicesMutex.Lock()
-	if _, ok := addedDevices[devname]; ok {
-		addedDevicesMutex.Unlock()
+	if _, alreadyAdded := addedDevices.LoadOrStore(devname, true); alreadyAdded {
+		// this devname has been processed already
 		return nil
 	}
-	addedDevices[devname] = true
-	addedDevicesMutex.Unlock()
 
 	debug("found a new device %s", devname)
 
