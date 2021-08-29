@@ -156,7 +156,7 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	}
 
 	if ev.Action == "add" {
-		return addBlockDevice(devName)
+		return addBlockDevice("/dev/" + devName)
 	}
 
 	return nil
@@ -193,26 +193,26 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 		return err
 	}
 
-	dmBlockDev := "mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
+	devPath := "/dev/" + devName
+	dmLinkPath := "/dev/mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
 	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
-	if err := os.Symlink("/dev/"+devName, "/dev/"+dmBlockDev); err != nil {
+	if err := os.Symlink(devPath, dmLinkPath); err != nil {
 		return err
 	}
-	if err := addBlockDevice(dmBlockDev); err != nil {
+	if err := addBlockDevice(dmLinkPath); err != nil {
 		return err
 	}
 
 	if strings.HasPrefix(info.UUID, "LVM-") {
 		// for LVM there is a special case - add /dev/VG/LG symlink
-		lvmDmName := strings.ReplaceAll(info.Name, "-", "/")
-		linkName := "/dev/" + lvmDmName
-		if err := os.MkdirAll(path.Dir(linkName), 0755); err != nil {
+		lvmLinkPath := "/dev/" + strings.ReplaceAll(info.Name, "-", "/")
+		if err := os.MkdirAll(path.Dir(lvmLinkPath), 0755); err != nil {
 			return err
 		}
-		if err := os.Symlink("/dev/"+devName, linkName); err != nil {
+		if err := os.Symlink(devPath, lvmLinkPath); err != nil {
 			return err
 		}
-		if err := addBlockDevice(lvmDmName); err != nil {
+		if err := addBlockDevice(lvmLinkPath); err != nil {
 			return err
 		}
 	}

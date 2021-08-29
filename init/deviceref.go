@@ -48,7 +48,7 @@ func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 }
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
-func (d *deviceRef) resolveFromGptTable(devName string, t []gptPart) *deviceRef {
+func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef {
 	if d.format != refGptType && d.format != refGptUuid && d.format != refGptLabel && d.format != refGptUuidPartoff {
 		return d
 	}
@@ -56,7 +56,7 @@ func (d *deviceRef) resolveFromGptTable(devName string, t []gptPart) *deviceRef 
 	calculateDevName := func(parent string, partition int) string {
 		name := parent
 		// some drivers use 'p' prefix for the partition number. TODO: find out where it is codified.
-		if strings.HasPrefix(parent, "nvme") || strings.HasPrefix(parent, "mmcblk") {
+		if strings.HasPrefix(parent, "/dev/nvme") || strings.HasPrefix(parent, "/dev/mmcblk") {
 			name += "p"
 		}
 		name += strconv.Itoa(partition + 1) // devname partitions start with "1"
@@ -67,20 +67,20 @@ func (d *deviceRef) resolveFromGptTable(devName string, t []gptPart) *deviceRef 
 		switch d.format {
 		case refGptType:
 			if bytes.Equal(d.data.(UUID), p.typeGuid) {
-				return &deviceRef{refName, calculateDevName(devName, p.num)}
+				return &deviceRef{refName, calculateDevName(devPath, p.num)}
 			}
 		case refGptUuid:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
-				return &deviceRef{refName, calculateDevName(devName, p.num)}
+				return &deviceRef{refName, calculateDevName(devPath, p.num)}
 			}
 		case refGptUuidPartoff:
 			data := d.data.(gptPartoffData)
 			if bytes.Equal(data.uuid, p.uuid) {
-				return &deviceRef{refName, calculateDevName(devName, p.num+data.offset)}
+				return &deviceRef{refName, calculateDevName(devPath, p.num+data.offset)}
 			}
 		case refGptLabel:
 			if d.data.(string) == p.name {
-				return &deviceRef{refName, calculateDevName(devName, p.num)}
+				return &deviceRef{refName, calculateDevName(devPath, p.num)}
 			}
 		}
 	}
@@ -178,8 +178,7 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 	}
 
 	if strings.HasPrefix(param, "/dev/") {
-		name := strings.TrimPrefix(param, "/dev/")
-		return &deviceRef{refName, name}, nil
+		return &deviceRef{refName, param}, nil
 	}
 
 	return nil, fmt.Errorf("unable to parse %s= parameter '%s'", name, param)

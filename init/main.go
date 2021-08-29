@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -100,17 +99,17 @@ var (
 
 // addBlockDevice is called upon receiving a uevent from the kernel with action “add”
 // from subsystem “block”.
-func addBlockDevice(devname string) error {
+// devpath is a full path to the block device and should include /dev/... prefix
+func addBlockDevice(devpath string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these nodes twice by tracking what has been added already
-	if _, alreadyAdded := addedDevices.LoadOrStore(devname, true); alreadyAdded {
-		// this devname has been processed already
+	if _, alreadyAdded := addedDevices.LoadOrStore(devpath, true); alreadyAdded {
+		// this devpath has been processed already
 		return nil
 	}
 
-	debug("found a new device %s", devname)
+	debug("found a new device %s", devpath)
 
-	devpath := path.Join("/dev", devname)
 	info, err := readBlkInfo(devpath)
 	if err == nil {
 		// check non-mountable types that require extra processing
@@ -122,7 +121,7 @@ func addBlockDevice(devname string) error {
 		case "mdraid":
 			return handleMdraidBlockDevice(info, devpath)
 		case "gpt":
-			return handleGptBlockDevice(info, devname)
+			return handleGptBlockDevice(info, devpath)
 		}
 	} else if err == errUnknownBlockType {
 		// provide a fake blkid with fs type specified by user
@@ -136,14 +135,14 @@ func addBlockDevice(devname string) error {
 	}
 
 	if cmdResume != nil {
-		if cmdResume.matchesName(devname) || cmdResume.matchesBlkInfo(info) {
+		if cmdResume.matchesName(devpath) || cmdResume.matchesBlkInfo(info) {
 			if err := resume(devpath); err != nil {
 				return err
 			}
 		}
 	}
 
-	matchesRoot := cmdRoot.matchesName(devname) || cmdRoot.matchesBlkInfo(info)
+	matchesRoot := cmdRoot.matchesName(devpath) || cmdRoot.matchesBlkInfo(info)
 
 	if matchesRoot {
 		if !info.isFs {
@@ -160,9 +159,9 @@ func addBlockDevice(devname string) error {
 
 // handleGptBlockDevice accepts information about GPT partition table and tries to match
 // possible root= partition.
-func handleGptBlockDevice(info *blkInfo, devname string) error {
+func handleGptBlockDevice(info *blkInfo, devPath string) error {
 	gptParts := info.data.(gptData).partitions
-	cmdRoot = cmdRoot.resolveFromGptTable(devname, gptParts)
+	cmdRoot = cmdRoot.resolveFromGptTable(devPath, gptParts)
 	return nil
 }
 
@@ -207,7 +206,7 @@ func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
 		return nil
 	}
 
-	return addBlockDevice("md/" + arrayName)
+	return addBlockDevice("/dev/md/" + arrayName)
 }
 
 func handleLvmBlockDevice(devpath string) error {
@@ -546,7 +545,7 @@ func scanSysBlock() error {
 	}
 	for _, d := range devs {
 		target := filepath.Join("/sys/block/", d.Name())
-		if err := addBlockDevice(d.Name()); err != nil {
+		if err := addBlockDevice("/dev/" + d.Name()); err != nil {
 			// even if it fails to find UUID here (e.g. in case of unsupported partition table)
 			// we still want to check its partitions
 			return err
@@ -562,7 +561,7 @@ func scanSysBlock() error {
 			if !strings.HasPrefix(p.Name(), d.Name()) {
 				continue
 			}
-			if err := addBlockDevice(p.Name()); err != nil {
+			if err := addBlockDevice("/dev/" + p.Name()); err != nil {
 				return err
 			}
 		}
