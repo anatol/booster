@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yookoala/realpath"
@@ -28,6 +29,7 @@ var (
 	// all boot params (from cmdline) that look like module.name=value considered as potential module parameters for 'module'
 	// it preserved to moduleParams for later use. cmdline is not modified.
 	moduleParams            = make(map[string][]string)
+	rootMounting            int32          // shows if there is a mounting operation in progress
 	rootMounted             sync.WaitGroup // waits until the root partition is mounted
 	concurrentModuleLoading = true
 )
@@ -266,6 +268,10 @@ func fsck(dev string) error {
 }
 
 func mountRootFs(dev, fstype string) error {
+	if !atomic.CompareAndSwapInt32(&rootMounting, 0, 1) {
+		return nil // mount process is in progress
+	}
+
 	wg := loadModules(fstype)
 	wg.Wait()
 
