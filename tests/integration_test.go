@@ -417,7 +417,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/mdraid_raid5.img"] = assetGenerator{"generate_asset_mdraid_raid5.sh", []string{"OUTPUT=assets/mdraid_raid5.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
-	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.raw"}}
+	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.img"}}
 
 	return nil
 }
