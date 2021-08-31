@@ -364,9 +364,8 @@ func (k *Kmod) scanModulesDir() error {
 			if info.Name() == "build" && filename == path.Join(k.hostModulesDir, "build") {
 				// skip header files under ./build dir
 				return filepath.SkipDir
-			} else {
-				return nil
 			}
+			return nil
 		}
 
 		parts := strings.Split(info.Name(), ".")
@@ -785,7 +784,7 @@ func readModprobeOptions() (map[string]string, error) {
 }
 
 func (k *Kmod) filterModprobeForRequiredModules() {
-	for m, _ := range k.modprobeOptions {
+	for m := range k.modprobeOptions {
 		if _, ok := k.requiredModules[m]; !ok {
 			delete(k.modprobeOptions, m)
 		}

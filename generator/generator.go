@@ -218,7 +218,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 		initConfig.Network.Dhcp = true
 	} else if conf.networkConfigType == netStatic {
 		initConfig.Network = &InitNetworkConfig{}
-		initConfig.Network.Ip = conf.networkStaticConfig.ip
+		initConfig.Network.IP = conf.networkStaticConfig.ip
 		initConfig.Network.Gateway = conf.networkStaticConfig.gateway
 		initConfig.Network.DNSServers = conf.networkStaticConfig.dnsServers
 	}

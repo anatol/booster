@@ -121,9 +121,9 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 }
 
 // readClock returns value of the clock in usec units
-func readClock(clockId int32) (uint64, error) {
+func readClock(clockID int32) (uint64, error) {
 	var t unix.Timespec
-	err := unix.ClockGettime(clockId, &t)
+	err := unix.ClockGettime(clockID, &t)
 	if err != nil {
 		return 0, err
 	}

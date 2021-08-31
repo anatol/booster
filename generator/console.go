@@ -51,34 +51,34 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 			return nil, err
 		}
 
-		if blob, err := readFontFile(font); err != nil {
+		blob, err := readFontFile(font)
+		if err != nil {
 			return nil, err
-		} else {
-			conf.FontFile = "/console/font"
+		}
+		conf.FontFile = "/console/font"
+		if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
+			return nil, err
+		}
+
+		if m, ok := vprop["FONT_MAP"]; ok {
+			blob, err := readFontFile(m)
+			if err != nil {
+				return nil, err
+			}
+			conf.FontFile = "/console/font.map"
 			if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
 				return nil, err
 			}
 		}
 
-		if m, ok := vprop["FONT_MAP"]; ok {
-			if blob, err := readFontFile(m); err != nil {
-				return nil, err
-			} else {
-				conf.FontFile = "/console/font.map"
-				if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
-					return nil, err
-				}
-			}
-		}
-
 		if u, ok := vprop["FONT_UNIMAP"]; ok {
-			if blob, err := readFontFile(u); err != nil {
+			blob, err := readFontFile(u)
+			if err != nil {
 				return nil, err
-			} else {
-				conf.FontFile = "/console/font.unimap"
-				if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
-					return nil, err
-				}
+			}
+			conf.FontFile = "/console/font.unimap"
+			if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
+				return nil, err
 			}
 		}
 	} else {

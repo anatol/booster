@@ -128,8 +128,8 @@ linkReadinessLoop:
 		}
 	} else {
 		// static address
-		if c.Ip != "" {
-			addr, err := netlink.ParseAddr(c.Ip)
+		if c.IP != "" {
+			addr, err := netlink.ParseAddr(c.IP)
 			if err != nil {
 				return err
 			}

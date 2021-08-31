@@ -43,7 +43,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 
 type gptPart struct {
 	num      int // index of the partition int the gpt table
-	typeGuid []byte
+	typeGUID []byte
 	uuid     []byte
 	name     string
 }
@@ -74,7 +74,7 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 	if _, err := r.ReadAt(buff, tableHeaderOffset+guidOffset); err != nil {
 		return nil
 	}
-	uuid := convertGptUuid(buff)
+	uuid := convertGptUUID(buff)
 
 	if _, err := r.ReadAt(buff[:16], tableHeaderOffset+partLocationOffset); err != nil {
 		return nil
@@ -86,19 +86,19 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 
 	var parts []gptPart
 	buf := make([]byte, partSize)
-	zeroUuid := make([]byte, 16) // zero UUID used as a marker for unused partitions
+	zeroUUID := make([]byte, 16) // zero UUID used as a marker for unused partitions
 	for i := uint32(0); i < partNum; i++ {
 		start := lbaOffset + uint64(i*partSize)
 		if _, err := r.ReadAt(buf, int64(start)); err != nil {
 			return nil
 		}
-		typeGuid := convertGptUuid(buf[0:0x10])
-		if bytes.Equal(typeGuid, zeroUuid) {
+		typeGUID := convertGptUUID(buf[0:0x10])
+		if bytes.Equal(typeGUID, zeroUUID) {
 			continue
 		}
-		partUuid := convertGptUuid(buf[0x10:0x20])
+		partUUID := convertGptUUID(buf[0x10:0x20])
 		name := fromUnicode16(buf[0x38:], binary.LittleEndian)
-		part := gptPart{int(i), typeGuid, partUuid, name}
+		part := gptPart{int(i), typeGUID, partUUID, name}
 
 		parts = append(parts, part)
 	}
@@ -106,7 +106,7 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 	return &blkInfo{format: "gpt", uuid: uuid, data: gptData{parts}}
 }
 
-func convertGptUuid(d []byte) []byte {
+func convertGptUUID(d []byte) []byte {
 	return []byte{d[3], d[2], d[1], d[0],
 		d[5], d[4],
 		d[7], d[6],

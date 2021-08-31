@@ -18,10 +18,10 @@ var (
 	kmsg *os.File
 )
 
-func printMessage(format string, kLevel int, v ...interface{}) {
+func printMessage(format string, level int, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
 	fmt.Println(msg)
-	_, _ = fmt.Fprint(kmsg, "<", kLevel, ">booster: ", msg)
+	_, _ = fmt.Fprint(kmsg, "<", level, ">booster: ", msg)
 }
 
 func debug(format string, v ...interface{}) {

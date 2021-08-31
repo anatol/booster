@@ -13,10 +13,10 @@ type refFormat uint8
 const (
 	refName           refFormat = iota // name of the block device, e.g. "sda". It corresponds to path inside /dev/ directory.
 	refGptType                         // type of gpt partition
-	refGptUuid                         // uuid of the gpt partition
-	refGptUuidPartoff                  // offset against a gpt partition with uuid
+	refGptUUID                         // uuid of the gpt partition
+	refGptUUIDPartoff                  // offset against a gpt partition with uuid
 	refGptLabel
-	refFsUuid
+	refFsUUID
 	refFsLabel
 )
 
@@ -36,7 +36,7 @@ func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 	switch d.format {
 	case refName:
 		return d.data.(string) == info.path
-	case refFsUuid:
+	case refFsUUID:
 		return bytes.Equal(d.data.(UUID), info.uuid)
 	case refFsLabel:
 		return d.data.(string) == info.label
@@ -47,7 +47,7 @@ func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
 func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef {
-	if d.format != refGptType && d.format != refGptUuid && d.format != refGptLabel && d.format != refGptUuidPartoff {
+	if d.format != refGptType && d.format != refGptUUID && d.format != refGptLabel && d.format != refGptUUIDPartoff {
 		return d
 	}
 
@@ -64,14 +64,14 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 	for _, p := range t {
 		switch d.format {
 		case refGptType:
-			if bytes.Equal(d.data.(UUID), p.typeGuid) {
+			if bytes.Equal(d.data.(UUID), p.typeGUID) {
 				return &deviceRef{refName, calculateDevName(devPath, p.num)}
 			}
-		case refGptUuid:
+		case refGptUUID:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
 				return &deviceRef{refName, calculateDevName(devPath, p.num)}
 			}
-		case refGptUuidPartoff:
+		case refGptUUIDPartoff:
 			data := d.data.(gptPartoffData)
 			if bytes.Equal(data.uuid, p.uuid) {
 				return &deviceRef{refName, calculateDevName(devPath, p.num+data.offset)}
@@ -97,9 +97,9 @@ var autodiscoveryGptTypes = map[string]string{
 func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, error) {
 	if param == "" {
 		// try to auto-discover gpt partition https://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/
-		if autodiscoveryGuid, ok := autodiscoveryGptTypes[runtime.GOARCH]; enableAutodetect && ok {
-			debug("%s= param is not specified. Use GPT partition autodiscovery with guid type %s", name, autodiscoveryGuid)
-			gptType, err := parseUUID(autodiscoveryGuid)
+		if autodiscoveryGUID, ok := autodiscoveryGptTypes[runtime.GOARCH]; enableAutodetect && ok {
+			debug("%s= param is not specified. Use GPT partition autodiscovery with guid type %s", name, autodiscoveryGUID)
+			gptType, err := parseUUID(autodiscoveryGUID)
 			if err != nil {
 				return nil, err
 			}
@@ -115,7 +115,7 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
-		return &deviceRef{refFsUuid, u}, nil
+		return &deviceRef{refFsUUID, u}, nil
 
 	}
 	if strings.HasPrefix(param, "/dev/disk/by-uuid/") {
@@ -124,7 +124,7 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
-		return &deviceRef{refFsUuid, u}, nil
+		return &deviceRef{refFsUUID, u}, nil
 	}
 	if strings.HasPrefix(param, "LABEL=") {
 		label := strings.TrimPrefix(param, "LABEL=")
@@ -149,13 +149,13 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 			}
-			return &deviceRef{refGptUuidPartoff, gptPartoffData{u, partnoff}}, nil
+			return &deviceRef{refGptUUIDPartoff, gptPartoffData{u, partnoff}}, nil
 		} else {
 			u, err := parseUUID(stripQuotes(uuid))
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 			}
-			return &deviceRef{refGptUuid, u}, nil
+			return &deviceRef{refGptUUID, u}, nil
 		}
 	}
 	if strings.HasPrefix(param, "/dev/disk/by-partuuid/") {
@@ -164,7 +164,7 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
-		return &deviceRef{refGptUuid, u}, nil
+		return &deviceRef{refGptUUID, u}, nil
 	}
 	if strings.HasPrefix(param, "PARTLABEL=") {
 		label := strings.TrimPrefix(param, "PARTLABEL=")

@@ -63,17 +63,17 @@ func loadKmap(fd uintptr, file string) error {
 			continue
 		}
 
-		type kbentry struct {
-			kb_table uint8
-			kb_index uint8
-			kb_value uint16
+		type kbEntry struct {
+			kbTable uint8
+			kbIndex uint8
+			kbValue uint16
 		}
 		for j := 0; j < NR_KEYS; j++ {
-			var ke kbentry
+			var ke kbEntry
 
-			ke.kb_table = uint8(i)
-			ke.kb_index = uint8(j)
-			ke.kb_value = *(*uint16)(unsafe.Pointer(&blob[curr]))
+			ke.kbTable = uint8(i)
+			ke.kbIndex = uint8(j)
+			ke.kbValue = *(*uint16)(unsafe.Pointer(&blob[curr]))
 			curr += 2
 
 			if _, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, KDSKBENT, uintptr(unsafe.Pointer(&ke))); errno != 0 {

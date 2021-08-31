@@ -91,19 +91,19 @@ func TestBlkInfo(t *testing.T) {
 	check(t, "luks1", "luks", "6faf1e59-9999-4da4-97f9-c815e7353777", "", 100, "cryptsetup luksFormat -q --type=luks1 --iter-time=1 --uuid=$UUID $OUTPUT <<< 'tetspassphrase'", nil)
 	check(t, "luks2", "luks", "51df71ed-8e4a-4a7a-956d-b782706a52d1", "bazz", 10, "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=$UUID --label=$LABEL $OUTPUT <<< 'tetspassphrase'", nil)
 
-	typeGuid := []byte{203, 52, 81, 177, 53, 176, 64, 249, 160, 234, 133, 102, 237, 5, 222, 109}
-	sector1Uuid := []byte{83, 69, 58, 7, 155, 238, 67, 151, 166, 20, 158, 143, 163, 135, 10, 114}
-	sector2Uuid := []byte{62, 161, 141, 185, 105, 31, 69, 94, 164, 13, 32, 212, 38, 177, 150, 95}
+	typeGUID := []byte{203, 52, 81, 177, 53, 176, 64, 249, 160, 234, 133, 102, 237, 5, 222, 109}
+	sector1UUID := []byte{83, 69, 58, 7, 155, 238, 67, 151, 166, 20, 158, 143, 163, 135, 10, 114}
+	sector2UUID := []byte{62, 161, 141, 185, 105, 31, 69, 94, 164, 13, 32, 212, 38, 177, 150, 95}
 	check(t, "gpt", "gpt", "c26fcabe-8010-4bff-a066-8c73e76dbb32", "", 10, "gdisk $OUTPUT <<< 'o\ny\nx\ng\n$UUID\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\nсектор1\nx\nc\n53453a07-9bee-4397-a614-9e8fa3870a72\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\n2\nhello\nx\nc\n2\n3ea18db9-691f-455e-a40d-20d426b1965f\nw\ny\n'",
 		gptData{partitions: []gptPart{{
 			num:      0,
-			typeGuid: typeGuid,
-			uuid:     sector1Uuid,
+			typeGUID: typeGUID,
+			uuid:     sector1UUID,
 			name:     "сектор1",
 		}, {
 			num:      1,
-			typeGuid: typeGuid,
-			uuid:     sector2Uuid,
+			typeGUID: typeGUID,
+			uuid:     sector2UUID,
 			name:     "hello",
 		}}})
 	check(t, "mbr", "mbr", "2beab180", "", 1, "fdisk $OUTPUT <<< 'o\nx\ni\n0x$UUID\nr\nw\n'", nil)
