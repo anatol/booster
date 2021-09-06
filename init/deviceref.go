@@ -64,7 +64,11 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 		switch d.format {
 		case refGptType:
 			if bytes.Equal(d.data.(UUID), p.typeGUID) {
-				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
+				partitionPath := calculateDevPath(devPath, p.num)
+				if rootAutodiscoveryMode {
+					debug("autodiscovery: partition %s matches root", partitionPath)
+				}
+				return &deviceRef{refPath, partitionPath}
 			}
 		case refGptUUID:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
@@ -85,7 +89,18 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 	return d
 }
 
-var autodiscoveryGptTypes = map[string]string{
+// checks whether given partition table contains active EFI service partition
+func gptContainsEsp(t []gptPart) bool {
+	for _, p := range t {
+		if bytes.Equal(activeEfiEspGUID, p.uuid) {
+			return true
+		}
+	}
+
+	return false
+}
+
+var rootAutodiscoveryGptTypes = map[string]string{
 	"amd64": "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
 	"386":   "44479540-f297-41b2-9af7-d131d5f0458a",
 	"arm":   "69dad710-2ce4-4e3c-b16c-21a1d49abed3",

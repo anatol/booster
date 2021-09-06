@@ -188,7 +188,8 @@ type Opts struct {
 	kernelArgs           []string
 	disk                 string
 	disks                []vmtest.QemuDisk
-	mountTimeout         int // in seconds
+	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	mountTimeout         int  // in seconds
 	extraFiles           string
 	checkVMState         func(vm *vmtest.Qemu, t *testing.T)
 	forceKill            bool // if true then kill VM rather than do a graceful shutdown
@@ -289,16 +290,45 @@ func boosterTest(opts Opts) func(*testing.T) {
 
 		params = append(params, opts.params...)
 
+		// provide host's directory as a guest block device
+		// disks = append(disks, vmtest.QemuDisk{Path: fmt.Sprintf("fat:ro:%s,read-only=on", filepath.Join(kernelsDir, opts.kernelVersion)), Format: "raw"})
+
+		vmlinuzPath := filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz")
+
+		if opts.containsESP {
+			params = append(params, "-bios", "/usr/share/ovmf/x64/OVMF.fd")
+
+			// ESP partition contains initramfs and cannot be statically built
+			// we built the image at runtime
+			output := t.TempDir() + "/disk.raw"
+
+			env := []string{
+				"OUTPUT=" + output,
+				"KERNEL_IMAGE=" + vmlinuzPath,
+				"KERNEL_OPTIONS=" + strings.Join(kernelArgs, " "),
+				"INITRAMFS_IMAGE=" + initRamfs,
+			}
+			if err := shell("generate_asset_esp.sh", env...); err != nil {
+				t.Fatal(err)
+			}
+
+			disks = append(disks, vmtest.QemuDisk{Path: output, Format: "raw"})
+		}
+
 		options := vmtest.QemuOptions{
-			OperatingSystem: vmtest.OS_LINUX,
-			Kernel:          filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz"),
-			InitRamFs:       initRamfs,
 			Params:          params,
-			Append:          kernelArgs,
+			OperatingSystem: vmtest.OS_LINUX,
 			Disks:           disks,
 			Verbose:         testing.Verbose(),
 			Timeout:         40 * time.Second,
 		}
+
+		if !opts.containsESP {
+			options.Kernel = vmlinuzPath
+			options.InitRamFs = initRamfs
+			options.Append = kernelArgs
+		}
+
 		vm, err := vmtest.NewQemu(&options)
 		require.NoError(t, err)
 		if opts.forceKill {
@@ -595,6 +625,7 @@ func TestBooster(t *testing.T) {
 	}))
 
 	t.Run("MountTimeout", boosterTest(Opts{
+		kernelArgs:   []string{"root=/dev/nonexistent"},
 		compression:  "xz",
 		mountTimeout: 1,
 		forceKill:    true,
@@ -776,16 +807,19 @@ func TestBooster(t *testing.T) {
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
 	}))
-	t.Run("Gpt.Autodiscovery", boosterTest(Opts{
-		disk: "assets/gpt.img",
+	t.Run("Gpt.RootAutodiscovery", boosterTest(Opts{
+		containsESP: true,
+		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
 	}))
 
 	t.Run("Nvme", boosterTest(Opts{
-		disks: []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+		kernelArgs: []string{"root=/dev/nvme0n1p3"},
 	}))
 	t.Run("Usb", boosterTest(Opts{
-		disks:  []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
-		params: []string{"-device", "usb-ehci,id=ehci"},
+		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
+		params:     []string{"-device", "usb-ehci,id=ehci"},
+		kernelArgs: []string{"root=/dev/sda3"},
 	}))
 
 	if yubikey != nil {

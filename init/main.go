@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,12 +34,15 @@ var (
 	rootMounting            int32          // shows if there is a mounting operation in progress
 	rootMounted             sync.WaitGroup // waits until the root partition is mounted
 	concurrentModuleLoading = true
+
+	cmdRoot   *deviceRef
+	cmdResume *deviceRef
+
+	rootAutodiscoveryMode bool
+	activeEfiEspGUID      UUID // partition that was used as Efi system partition last time
 )
 
 type set map[string]bool
-
-var cmdRoot *deviceRef
-var cmdResume *deviceRef
 
 func parseCmdline() error {
 	b, err := os.ReadFile("/proc/cmdline")
@@ -87,15 +92,22 @@ func parseCmdline() error {
 		}
 	} else {
 		// try to auto-discover gpt partition https://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/
-		autodiscoveryGUID, ok := autodiscoveryGptTypes[runtime.GOARCH]
+		rootUUIDType, ok := rootAutodiscoveryGptTypes[runtime.GOARCH]
 		if !ok {
 			return fmt.Errorf("root= boot option is not specified")
 		}
-		debug("root= param is not specified. Use GPT partition autodiscovery with guid type %s", autodiscoveryGUID)
-		gptType, err := parseUUID(autodiscoveryGUID)
+		debug("root= param is not specified. Use GPT partition autodiscovery with guid type %s", rootUUIDType)
+		gptType, err := parseUUID(rootUUIDType)
 		if err != nil {
 			return err
 		}
+
+		activeEfiEspGUID, err = getActiveEfiEsp()
+		if err != nil {
+			return fmt.Errorf("unable to detect active ESP: %v", err)
+		}
+
+		rootAutodiscoveryMode = true
 		cmdRoot = &deviceRef{refGptType, gptType}
 	}
 
@@ -107,6 +119,28 @@ func parseCmdline() error {
 	}
 
 	return nil
+}
+
+// get the active EFI ESP UUID by reading efivars
+func getActiveEfiEsp() (UUID, error) {
+	_, data, err := readEfiVar("LoaderDevicePartUUID", "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f")
+	if err != nil {
+		return nil, err
+	}
+
+	uuid := fromUnicode16(data, binary.LittleEndian)
+	return parseUUID(uuid)
+}
+
+func readEfiVar(name, uuid string) (attribute uint32, data []byte, err error) {
+	data, err = os.ReadFile("/sys/firmware/efi/efivars/" + name + "-" + uuid)
+	if err != nil {
+		return
+	}
+
+	attribute = binary.LittleEndian.Uint32(data[:4])
+	data = data[4:]
+	return
 }
 
 var (
@@ -226,6 +260,16 @@ func addBlockDeviceSymlink(symlink string) error {
 // possible root= partition.
 func handleGptBlockDevice(info *blkInfo, devPath string) error {
 	gptParts := info.data.(gptData).partitions
+
+	if rootAutodiscoveryMode {
+		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
+		if gptContainsEsp(gptParts) {
+			debug("%s table contains active ESP, use it to discover root", devPath)
+		} else {
+			return nil
+		}
+	}
+
 	cmdRoot = cmdRoot.resolveFromGptTable(devPath, gptParts)
 	return nil
 }
@@ -683,6 +727,13 @@ func boost() error {
 	}
 	if err := mount("run", "/run", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_STRICTATIME, "mode=755"); err != nil {
 		return err
+	}
+
+	// Mount efivarfs if running in EFI mode
+	if _, err := os.Stat("/sys/firmware/efi"); !errors.Is(err, os.ErrNotExist) {
+		if err := mount("efivarfs", "/sys/firmware/efi/efivars", "efivarfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
+			return err
+		}
 	}
 
 	if err := os.Setenv("PATH", "/usr/bin"); err != nil {
