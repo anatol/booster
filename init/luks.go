@@ -357,43 +357,49 @@ func luksOpen(dev string, name string) error {
 	}
 }
 
-func handleLuksBlockDevice(info *blkInfo, devpath string) error {
-	var name string
-	var matches bool
-
+func parseLuksParameters(info *blkInfo) (string, error) {
 	if param, ok := cmdline["rd.luks.name"]; ok {
 		parts := strings.Split(param, "=")
 		if len(parts) != 2 {
-			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
+			return "", fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
 		}
 		uuid, err := parseUUID(stripQuotes(parts[0]))
 		if err != nil {
-			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
+			return "", fmt.Errorf("invalid UUID %s %v", parts[0], err)
 		}
 		if bytes.Equal(uuid, info.uuid) {
-			matches = true
-			name = parts[1]
+			return parts[1], nil
 		}
 	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
 		stripped := stripQuotes(uuid)
 		u, err := parseUUID(stripped)
 		if err != nil {
-			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
+			return "", fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
 		}
 		if bytes.Equal(u, info.uuid) {
-			matches = true
-			name = "luks-" + stripped
+			return "luks-" + stripped, nil
 		}
 	}
-	if matches {
-		go func() {
-			// opening a luks device is a slow operation, run it in a separate goroutine
-			if err := luksOpen(devpath, name); err != nil {
-				severe("%v", err)
-			}
-		}()
-	} else {
-		debug("luks device %s does not match rd.luks.xx param", devpath)
+	return "", nil
+}
+
+func handleLuksBlockDevice(info *blkInfo, devpath string) error {
+	name, err := parseLuksParameters(info)
+	if err != nil {
+		return err
 	}
+
+	if name == "" {
+		debug("luks device %s does not match rd.luks.xx param", devpath)
+		return nil
+	}
+
+	go func() {
+		// opening a luks device is a slow operation, run it in a separate goroutine
+		if err := luksOpen(devpath, name); err != nil {
+			severe("%v", err)
+		}
+	}()
+
 	return nil
 }

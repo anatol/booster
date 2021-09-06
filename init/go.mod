@@ -8,6 +8,7 @@ require (
 	github.com/anatol/luks.go v0.0.0-20210908180322-d9003e7f7df8
 	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.0-20210906140327-598bf66f24a6 // indirect
+	github.com/foxboron/go-uefi v0.0.0-20210905104421-29591bd7f4d5
 	github.com/goccy/go-json v0.7.8 // indirect
 	github.com/google/go-tpm v0.3.3-0.20210409082102-d3310770bfec
 	github.com/insomniacslk/dhcp v0.0.0-20210827173440-b95caade3eac
@@ -32,4 +33,5 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
+	golang.org/x/text v0.3.6 // indirect
 )

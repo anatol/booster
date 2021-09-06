@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -37,6 +38,8 @@ type set map[string]bool
 
 var cmdRoot *deviceRef
 var cmdResume *deviceRef
+
+var efiVarsAvailable = false
 
 func parseCmdline() error {
 	b, err := os.ReadFile("/proc/cmdline")
@@ -619,6 +622,15 @@ func boost() error {
 	}
 	if err := mount("run", "/run", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_STRICTATIME, "mode=755"); err != nil {
 		return err
+	}
+
+	// Mount efivarfs if running in EFI mode
+	if _, err := os.Stat("/sys/firmware/efi"); !errors.Is(err, os.ErrNotExist) {
+		if err := mount("efivarfs", "/sys/firmware/efi/efivars", "efivarfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
+			debug("Unable to load EFI variables although kernel has been booted on EFI mode. Root partition can't be autodetected.") // Don't fail as this is only needed for root autodetection
+		} else {
+			efiVarsAvailable = true
+		}
 	}
 
 	if err := os.Setenv("PATH", "/usr/bin"); err != nil {

@@ -774,7 +774,8 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
 	}))
 	t.Run("Gpt.Autodiscovery", boosterTest(Opts{
-		disk: "assets/gpt.img",
+		disk:   "assets/gpt.img",
+		params: []string{"-bios", "/usr/share/ovmf/x64/OVMF.fd"},
 	}))
 
 	t.Run("Nvme", boosterTest(Opts{
