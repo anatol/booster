@@ -8,8 +8,8 @@ github.com/anatol/clevis.go v0.0.0-20210819160903-117fd670c26a/go.mod h1:nkR4z11
 github.com/anatol/devmapper.go v0.0.0-20210415184739-2afcc0316ff9/go.mod h1:HH26Zgz5+9A59tfHtCxq8LlnqV90Z8YsWciQXb5hqL8=
 github.com/anatol/devmapper.go v0.0.0-20210818022933-f8f04407d1ed h1:EeTzx74x8jeqCeHiQKwFQAgydBwCARHznam1WKs6DAA=
 github.com/anatol/devmapper.go v0.0.0-20210818022933-f8f04407d1ed/go.mod h1:ssHSrmx1jWcQiOnwK4ulAfFe+eFEE5LkvPU7W4fLRpU=
-github.com/anatol/luks.go v0.0.0-20210902234451-c3c73d13be99 h1:VmajKMjjRjoCcJgSvvz4dT/za6SY4OQiR2GIztKYCPI=
-github.com/anatol/luks.go v0.0.0-20210902234451-c3c73d13be99/go.mod h1:UzCyoTh2f0wRm7f0ugjSLxiH9ZzkkIP6eaA+w/BTAr8=
+github.com/anatol/luks.go v0.0.0-20210908180322-d9003e7f7df8 h1:AK3t5RGfp05mci9UrnIpK4me1PdjfNReeY69uP8+fTg=
+github.com/anatol/luks.go v0.0.0-20210908180322-d9003e7f7df8/go.mod h1:UzCyoTh2f0wRm7f0ugjSLxiH9ZzkkIP6eaA+w/BTAr8=
 github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549 h1:CPuCjtWK5UI9KQPDhylGHfZe7Pp8j58WK7i3wpLemA0=
 github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549/go.mod h1:yO7hm0VhhOujsh+j0nn8ExPhAqIJh50MZOcKetKhAPA=
 github.com/anatol/vmtest v0.0.0-20210225191124-26540db15d49/go.mod h1:EWbYrKMDMxiKbQjI7z6GO7yABGxqRkU3+slxy/avES8=

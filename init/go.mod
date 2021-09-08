@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/anatol/clevis.go v0.0.0-20210819160903-117fd670c26a
 	github.com/anatol/devmapper.go v0.0.0-20210818022933-f8f04407d1ed
-	github.com/anatol/luks.go v0.0.0-20210902234451-c3c73d13be99
+	github.com/anatol/luks.go v0.0.0-20210908180322-d9003e7f7df8
 	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.0-20210906140327-598bf66f24a6 // indirect
 	github.com/goccy/go-json v0.7.8 // indirect
