@@ -418,6 +418,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
 	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.img"}}
+	assetGenerators["assets/systemd-fido2.img"] = assetGenerator{"generate_asset_systemd_fido2.sh", []string{"OUTPUT=assets/systemd-fido2.img", "LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567"}}
 
 	return nil
 }
@@ -764,6 +765,21 @@ func TestBooster(t *testing.T) {
 	t.Run("Gpt.Autodiscovery", boosterTest(Opts{
 		disk: "assets/gpt.img",
 	}))
+
+	if yubikey != nil {
+		t.Run("Systemd.Fido2", boosterTest(Opts{
+			disk:       "assets/systemd-fido2.img",
+			kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
+			params:     []string{"-usb", "-device", "usb-host,hostbus=" + yubikey.bus + ",hostaddr=" + yubikey.device},
+			extraFiles: "fido2-assert",
+			checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+				pin := "1111"
+				require.NoError(t, vm.ConsoleExpect("Enter PIN for /dev/hidraw1:"))
+				require.NoError(t, vm.ConsoleWrite(pin+"\n"))
+
+			},
+		}))
+	}
 
 	t.Run("VoidLinux", boosterTest(Opts{
 		disk:       "assets/voidlinux.img",

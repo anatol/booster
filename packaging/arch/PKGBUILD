@@ -10,7 +10,11 @@ license=(MIT)
 depends=(bash)
 makedepends=(git go ruby-ronn-ng)
 #checkdepends=(qemu-headless linux tang)
-optdepends=('busybox: to enable emergency shell at the boot time')
+optdepends=(
+  'busybox: to enable emergency shell at the boot time'
+  'yubikey-personalization: for clevis Yubikey challenge-response support'
+  'libfido2: for systemd-enroll with FIDO2'
+)
 backup=(etc/booster.yaml)
 provides=(booster initramfs)
 conflicts=(booster)
