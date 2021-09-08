@@ -62,7 +62,7 @@ func luksOpen(dev string, name string) error {
 		return err
 	}
 	for tokenNum, t := range tokens {
-		if t.Type != luks.ClevisTokenType {
+		if t.Type != "clevis" {
 			continue
 		}
 
