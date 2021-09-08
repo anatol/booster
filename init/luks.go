@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -221,6 +224,49 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	return nil, fmt.Errorf("no matching fido2 devices available")
 }
 
+func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
+	var node struct {
+		Blob       string `json:"tpm2-blob"` // base64
+		PCRs       []int  `json:"tpm2-pcrs"`
+		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
+		PolicyHash string `json:"tpm2-policy-hash"` // base64
+	}
+	if err := json.Unmarshal(t.Payload, &node); err != nil {
+		return nil, err
+	}
+
+	blob, err := base64.StdEncoding.DecodeString(node.Blob)
+	if err != nil {
+		return nil, err
+	}
+
+	privateSize := binary.BigEndian.Uint16(blob[:2])
+	blob = blob[2:]
+	private := blob[:privateSize]
+	blob = blob[privateSize:]
+
+	publcSize := binary.BigEndian.Uint16(blob[:2])
+	blob = blob[2:]
+	public := blob[:publcSize]
+	blob = blob[publcSize:]
+
+	if node.PolicyHash == "" {
+		return nil, fmt.Errorf("empty policy hash")
+	}
+	policyHash, err := hex.DecodeString(node.PolicyHash)
+	if err != nil {
+		return nil, err
+	}
+
+	bank := parsePCRBank(node.PCRBank)
+
+	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(base64.StdEncoding.EncodeToString(password)), nil
+}
+
 func luksOpen(dev string, name string) error {
 	wg := loadModules("dm_crypt")
 	wg.Wait()
@@ -252,7 +298,10 @@ func luksOpen(dev string, name string) error {
 			password, err = recoverClevisPassword(t, d.Version())
 		case "systemd-fido2":
 			password, err = recoverSystemdFido2Password(t)
+		case "systemd-tpm2":
+			password, err = recoverSystemdTPM2Password(t)
 		default:
+			debug("token #%d has unknown type: %s", tokenNum, t.Type)
 			continue
 		}
 
