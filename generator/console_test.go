@@ -1,20 +1,18 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestReadFontFile(t *testing.T) {
 	check := func(font string) {
 		blob, err := readFontFile(font)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
-		if len(blob) < 1024 {
-			t.Fatalf("%s: expected font file size bigger than 1K, got %d", font, len(blob))
-		}
-		if len(blob) > 16384 {
-			t.Fatalf("%s: expected font file size smaller than 16K, got %d", font, len(blob))
-		}
+		require.Greaterf(t, len(blob), 1024, "font size is too small")
+		require.Lessf(t, len(blob), 16384, "font size is too big")
 	}
 
 	check("lat0-16")
@@ -27,17 +25,10 @@ func TestReadFontFile(t *testing.T) {
 func TestLoadKeymap(t *testing.T) {
 	check := func(keymap, keymapToggle string, isUtf bool) {
 		blob, err := loadKeymap(keymap, keymapToggle, isUtf)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
-		l := len(blob)
-		if l < 30 {
-			t.Fatal("keymap file is too small")
-		}
-		if l > 3000 {
-			t.Fatal("keymap file is too big")
-		}
+		require.Greaterf(t, len(blob), 30, "keymap size is too small")
+		require.Lessf(t, len(blob), 3000, "keymap size is too big")
 	}
 
 	check("us", "de", true)

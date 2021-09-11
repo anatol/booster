@@ -3,18 +3,15 @@ package main
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
 
 func TestSunderMountFlags(t *testing.T) {
 	check := func(input string, flags uintptr, options string) {
 		f, o := sunderMountFlags(input)
-		if flags != f {
-			t.Fatalf("%s: flags expected 0x%x, got 0x%x", input, flags, f)
-		}
-		if options != o {
-			t.Fatalf("%s: options expected %s, got %s", input, options, o)
-		}
+		require.Equal(t, flags, f)
+		require.Equal(t, options, o)
 	}
 
 	check("", 0x0, "")

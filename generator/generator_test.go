@@ -8,11 +8,11 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,31 +23,20 @@ func prepareAssets(t *testing.T) {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 		}
-		if err := cmd.Run(); err != nil {
-			t.Fatal(err)
-		}
-
+		require.NoError(t, cmd.Run())
 		// compress with zst
-		if err := exec.Command("zstd", "-z", "assets/test_module.ko", "-o", "assets/test_module.ko.zst").Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, exec.Command("zstd", "-z", "assets/test_module.ko", "-o", "assets/test_module.ko.zst").Run())
 
 		// compress with xz
-		if err := exec.Command("xz", "-z", "--keep", "assets/test_module.ko").Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, exec.Command("xz", "-z", "--keep", "assets/test_module.ko").Run())
 
 		// compress with lz4
 		cmd = exec.Command("lz4", "-z", "assets/test_module.ko")
 		cmd.Stdout = os.Stdout // lz4 does not work without stdout, it is weird
-		if err := cmd.Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, cmd.Run())
 
 		// compress with gz
-		if err := exec.Command("gzip", "--keep", "assets/test_module.ko").Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, exec.Command("gzip", "--keep", "assets/test_module.ko").Run())
 	}
 }
 
@@ -123,16 +112,12 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	opts.workDir = wd
 
 	modulesDir := path.Join(wd, "modules")
-	if err := os.Mkdir(modulesDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Mkdir(modulesDir, 0755))
 
 	for _, l := range opts.prepareModulesAt {
 		loc := modulesDir + "/" + l
 		dir := filepath.Dir(loc)
-		if err := exec.Command("mkdir", "-p", dir).Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, exec.Command("mkdir", "-p", dir).Run())
 		source := "assets/test_module.ko"
 		switch path.Ext(loc) {
 		case ".xz":
@@ -144,29 +129,15 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		case ".gz":
 			source += ".gz"
 		}
-		if err := exec.Command("cp", source, loc).Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, exec.Command("cp", source, loc).Run())
 	}
 
-	if err := os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(opts.builtin), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(opts.kernelAliases), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(opts.softDeps), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(wd+"/proc_modules", generateProcModulesFile(opts.hostModules), 0644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(opts.builtin), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(opts.kernelAliases), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(opts.softDeps), 0644))
+	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(opts.hostModules), 0644))
 
 	listAsFunc := func(in []string) func() (set, error) {
 		out := make(set)
@@ -201,42 +172,28 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	}
 	if opts.enableVirtualConsole {
 		conf.vconsolePath = wd + "/vconsole.conf"
-		if err := os.WriteFile(conf.vconsolePath, []byte(opts.vConsoleConfig), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(opts.vConsoleConfig), 0644))
 
 		conf.localePath = wd + "/locale.conf"
-		if err := os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644))
 	}
 
 	err := generateInitRamfs(&conf)
 	if opts.expectError == "" {
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 	} else {
-		if err == nil || opts.expectError != err.Error() {
-			t.Fatalf("expected failure '%s', got error '%v'", opts.expectError, err)
-		}
+		require.Equal(t, opts.expectError, err.Error())
 		return
 	}
 
-	if err := verifyCompressedFile(compression, wd+"/booster.img"); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, verifyCompressedFile(compression, wd+"/booster.img"))
 
 	if opts.unpackImage {
-		if err := os.Mkdir(wd+"/image.unpacked", 0755); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Mkdir(wd+"/image.unpacked", 0755))
 
 		unpCmd := exec.Command("unp", wd+"/booster.img")
 		unpCmd.Dir = wd + "/image.unpacked"
-		if err := unpCmd.Run(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, unpCmd.Run())
 	}
 }
 
@@ -269,12 +226,8 @@ func verifyCompressedFile(compression string, file string) error {
 
 func checkDirListing(t *testing.T, dir string, expected ...string) {
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != len(expected) {
-		t.Fatalf("%s: expected %d files in modules dir, got %d", dir, len(expected), len(entries))
-	}
+	require.NoError(t, err)
+	require.Equal(t, len(expected), len(entries))
 
 entriesLoop:
 	for _, e := range entries {
@@ -284,35 +237,25 @@ entriesLoop:
 				continue entriesLoop
 			}
 		}
-		t.Fatalf("directory %s contains unexpected file %s", dir, e.Name())
+		require.Failf(t, "directory %s contains unexpected file %s", dir, e.Name())
 	}
 }
 
 func checkFileExistence(t *testing.T, file string) {
-	if _, err := os.Stat(file); err != nil {
-		t.Fatal(err)
-	}
+	_, err := os.Stat(file)
+	require.NoError(t, err)
 }
 
 func checkFilesEqual(t *testing.T, files ...string) {
-	if len(files) < 2 {
-		t.Fatal("expect at least 2 files as input")
-	}
+	require.Greater(t, len(files), 2)
 
 	b1, err := ioutil.ReadFile(files[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	for _, f := range files[1:] {
 		b, err := ioutil.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !bytes.Equal(b1, b) {
-			t.Fatalf("files %s and %s are different", files[0], f)
-		}
+		require.NoError(t, err)
+		require.Equal(t, b1, b)
 	}
 }
 
@@ -356,28 +299,22 @@ func testUniversalMode(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	conf, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	expectedConf := "kernel: matestkernel\n"
-	if string(conf) != expectedConf {
-		t.Fatalf("invalid init config, expected %s, got %s", expectedConf, conf)
-	}
+	require.Equal(t, expectedConf, string(conf))
 
 	// all except kernel/testfoo.ko need to be in the image
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "cbc.ko", "virtio_scsi.ko", "booster.alias")
 
 	aliasesFile, err := os.ReadFile(opts.workDir + "/image.unpacked/usr/lib/modules/booster.alias")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	expectedAliases := `pci:v*d*sv*sd*bc0Csc03i30* cbc
 cpu:type:x86,ven*fam*mod*:feature:*0099* virtio_scsi
 cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 `
-	if string(aliasesFile) != expectedAliases {
-		t.Fatalf("Generated booster.alias '%s' does not match the expected one '%s'", string(aliasesFile), expectedAliases)
-	}
+	require.Equal(t, expectedAliases, string(aliasesFile))
 
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
@@ -440,9 +377,8 @@ func testHostMode(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "cbc.ko", "virtio_scsi.ko", "booster.alias")
 
 	aliasesFile, err := os.ReadFile(opts.workDir + "/image.unpacked/usr/lib/modules/booster.alias")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	expectedAliases := `cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 pci:v*d*sv*sd*bc0Csc03i30* cbc`
 
@@ -452,9 +388,7 @@ pci:v*d*sv*sd*bc0Csc03i30* cbc`
 	sort.Strings(arr)
 	sortedAliases := strings.Join(arr, "\n")
 
-	if sortedAliases != expectedAliases {
-		t.Fatalf("Generated aliases '%s' do not match the expected '%s'", sortedAliases, expectedAliases)
-	}
+	require.Equal(t, expectedAliases, sortedAliases)
 
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin")
@@ -465,9 +399,7 @@ func testExtraFiles(t *testing.T) {
 	files := []string{"e", "q", "z"}
 	d := t.TempDir()
 	for _, f := range files {
-		if err := os.WriteFile(d+"/"+f, []byte{}, 0644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.WriteFile(d+"/"+f, []byte{}, 0644))
 	}
 
 	opts := options{
@@ -477,9 +409,9 @@ func testExtraFiles(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	for _, f := range []string{"/usr/bin/true", "/usr/bin/false"} {
-		if _, err := os.Stat(opts.workDir + "/image.unpacked" + f); err != nil {
-			t.Fatal(err)
-		}
+		_, err := os.Stat(opts.workDir + "/image.unpacked" + f)
+		require.NoError(t, err)
+
 	}
 
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/true")
@@ -582,25 +514,19 @@ func testModprobeOptions(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/etc/booster.init.yaml")
 
 	c, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	cfg := struct {
 		ModprobeOptions map[string]string `yaml:",omitempty"`
 	}{}
 
-	if err := yaml.Unmarshal(c, &cfg); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, yaml.Unmarshal(c, &cfg))
 
 	expect := map[string]string{
 		"test1": "foo=1 bar=2",
 		"test2": "bazz=foo",
 	}
-	if !reflect.DeepEqual(expect, cfg.ModprobeOptions) {
-		t.Fatalf("incorrect modprobe options saved, expected %v, got %v", expect, cfg.ModprobeOptions)
-	}
+	require.Equal(t, expect, cfg.ModprobeOptions)
 }
 
 func TestGenerator(t *testing.T) {

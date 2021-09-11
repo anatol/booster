@@ -8,13 +8,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script string, data interface{}) {
 	if !fileExists("assets") {
-		if err := os.Mkdir("assets", 0755); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Mkdir("assets", 0755))
 	}
 
 	asset := "assets/" + name
@@ -24,24 +24,18 @@ func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script
 		script = strings.ReplaceAll(script, "$LABEL", label)
 
 		f, err := os.Create(asset)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		_ = f.Close()
-		if err := os.Truncate(asset, size*1024*1024); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Truncate(asset, size*1024*1024))
 
 		if err := shell(script); err != nil {
 			_ = os.Remove(asset)
-			t.Fatal(err)
+			require.NoError(t, err)
 		}
 	}
 
 	info, err := readBlkInfo(asset)
-	if err != nil {
-		t.Fatalf("%s: %v", fstype, err)
-	}
+	require.NoError(t, err)
 	if info.format != fstype {
 		t.Errorf("blkinfo(%s) format = %v, want %v", asset, info.format, fstype)
 	}
@@ -53,9 +47,7 @@ func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script
 	} else {
 		uuid, err = parseUUID(uuidStr)
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if !bytes.Equal(info.uuid, uuid) {
 		t.Errorf("blkinfo(%s) uuid = %v, want %v", fstype, info.uuid.toString(), uuidStr)
 	}

@@ -1,21 +1,20 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestBimap(t *testing.T) {
 	b := NewBimap()
 
-	if err := b.Add("f1", "p1"); err != nil {
-		t.Fatal()
-	}
-	if val, _ := b.forward["f1"]; val != "p1" {
-		t.Fail()
-	}
-	if val, _ := b.reverse["p1"]; val != "f1" {
-		t.Fail()
-	}
+	require.NoError(t, b.Add("f1", "p1"))
+	val, _ := b.forward["f1"]
+	require.Equal(t, "p1", val)
 
-	if err := b.Add("f2", "p1"); err == nil {
-		t.Fail()
-	}
+	val, _ = b.reverse["p1"]
+	require.Equal(t, "f1", val)
+
+	require.Error(t, b.Add("f2", "p1"))
 }

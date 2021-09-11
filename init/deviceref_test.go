@@ -1,23 +1,18 @@
 package main
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseDeviceRef(t *testing.T) {
 	check := func(path string, format refFormat, data interface{}) {
 		ref, err := parseDeviceRef("test", path, true)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
-		if ref.format != format {
-			t.Fatalf("invalid ref format, expected %d, got %d", format, ref.format)
-		}
-		if !reflect.DeepEqual(ref.data, data) {
-			t.Fatalf("invalid ref format, expected %v, got %v", data, ref.data)
-		}
+		require.Equal(t, format, ref.format)
+		require.Equal(t, data, ref.data)
 	}
 
 	check("/dev/foobar", refName, "/dev/foobar")

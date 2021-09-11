@@ -1,8 +1,9 @@
 package main
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseProperties(t *testing.T) {
@@ -14,7 +15,5 @@ func TestParseProperties(t *testing.T) {
 		"PROP3": "VAL3",
 		"FONT":  "cp866-8x14",
 	}
-	if !reflect.DeepEqual(expect, got) {
-		t.Fatalf("expected %+v got %+v", expect, got)
-	}
+	require.Equal(t, expect, got)
 }

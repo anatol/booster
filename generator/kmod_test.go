@@ -7,12 +7,12 @@ import (
 	"io"
 	"os"
 	"path"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/require"
 	"github.com/xi2/xz"
 )
 
@@ -21,9 +21,7 @@ func TestModuleNames(t *testing.T) {
 	t.Parallel()
 
 	ver, err := readKernelVersion()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	conf := &generatorConfig{
 		universal:           true,
@@ -34,19 +32,14 @@ func TestModuleNames(t *testing.T) {
 		readModprobeOptions: readModprobeOptions,
 	}
 	kmod, err := NewKmod(conf)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	ch := make(chan error)
 	wg := sync.WaitGroup{}
 	for name, fn := range kmod.nameToPathMapping.forward {
-		if fn[0] == '/' {
-			t.Fatalf("module filename %s should not start with slash", fn)
-		}
-		if fn != path.Clean(fn) {
-			t.Fatalf("filepath %s is not clean", fn)
-		}
+		require.NotEqual(t, '/', fn[0], "module filename should not start with slash")
+		require.Equal(t, fn, path.Clean(fn), "filepath is not clean")
+
 		if _, ok := kmod.builtinModules[name]; ok {
 			continue // skip builtin modules
 		}
@@ -64,7 +57,7 @@ func TestModuleNames(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		t.Fatal(err)
+		require.Fail(t, err.Error())
 	case <-w:
 		// wg is Done()
 		break
@@ -157,28 +150,20 @@ func TestReadDeviceAliases(t *testing.T) {
 	t.Parallel()
 
 	a, err := readDeviceAliases()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// on a regular host we would expect at least dozen devices/aliases
-	if len(a) < 12 {
-		t.Fatalf("too few device aliases detected: %d", len(a))
-	}
+	require.Greater(t, len(a), 12, "too few device aliases detected")
 }
 
 func TestReadBuiltinModinfo(t *testing.T) {
 	t.Parallel()
 
 	ver, err := readKernelVersion()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	fws, err := readBuiltinModinfo("/usr/lib/modules/"+ver, "file")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	_ = fws
 }
@@ -186,13 +171,8 @@ func TestReadBuiltinModinfo(t *testing.T) {
 func TestParseModprobe(t *testing.T) {
 	check := func(content string, expected map[string][]string) {
 		got := make(map[string][]string)
-		if err := parseModprobe(content, got); err != nil {
-			t.Fatal(err)
-		}
-
-		if !reflect.DeepEqual(expected, got) {
-			t.Fatalf("invalid options generated: expected %v, got %v", expected, got)
-		}
+		require.NoError(t, parseModprobe(content, got))
+		require.Equal(t, expected, got)
 	}
 
 	check("# use \"reset=1\" as default, since it should be safe for recent devices and\n# solves all kind of problems.\noptions btusb reset=1",
@@ -213,10 +193,6 @@ func TestParseModprobe(t *testing.T) {
 
 func TestReadModprobeOptions(t *testing.T) {
 	opts, err := readModprobeOptions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts == nil {
-		t.Fatal("expect non-nil options map")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, opts)
 }

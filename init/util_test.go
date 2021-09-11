@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
-	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
 
@@ -17,9 +16,7 @@ func TestMemZeroBytes(t *testing.T) {
 	data := []byte{10, 40, 50, 33}
 	MemZeroBytes(data)
 	for i, e := range data {
-		if e != 0 {
-			t.Fatalf("MemZeroBytes() did not clear element # %v", i)
-		}
+		require.Equalf(t, byte(0), e, "%d element is not wiped", i)
 	}
 }
 
@@ -28,9 +25,7 @@ func TestFixedArrayToString(t *testing.T) {
 
 	check := func(input []byte, expected string) {
 		str := fixedArrayToString(input)
-		if str != expected {
-			t.Fatalf("Expected string %v, got %v", expected, str)
-		}
+		require.Equal(t, expected, str)
 	}
 
 	check([]byte{}, "")
@@ -41,14 +36,10 @@ func TestFixedArrayToString(t *testing.T) {
 }
 
 func TestParseUUID(t *testing.T) {
-	check := func(uuid string, expected []byte) {
+	check := func(uuid string, expected UUID) {
 		u, err := parseUUID(uuid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(u, expected) {
-			t.Fatalf("uuid %s does not match expected result", uuid)
-		}
+		require.NoError(t, err)
+		require.Equal(t, expected, u)
 	}
 
 	check("123e4567-e89b-12d3-a456-426614174000", []byte{0x12, 0x3e, 0x45, 0x67, 0xe8, 0x9b, 0x12, 0xd3, 0xa4, 0x56, 0x42, 0x66, 0x14, 0x17, 0x40, 0x00})
@@ -58,12 +49,8 @@ func TestParseUUID(t *testing.T) {
 	// invalid uuid
 	invalid := func(uuid string) {
 		u, err := parseUUID(uuid)
-		if err == nil {
-			t.Fatalf("uuid %s expected to fail but it did not", uuid)
-		}
-		if u != nil {
-			t.Fatal("expected to return nil uuid")
-		}
+		require.Error(t, err)
+		require.Nil(t, u)
 	}
 	invalid(`"1705d91e-bf54-4a1a-878d-721d7233eba4"`)
 	invalid("1705d91e-bf54-4a1a-878d-721d7233eb4")
@@ -76,27 +63,19 @@ func TestFormatUUID(t *testing.T) {
 	// uuid v4
 	str := "1705d91e-bf54-4a1a-878d-721d7233eba4"
 	uuid, err := parseUUID(str)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if uuid.toString() != str {
-		t.Fatalf("incorrect uuid formatting: expected %s, got %s", str, uuid.toString())
-	}
+	require.NoError(t, err)
+	require.Equal(t, str, uuid.toString())
 
 	// msdos uuid
 	uuid = []byte{0x45, 0x22, 0x67, 0x77}
 	expected := "45226777"
-	if uuid.toString() != expected {
-		t.Fatalf("incorrect uuid formatting: expected %s, got %s", expected, uuid.toString())
-	}
+	require.Equal(t, expected, uuid.toString())
 }
 
 func TestStripQuotes(t *testing.T) {
 	check := func(in, out string) {
 		str := stripQuotes(in)
-		if str != out {
-			t.Fatalf("Stripping failed: expected out is %s, got %s", out, str)
-		}
+		require.Equal(t, out, str)
 	}
 
 	check("Hello", "Hello")
@@ -110,25 +89,16 @@ func TestStripQuotes(t *testing.T) {
 
 func TestDeviceNo(t *testing.T) {
 	dir, err := os.ReadDir("/sys/block")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for _, d := range dir {
 		dev, err := deviceNo("/dev/" + d.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		expected, err := os.ReadFile("/sys/block/" + d.Name() + "/dev")
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		got := fmt.Sprintf("%d:%d\n", unix.Major(dev), unix.Minor(dev))
-
-		if string(expected) != got {
-			t.Fatalf("incorrect device number: expected %s, got %s", string(expected), got)
-		}
+		require.Equal(t, string(expected), got)
 	}
 }
 
@@ -141,17 +111,13 @@ func TestParseProperties(t *testing.T) {
 		"PROP3": "VAL3",
 		"FONT":  "cp866-8x14",
 	}
-	if !reflect.DeepEqual(expect, got) {
-		t.Fatalf("expected %+v got %+v", expect, got)
-	}
+	require.Equal(t, expect, got)
 }
 
 func TestFromUnicode16(t *testing.T) {
 	check := func(in []byte, bo binary.ByteOrder, out string) {
 		s := fromUnicode16(in, bo)
-		if s != out {
-			t.Fatalf("unicode16 conversion failed, got %s, expected %s", s, out)
-		}
+		require.Equal(t, out, s)
 	}
 	// examples are generated with 'iconv -f utf-8 -t utf-16le'
 	check([]byte{0x31, 00}, binary.LittleEndian, "1")
