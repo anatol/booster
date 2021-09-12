@@ -9,6 +9,7 @@ Booster advantages:
  * Fast image build time and fast boot time.
  * Out-of-box support for LUKS-based full disk encryption setup.
  * Clevis style data binding. The encrypted filesystem can be bound to TPM2 chip or to a network service. This helps to unlock the drive automatically but only if the TPM2/network service presents.
+ * Automatically detects and unlocks systemd-cryptenroll (fido2 and tpm2) type of partition encryption.
  * Easy to configure.
  * Automatic host configuration discovery. This helps to create minimalistic images specific for the current host.
 

@@ -13,6 +13,8 @@ Booster advantages:
  * [Clevis](https://github.com/latchset/clevis/) style data binding. The encrypted filesystem can be bound
    to TPM2 chip or to a network service. This helps to unlock the drive automatically but only if the TPM2/network service
    presents.
+ * [Systemd-cryptenroll](http://0pointer.net/blog/unlocking-luks2-volumes-with-tpm2-fido2-pkcs11-security-hardware-on-systemd-248.html)
+   type of binding. Booster is able to detect and unlock systemd-fido2 and systemd-tpm2 style partitions.
  * Easy to configure.
  * Automatic host configuration discovery. This helps to create minimalistic images specific for the current host.
 
