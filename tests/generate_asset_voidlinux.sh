@@ -1,5 +1,12 @@
-trap 'rm $OUTPUT; rm -rf assets/voidlinux/{modules,config,dracut.img,vmlinuz}' ERR
-trap 'sudo umount $mount; rm -rf $mount; sudo losetup -d $lodev' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  rm -rf assets/voidlinux/{modules,config,dracut.img,vmlinuz}
+  sudo umount $mount
+  rm -rf $mount
+  sudo losetup -d $lodev
+}
 
 truncate --size 5G $OUTPUT
 mkfs.ext4 $OUTPUT

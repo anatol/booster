@@ -1,5 +1,11 @@
-trap 'rm $OUTPUT' ERR
-trap 'sudo umount $mount; rm -rf $mount; sudo losetup -d $lodev' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  sudo umount $mount
+  rm -rf $mount
+  sudo losetup -d $lodev
+}
 
 truncate --size 1G $OUTPUT
 mkfs.ext4 $OUTPUT

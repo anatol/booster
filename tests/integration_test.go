@@ -440,7 +440,11 @@ func checkAsset(file string) error {
 	if testing.Verbose() {
 		fmt.Printf("Generating asset %s\n", file)
 	}
-	return shell(gen.script, gen.env...)
+	err := shell(gen.script, gen.env...)
+	if err != nil {
+		_ = os.Remove(file)
+	}
+	return err
 }
 
 func shell(script string, env ...string) error {

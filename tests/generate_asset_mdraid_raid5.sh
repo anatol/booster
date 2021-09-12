@@ -1,5 +1,12 @@
-trap 'rm $OUTPUT' ERR
-trap 'sudo umount $dir; rm -r $dir; sudo mdadm --stop /dev/md/BoosterTestArray5; sudo losetup -d $lodev' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  sudo umount $dir
+  rm -r $dir
+  sudo mdadm --stop /dev/md/BoosterTestArray5
+  sudo losetup -d $lodev
+}
 
 truncate --size 60M $OUTPUT
 lodev=$(sudo losetup -f --show $OUTPUT)
@@ -49,7 +56,7 @@ w
 
 sudo partprobe $lodev
 
-echo "DEVICE partitions\n" >> $OUTPUT.array
+echo "DEVICE partitions\n" >>$OUTPUT.array
 
 sudo mdadm --create --verbose --level=raid5 --metadata=1.2 --chunk=256 --raid-devices=4 /dev/md/BoosterTestArray5 ${lodev}p2 ${lodev}p4 ${lodev}p5 ${lodev}p1 --spare-devices=1 ${lodev}p3
 sudo mdadm --detail --scan | tee -a $OUTPUT.array

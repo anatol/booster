@@ -1,5 +1,12 @@
-trap 'rm $OUTPUT' ERR
-trap 'sudo umount $dir; rm -r $dir; sudo mdadm --stop /dev/md/BoosterTestArray1; sudo losetup -d $lodev' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  sudo umount $dir
+  rm -r $dir
+  sudo mdadm --stop /dev/md/BoosterTestArray1
+  sudo losetup -d $lodev
+}
 
 truncate --size 60M $OUTPUT
 lodev=$(sudo losetup -f --show $OUTPUT)

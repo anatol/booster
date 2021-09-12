@@ -1,5 +1,10 @@
-trap 'rm $OUTPUT' ERR
-trap 'sudo umount $dir; rm -r $dir' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  sudo umount $dir
+  rm -r $dir
+}
 
 truncate --size 40M $OUTPUT
 mkfs.ext4 -U $FS_UUID -L $FS_LABEL $OUTPUT

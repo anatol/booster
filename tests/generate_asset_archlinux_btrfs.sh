@@ -1,5 +1,11 @@
-trap 'rm $OUTPUT' ERR
-trap 'sudo umount $mount/{home,srv,var,.}; rm -r $mount; sudo cryptsetup close $cryptname' EXIT
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  sudo umount $mount/{home,srv,var,.}
+  rm -r $mount
+  sudo cryptsetup close $cryptname
+}
 
 truncate --size 1G $OUTPUT
 cryptname=booster.tests.btrfs

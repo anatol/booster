@@ -1,5 +1,14 @@
-trap 'swtpm_ioctl --tcp :2322 -s; rm assets/cryptenroll.passphrase; sudo umount $dir; rm -r $dir; sudo cryptsetup close $LUKS_DEV_NAME; sudo losetup -d $lodev' EXIT
-trap 'rm $OUTPUT' ERR
+trap 'quit' EXIT ERR
+
+quit() {
+  set +o errexit
+  swtpm_ioctl --tcp :2322 -s
+  rm assets/cryptenroll.passphrase
+  sudo umount $dir
+  rm -r $dir
+  sudo cryptsetup close $LUKS_DEV_NAME
+  sudo losetup -d $lodev
+}
 
 LUKS_DEV_NAME=luks-booster-systemd
 
@@ -13,7 +22,7 @@ echo -n "$LUKS_PASSWORD" >assets/cryptenroll.passphrase
 # it looks like edk2 extends PCR 0-7 so let's use some other PCR outside of this range
 sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --tpm2-device=swtpm: --tpm2-pcrs=10+13 $lodev
 
-sudo cryptsetup open --type luks2 $lodev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
+sudo cryptsetup open --disable-external-tokens --type luks2 $lodev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
 sudo mkfs.ext4 -U $FS_UUID -L atestlabel12 /dev/mapper/$LUKS_DEV_NAME
 dir=$(mktemp -d)
 sudo mount /dev/mapper/$LUKS_DEV_NAME $dir
