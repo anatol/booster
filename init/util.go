@@ -16,7 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func MemZeroBytes(bytes []byte) {
+func memZeroBytes(bytes []byte) {
 	for i := range bytes {
 		bytes[i] = 0
 	}

@@ -317,13 +317,13 @@ func luksOpen(dev string, name string) error {
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
-			MemZeroBytes(password)
+			memZeroBytes(password)
 			if err == nil {
 				debug("password from %s token #%d matches", t.Type, tokenNum)
 			}
 			return err
 		}
-		MemZeroBytes(password)
+		memZeroBytes(password)
 		debug("password from %s token #%d does not match", t.Type, tokenNum)
 	}
 
@@ -345,12 +345,12 @@ func luksOpen(dev string, name string) error {
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
-			MemZeroBytes(password)
+			memZeroBytes(password)
 			return err
 		}
 
 		// zeroify the password so we do not keep the sensitive data in the memory
-		MemZeroBytes(password)
+		memZeroBytes(password)
 
 		// retry password
 		fmt.Println("   Incorrect passphrase, please try again")

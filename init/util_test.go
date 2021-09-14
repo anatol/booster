@@ -14,7 +14,7 @@ func TestMemZeroBytes(t *testing.T) {
 	t.Parallel()
 
 	data := []byte{10, 40, 50, 33}
-	MemZeroBytes(data)
+	memZeroBytes(data)
 	for i, e := range data {
 		require.Equalf(t, byte(0), e, "%d element is not wiped", i)
 	}
