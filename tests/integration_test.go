@@ -261,6 +261,10 @@ func boosterTest(opts Opts) func(*testing.T) {
 		}
 
 		if opts.enableTpm2 {
+			_ = os.Remove("assets/tpm2/.lock")
+			_, err := copy("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall")
+			require.NoError(t, err)
+
 			cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
 			if testing.Verbose() {
 				cmd.Stdout = os.Stdout
@@ -397,7 +401,7 @@ func initAssetsGenerators() error {
 		}
 	}
 
-	if exists := fileExists("assets/tpm2/tpm2-00.permall"); !exists {
+	if exists := fileExists("assets/tpm2/tpm2-00.permall.pristine"); !exists {
 		if err := shell("generate_asset_swtpm.sh"); err != nil {
 			return err
 		}

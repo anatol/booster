@@ -15,6 +15,8 @@ LUKS_TYPE=luks${LUKS_VERSION}
 LUKS_DEV_NAME=luks-$LUKS_UUID
 
 if [ "$CLEVIS_PIN" == "tpm2" ]; then
+  cp assets/tpm2/tpm2-00.permall.pristine assets/tpm2/tpm2-00.permall
+
   swtpm socket --tpmstate dir=assets/tpm2 --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear &
 fi
 
