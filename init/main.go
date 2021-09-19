@@ -529,9 +529,6 @@ func switchRoot() error {
 
 // Cleanup the state before handing off the machine to the new init
 func cleanup() {
-	// We need to close our uevent connection, otherwise it will stay open forever and mess with the new init. .
-	_ = udevReader.Close()
-
 	shutdownNetwork()
 }
 
