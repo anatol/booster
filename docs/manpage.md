@@ -50,7 +50,7 @@ Booster advantages:
     A special symbol `*` (star) means all modules. It can be used for example to add all modules or remove all predefined modules from the image.
     Booster also takes module dependencies into account, all dependencies of the specified modules will be added to the image as well.
 
- * `modules_force_load` list of module names that are forcibly loaded at the beginning of the boot process. Any module in this list automatically added to the image so there is no need to duplicate it at `modules` property.
+ * `modules_force_load` list of module names that are forcibly loaded during the boot process before switching into user-space. Any module in this list automatically added to the image so there is no need to duplicate it at `modules` property.
 
  * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 

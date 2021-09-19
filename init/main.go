@@ -659,7 +659,7 @@ func boost() error {
 
 	go udevListener()
 
-	_ = loadModules(config.ModulesForceLoad...)
+	loadModulesWg := loadModules(config.ModulesForceLoad...)
 
 	if err := filepath.Walk("/sys/devices", scanSysModaliases); err != nil {
 		return err
@@ -677,6 +677,8 @@ func boost() error {
 		// wait for mount forever
 		rootMounted.Wait()
 	}
+
+	loadModulesWg.Wait()
 
 	cleanup()
 	return switchRoot()
