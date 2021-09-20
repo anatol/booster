@@ -648,15 +648,15 @@ func boost() error {
 		return err
 	}
 
-	if err := configureVirtualConsole(); err != nil {
-		return err
-	}
-
 	rootMounted.Add(1)
 
 	go udevListener()
 
 	loadModulesWg := loadModules(config.ModulesForceLoad...)
+
+	if err := configureVirtualConsole(); err != nil {
+		return err
+	}
 
 	if err := filepath.Walk("/sys/devices", scanSysModaliases); err != nil {
 		return err
