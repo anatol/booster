@@ -150,7 +150,7 @@ func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
 	return os.ReadFile(t.Name())
 }
 
-func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) error {
+func (img *Image) AppendContent(content []byte, osMode os.FileMode, dest string) error {
 	img.m.Lock()
 	if img.contains[dest] {
 		img.m.Unlock()
@@ -197,19 +197,8 @@ func (img *Image) AppendContent(content []byte, mode os.FileMode, dest string) e
 		}
 	}
 
-	hdr := &cpio.Header{
-		Name: strings.TrimPrefix(dest, "/"),
-		Mode: cpio.FileMode(mode) | cpio.ModeRegular,
-		Size: int64(len(content)),
-	}
-	img.m.Lock()
-	if err := img.out.WriteHeader(hdr); err != nil {
-		img.m.Unlock()
-		return err
-	}
-	_, err := img.out.Write(content)
-	img.m.Unlock()
-	return err
+	mode := cpio.FileMode(osMode) | cpio.ModeRegular
+	return img.AppendEntry(dest, mode, content)
 }
 
 // AppendFile appends the file + its dependencies to the ramfs file
@@ -248,22 +237,10 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 
-		hdr := &cpio.Header{
-			Name: strings.TrimPrefix(fn, "/"),
-			Mode: cpio.FileMode(fi.Mode().Perm()) | cpio.ModeSymlink,
-			Size: int64(len(linkTarget)),
-		}
-
-		img.m.Lock()
-		if err := img.out.WriteHeader(hdr); err != nil {
-			img.m.Unlock()
+		mode := cpio.FileMode(fi.Mode().Perm()) | cpio.ModeSymlink
+		if err := img.AppendEntry(fn, mode, []byte(linkTarget)); err != nil {
 			return err
 		}
-		if _, err := img.out.Write([]byte(linkTarget)); err != nil {
-			img.m.Unlock()
-			return err
-		}
-		img.m.Unlock()
 
 		// now add the link target as well
 		if !filepath.IsAbs(linkTarget) {
@@ -297,6 +274,36 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 	}
+
+	return nil
+}
+
+// AppendEntry appends an entry to the archive
+func (img *Image) AppendEntry(dest string, fileMode cpio.FileMode, content []byte) error {
+	img.m.Lock()
+	img.contains[dest] = true
+	img.m.Unlock()
+
+	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
+		return err
+	}
+
+	hdr := &cpio.Header{
+		Name: strings.TrimPrefix(dest, "/"),
+		Mode: fileMode,
+		Size: int64(len(content)),
+	}
+
+	img.m.Lock()
+	if err := img.out.WriteHeader(hdr); err != nil {
+		img.m.Unlock()
+		return err
+	}
+	if _, err := img.out.Write(content); err != nil {
+		img.m.Unlock()
+		return err
+	}
+	img.m.Unlock()
 
 	return nil
 }

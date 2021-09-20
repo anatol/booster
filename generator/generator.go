@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cavaliercoder/go-cpio"
 	"gopkg.in/yaml.v3"
 )
 
@@ -93,6 +94,10 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 	defer img.Cleanup()
 
+	if err := appendCompatibilitySymlinks(img); err != nil {
+		return err
+	}
+
 	if err := img.appendInitBinary(conf.initBinary); err != nil {
 		return err
 	}
@@ -161,6 +166,30 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	return img.Close()
+}
+
+// appendCompatibilitySymlinks appends symlinks for compatibility with older firmware that loads extra files from non-standard locations
+func appendCompatibilitySymlinks(img *Image) error {
+	symlinks := []struct{ src, target string }{
+		{"/lib", "/usr/lib"},
+		{"/usr/local/lib", "/usr/lib"},
+		{"/usr/sbin", "/usr/bin"},
+		{"/bin", "/usr/bin"},
+		{"/sbin", "/usr/bin"},
+		{"/usr/local/bin", "/usr/bin"},
+		{"/usr/local/sbin", "/usr/bin"},
+		{"/var/run", "/run"},
+		{"/usr/lib64", "/usr/lib"},
+		{"/lib64", "/usr/lib"},
+	}
+
+	for _, l := range symlinks {
+		mode := cpio.FileMode(0777) | cpio.ModeSymlink
+		if err := img.AppendEntry(l.src, mode, []byte(l.target)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (img *Image) appendInitBinary(initBinary string) error {
