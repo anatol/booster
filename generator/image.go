@@ -150,7 +150,7 @@ func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
 	return os.ReadFile(t.Name())
 }
 
-func (img *Image) AppendContent(content []byte, osMode os.FileMode, dest string) error {
+func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte) error {
 	img.m.Lock()
 	if img.contains[dest] {
 		img.m.Unlock()
@@ -270,7 +270,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 
-		if err := img.AppendContent(content, fi.Mode().Perm(), fn); err != nil {
+		if err := img.AppendContent(fn, fi.Mode().Perm(), content); err != nil {
 			return err
 		}
 	}

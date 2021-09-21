@@ -38,7 +38,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 		if err != nil {
 			return nil, err
 		}
-		if err := img.AppendContent(blob, 0644, conf.KeymapFile); err != nil {
+		if err := img.AppendContent(conf.KeymapFile, 0644, blob); err != nil {
 			return nil, err
 		}
 	} else {
@@ -56,7 +56,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 			return nil, err
 		}
 		conf.FontFile = "/console/font"
-		if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
+		if err := img.AppendContent(conf.FontFile, 0644, blob); err != nil {
 			return nil, err
 		}
 
@@ -66,7 +66,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 				return nil, err
 			}
 			conf.FontFile = "/console/font.map"
-			if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
+			if err := img.AppendContent(conf.FontFile, 0644, blob); err != nil {
 				return nil, err
 			}
 		}
@@ -77,7 +77,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 				return nil, err
 			}
 			conf.FontFile = "/console/font.unimap"
-			if err := img.AppendContent(blob, 0644, conf.FontFile); err != nil {
+			if err := img.AppendContent(conf.FontFile, 0644, blob); err != nil {
 				return nil, err
 			}
 		}
