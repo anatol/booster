@@ -644,6 +644,49 @@ func readDeviceAliases() (set, error) {
 	return aliases, err
 }
 
+var errNoConfigFile = fmt.Errorf("unable to find a config file in /proc")
+
+// readCompiledInComponents reads/parses /proc/config file and finds all compiled-in config options (i.e. those having 'Y')
+// the function tries to open /proc/config and /proc/config.gz, if having problems with it then the function returns errNoConfigFile
+func readCompiledInComponents() (set, error) {
+	var r io.Reader
+
+	if f, err := os.Open("/proc/config"); err == nil {
+		debug("reading /proc/config")
+		defer f.Close()
+		r = f
+	} else if gz, err := os.Open("/proc/config.gz"); err == nil {
+		debug("reading /proc/config.gz")
+		defer gz.Close()
+
+		r, err = gzip.NewReader(gz)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+	} else {
+		return nil, errNoConfigFile
+	}
+
+	result := make(set)
+
+	re := regexp.MustCompile(`^(CONFIG_.*)=y$`)
+
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		line := s.Text()
+		matches := re.FindAllStringSubmatch(line, -1)
+		if matches == nil {
+			continue
+		}
+
+		config := matches[0][1]
+		result[config] = true
+	}
+
+	return result, nil
+}
+
 func readHostModules() (set, error) {
 	// Unlike /proc/modules (or `lsmod`) /sys/module provides information about builtin modules as well.
 	// And we need to check the built-in modules and try to add it to the image. This is needed because
@@ -665,6 +708,38 @@ func readHostModules() (set, error) {
 		result[e.Name()] = true
 		modules[i] = e.Name()
 	}
+
+	// some built-in modules are not reported at /proc/modules, e.g. ext4
+	// so in addition to reading /proc/modules we read /proc/config and see if some modules are compiled-in so we force adding them to
+	// 'active' modules
+	compiledIn, err := readCompiledInComponents()
+	if err == errNoConfigFile {
+		debug("%v", err)
+	} else if err != nil {
+		return nil, err
+	}
+
+	type configToModule struct {
+		configOption, module string
+	}
+
+	// here is the list of built-in kernel modules that are not reported as active via /proc/modules
+	// TODO: as /proc/modules does not work then find another way to list all built-in modules
+	unreportedModules := []configToModule{{"CONFIG_EXT4_FS", "ext4"}}
+
+	for _, m := range unreportedModules {
+		if result[m.module] {
+			continue
+		}
+		if err != errNoConfigFile && !compiledIn[m.configOption] {
+			// if there is no /proc/config at the host then add all unreported modules as a safe tion
+			continue
+		}
+
+		result[m.module] = true
+		modules = append(modules, "config:"+m.module)
+	}
+
 	debug("active host modules: %v", modules)
 
 	return result, nil
