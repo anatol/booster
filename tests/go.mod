@@ -3,7 +3,7 @@ module tests
 go 1.17
 
 require (
-	github.com/anatol/vmtest v0.0.0-20210818021435-9894c562b88f
+	github.com/anatol/vmtest v0.0.0-20210922030747-b951d158b7cc
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5

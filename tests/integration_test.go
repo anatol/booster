@@ -777,6 +777,10 @@ func TestBooster(t *testing.T) {
 		disk: "assets/gpt.img",
 	}))
 
+	t.Run("Nvme", boosterTest(Opts{
+		disks: []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+	}))
+
 	if yubikey != nil {
 		t.Run("Systemd.Fido2", boosterTest(Opts{
 			disk:       "assets/systemd-fido2.img",
@@ -813,6 +817,7 @@ func TestBooster(t *testing.T) {
 		if pkg == "linux-lts" {
 			compression = "gzip"
 		}
+
 		checkVMState := func(vm *vmtest.Qemu, t *testing.T) {
 			config := &ssh.ClientConfig{
 				User:            "root",
@@ -848,13 +853,21 @@ func TestBooster(t *testing.T) {
 		}
 
 		// simple ext4 image
+		controller := ""
+		ext4RootDevice := "/dev/sda"
+		if pkg == "linux-xanmod" {
+			// xanmod compiles nvme as a standalone module
+			// use it as an opportunity to verify 'nvme as a root device' functionality
+			controller = "nvme,serial=boostfoo"
+			ext4RootDevice = "/dev/nvme0n1"
+		}
 		t.Run("ArchLinux.ext4."+pkg, boosterTest(Opts{
 			kernelVersion: ver,
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
+			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
 			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
-			kernelArgs:   []string{"root=/dev/sda", "rw"},
+			kernelArgs:   []string{"root=" + ext4RootDevice, "rw"},
 			checkVMState: checkVMState,
 		}))
 
