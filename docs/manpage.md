@@ -96,6 +96,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `resume={$PATH|UUID=$UUID|LABEL=$LABEL}` suspend-to-disk device. Like `root`, can be specified as a path to the block device, fs UUID, or a fs label.
  * `booster.debug` enables booster debug output. It is printed to the console at boot time. This feature might be useful to debug booster issues.
     The debug log is also printed to the kernel kmsg buffer and available for reading either with `dmesg` or with `journalctl -b`. If booster.debug is enabled then kmsg throttling gets disabled automatically.
+ * `booster.debug.udev` prints udev events to debug logs. This option requires `booster.debug` to be enabled. 
  * `booster.disable_concurrent_module_loading` to disable parallel module loading. With this flag set booster will load modules one-by-one sequentially
  * `quiet` option is opposite of `booster.debug` and reduces verbosity of the tool. It hides boot-time booster warnings. This option is ignored if `booster.debug` is set.
 

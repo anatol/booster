@@ -86,7 +86,9 @@ func udevListener() {
 			severe("uevent: %v", err)
 			return
 		}
-		debug("udev event %+v", *ev)
+		if udevDebugEnable {
+			debug("udev event %+v", *ev)
+		}
 
 		if modalias, ok := ev.Vars["MODALIAS"]; ok {
 			err = loadModalias(modalias)

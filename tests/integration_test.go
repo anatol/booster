@@ -544,7 +544,7 @@ func TestBooster(t *testing.T) {
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 		disks:            []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
-		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
+		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0", "booster.debug.udev"},
 
 		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
 			config := &ssh.ClientConfig{

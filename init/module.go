@@ -27,7 +27,9 @@ func loadModalias(alias string) error {
 		return fmt.Errorf("unable to match modalias %s: %v", alias, err)
 	}
 	if len(mods) == 0 {
-		debug("no match found for alias %s", alias)
+		if udevDebugEnable {
+			debug("no match found for alias %s", alias)
+		}
 		return nil
 	}
 	_ = loadModules(mods...)
@@ -160,7 +162,9 @@ func matchAlias(alias string) ([]string, error) {
 			return nil, err
 		}
 		if match {
-			debug("modalias %v matched module %v", alias, a.module)
+			if udevDebugEnable {
+				debug("modalias %v matched module %v", alias, a.module)
+			}
 			result = append(result, a.module)
 		}
 	}

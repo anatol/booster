@@ -13,7 +13,8 @@ const (
 )
 
 var (
-	verbosityLevel = levelWarning // by default show warnings and errors
+	verbosityLevel  = levelWarning // by default show warnings and errors
+	udevDebugEnable bool
 
 	kmsg *os.File
 )

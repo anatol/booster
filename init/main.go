@@ -71,6 +71,10 @@ func parseCmdline() error {
 			// in this case ignore the error
 			debug("%v", err)
 		}
+
+		if _, ok := cmdline["booster.debug.udev"]; ok {
+			udevDebugEnable = true
+		}
 	} else if _, ok := cmdline["quiet"]; ok {
 		verbosityLevel = levelSevere
 	}
