@@ -68,7 +68,7 @@ func generateInitRamfs(opts Opts) (string, error) {
 
 	cmd := exec.Command(binariesDir+"/generator", "-force", "-initBinary", binariesDir+"/init", "-kernelVersion", opts.kernelVersion, "-output", output, "-config", config)
 	if testing.Verbose() {
-		log.Print("Create booster.img")
+		log.Print("Create booster.img with " + cmd.String())
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
@@ -220,10 +220,12 @@ func boosterTest(opts Opts) func(*testing.T) {
 			}
 		}
 
-		if kernel, ok := kernelVersions["linux"]; ok {
-			opts.kernelVersion = kernel
-		} else {
-			require.Fail(t, "System does not have 'linux' package installed needed for the integration tests")
+		if opts.kernelVersion == "" {
+			if kernel, ok := kernelVersions["linux"]; ok {
+				opts.kernelVersion = kernel
+			} else {
+				require.Fail(t, "System does not have 'linux' package installed needed for the integration tests")
+			}
 		}
 
 		initRamfs, err := generateInitRamfs(opts)
