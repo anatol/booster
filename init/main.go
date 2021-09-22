@@ -540,9 +540,10 @@ func scanSysBlock() error {
 	for _, d := range devs {
 		target := filepath.Join("/sys/block/", d.Name())
 		if err := addBlockDevice("/dev/" + d.Name()); err != nil {
-			// even if it fails to find UUID here (e.g. in case of unsupported partition table)
-			// we still want to check its partitions
-			return err
+			// some unimportant block devices (e.g. /dev/sr0) might return errors like 'no medium found'
+			// just ignore failing devices and keep enumerating
+			warning("%v", err)
+			continue
 		}
 
 		// Probe all partitions of this block device, too:
