@@ -111,28 +111,28 @@ func addBlockDevice(devpath string) error {
 	debug("found a new device %s", devpath)
 
 	info, err := readBlkInfo(devpath)
-	if err == nil {
-		// check non-mountable types that require extra processing
-		switch info.format {
-		case "luks":
-			return handleLuksBlockDevice(info, devpath)
-		case "lvm":
-			return handleLvmBlockDevice(devpath)
-		case "mdraid":
-			return handleMdraidBlockDevice(info, devpath)
-		case "gpt":
-			return handleGptBlockDevice(info, devpath)
-		}
-	} else if err == errUnknownBlockType {
-		// provide a fake blkid with fs type specified by user
+	if err == errUnknownBlockType {
+		// even if booster unable to detect a filesystem we might still try to mount with the type specified by the user
 		info = &blkInfo{
-			path:   devpath,
-			format: cmdline["rootfstype"],
-			isFs:   true,
+			path: devpath,
 		}
-		debug("unable to detect fs type for %s, using one specified by rootfstype boot param %s", devpath, cmdline["rootfstype"])
-	} else {
+		err = nil
+	}
+
+	if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
+	}
+
+	// check non-mountable types that require extra processing
+	switch info.format {
+	case "luks":
+		return handleLuksBlockDevice(info, devpath)
+	case "lvm":
+		return handleLvmBlockDevice(devpath)
+	case "mdraid":
+		return handleMdraidBlockDevice(info, devpath)
+	case "gpt":
+		return handleGptBlockDevice(info, devpath)
 	}
 
 	if cmdResume != nil && cmdResume.matchesBlkInfo(info) {
@@ -142,11 +142,15 @@ func addBlockDevice(devpath string) error {
 	}
 
 	if cmdRoot.matchesBlkInfo(info) {
-		if !info.isFs {
-			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, info.format)
+		if info.format == "" && cmdline["rootfstype"] != "" {
+			info.format = cmdline["rootfstype"]
+			info.isFs = true
 		}
 		if info.format == "" {
 			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", devpath)
+		}
+		if !info.isFs {
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, info.format)
 		}
 		return mountRootFs(devpath, info.format)
 	}
