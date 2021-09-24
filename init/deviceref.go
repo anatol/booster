@@ -45,20 +45,20 @@ func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 	}
 }
 
+func calculateDevName(parent string, partition int) string {
+	name := parent
+	// some drivers use 'p' prefix for the partition number. TODO: find out where it is codified.
+	if strings.HasPrefix(parent, "/dev/nvme") || strings.HasPrefix(parent, "/dev/mmcblk") {
+		name += "p"
+	}
+	name += strconv.Itoa(partition + 1) // devname partitions start with "1"
+	return name
+}
+
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
 func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef {
 	if d.format != refGptType && d.format != refGptUUID && d.format != refGptLabel && d.format != refGptUUIDPartoff {
 		return d
-	}
-
-	calculateDevName := func(parent string, partition int) string {
-		name := parent
-		// some drivers use 'p' prefix for the partition number. TODO: find out where it is codified.
-		if strings.HasPrefix(parent, "/dev/nvme") || strings.HasPrefix(parent, "/dev/mmcblk") {
-			name += "p"
-		}
-		name += strconv.Itoa(partition + 1) // devname partitions start with "1"
-		return name
 	}
 
 	for _, p := range t {
