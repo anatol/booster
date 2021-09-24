@@ -780,6 +780,10 @@ func TestBooster(t *testing.T) {
 	t.Run("Nvme", boosterTest(Opts{
 		disks: []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
 	}))
+	t.Run("Usb", boosterTest(Opts{
+		disks:  []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
+		params: []string{"-device", "usb-ehci,id=ehci"},
+	}))
 
 	if yubikey != nil {
 		t.Run("Systemd.Fido2", boosterTest(Opts{
