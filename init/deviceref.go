@@ -11,7 +11,7 @@ import (
 type refFormat uint8
 
 const (
-	refName           refFormat = iota // name of the block device, e.g. "sda". It corresponds to path inside /dev/ directory.
+	refPath           refFormat = iota // path to the block device, e.g. "/dev/sda".
 	refGptType                         // type of gpt partition
 	refGptUUID                         // uuid of the gpt partition
 	refGptUUIDPartoff                  // offset against a gpt partition with uuid
@@ -34,7 +34,7 @@ type gptPartoffData struct {
 
 func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 	switch d.format {
-	case refName:
+	case refPath:
 		return d.data.(string) == info.path
 	case refFsUUID:
 		return bytes.Equal(d.data.(UUID), info.uuid)
@@ -45,7 +45,7 @@ func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
 	}
 }
 
-func calculateDevName(parent string, partition int) string {
+func calculateDevPath(parent string, partition int) string {
 	name := parent
 	// some drivers use 'p' prefix for the partition number. TODO: find out where it is codified.
 	if strings.HasPrefix(parent, "/dev/nvme") || strings.HasPrefix(parent, "/dev/mmcblk") {
@@ -65,20 +65,20 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 		switch d.format {
 		case refGptType:
 			if bytes.Equal(d.data.(UUID), p.typeGUID) {
-				return &deviceRef{refName, calculateDevName(devPath, p.num)}
+				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
 			}
 		case refGptUUID:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
-				return &deviceRef{refName, calculateDevName(devPath, p.num)}
+				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
 			}
 		case refGptUUIDPartoff:
 			data := d.data.(gptPartoffData)
 			if bytes.Equal(data.uuid, p.uuid) {
-				return &deviceRef{refName, calculateDevName(devPath, p.num+data.offset)}
+				return &deviceRef{refPath, calculateDevPath(devPath, p.num+data.offset)}
 			}
 		case refGptLabel:
 			if d.data.(string) == p.name {
-				return &deviceRef{refName, calculateDevName(devPath, p.num)}
+				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
 			}
 		}
 	}
@@ -176,7 +176,7 @@ func parseDeviceRef(name, param string, enableAutodetect bool) (*deviceRef, erro
 	}
 
 	if strings.HasPrefix(param, "/dev/") {
-		return &deviceRef{refName, param}, nil
+		return &deviceRef{refPath, param}, nil
 	}
 
 	return nil, fmt.Errorf("unable to parse %s= parameter '%s'", name, param)

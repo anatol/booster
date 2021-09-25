@@ -183,13 +183,13 @@ func addBlockDeviceSymlink(symlink string) error {
 		return fmt.Errorf("%s: %v", symlink, err)
 	}
 
-	if cmdResume != nil && cmdResume.format == refName && cmdResume.matchesBlkInfo(info) {
+	if cmdResume != nil && cmdResume.format == refPath && cmdResume.matchesBlkInfo(info) {
 		if err := resume(symlink); err != nil {
 			return err
 		}
 	}
 
-	if cmdRoot.format == refName && cmdRoot.matchesBlkInfo(info) {
+	if cmdRoot.format == refPath && cmdRoot.matchesBlkInfo(info) {
 		if info.format == "" && cmdline["rootfstype"] != "" {
 			info.format = cmdline["rootfstype"]
 			info.isFs = true
