@@ -16,9 +16,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// isValidDmEvent checks whether this udev event has correct flags.
+// validDmEvent checks whether this udev event has correct flags.
 // This is similar to checks done by /usr/lib/udev/rules.d/10-dm.rules udev rules.
-func isValidDmEvent(ev *uevent.Uevent) bool {
+func validDmEvent(ev *uevent.Uevent) bool {
 	dmCookie := ev.Vars["DM_COOKIE"]
 	if dmCookie == "" {
 		debug("udev event does not contain DM_COOKIE")
@@ -147,31 +147,26 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	devName := ev.Vars["DEVNAME"]
 
 	if dmNameRe.MatchString(devName) {
-		err := handleMapperDeviceUevent(ev)
-		if err == errIgnoredMapperEvent {
-			err = nil
+		// mapper devices should not be added on "add" uevent
+		// instead it tracks "readiness" using udev information and adds the block device
+		// when it is really ready.
+		if !validDmEvent(ev) {
+			return nil
 		}
+		return handleMapperDeviceUevent(ev)
 
-		return err
 	}
 
-	if ev.Action == "add" {
-		return addBlockDevice("/dev/" + devName)
+	if ev.Action != "add" {
+		return nil
 	}
-
-	return nil
+	return addBlockDevice("/dev/" + devName)
 }
-
-var errIgnoredMapperEvent = fmt.Errorf("ignored device mapper event")
 
 // handleMapperDeviceUevent handles device mapper related uevent
 // if udev event is valid then it return non-empty string that contains
 // new mapper device name (e.g. /dev/mapper/name)
 func handleMapperDeviceUevent(ev *uevent.Uevent) error {
-	if !isValidDmEvent(ev) {
-		return errIgnoredMapperEvent
-	}
-
 	devName := ev.Vars["DEVNAME"]
 
 	major, err := strconv.Atoi(ev.Vars["MAJOR"])
@@ -194,12 +189,16 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 	}
 
 	devPath := "/dev/" + devName
+	if err := addBlockDevice(devPath); err != nil {
+		return err
+	}
+
 	dmLinkPath := "/dev/mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
 	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
 	if err := os.Symlink(devPath, dmLinkPath); err != nil {
 		return err
 	}
-	if err := addBlockDevice(dmLinkPath); err != nil {
+	if err := addBlockDeviceSymlink(dmLinkPath); err != nil {
 		return err
 	}
 
@@ -212,7 +211,7 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 		if err := os.Symlink(devPath, lvmLinkPath); err != nil {
 			return err
 		}
-		if err := addBlockDevice(lvmLinkPath); err != nil {
+		if err := addBlockDeviceSymlink(lvmLinkPath); err != nil {
 			return err
 		}
 	}

@@ -158,6 +158,54 @@ func addBlockDevice(devpath string) error {
 	return nil
 }
 
+// if symlink is provided then it is expected that target device already processed
+// the only thing that is interesting to us whether it matches root= by path
+func addBlockDeviceSymlink(symlink string) error {
+	// Some devices might receive multiple udev add events
+	// Avoid processing these nodes twice by tracking what has been added already
+	if _, alreadyAdded := addedDevices.LoadOrStore(symlink, true); alreadyAdded {
+		// this devpath has been processed already
+		return nil
+	}
+
+	debug("found a new device symlink %s", symlink)
+
+	info, err := readBlkInfo(symlink)
+	if err == errUnknownBlockType {
+		// even if booster unable to detect a filesystem we might still try to mount with the type specified by the user
+		info = &blkInfo{
+			path: symlink,
+		}
+		err = nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("%s: %v", symlink, err)
+	}
+
+	if cmdResume != nil && cmdResume.format == refName && cmdResume.matchesBlkInfo(info) {
+		if err := resume(symlink); err != nil {
+			return err
+		}
+	}
+
+	if cmdRoot.format == refName && cmdRoot.matchesBlkInfo(info) {
+		if info.format == "" && cmdline["rootfstype"] != "" {
+			info.format = cmdline["rootfstype"]
+			info.isFs = true
+		}
+		if info.format == "" {
+			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", symlink)
+		}
+		if !info.isFs {
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", symlink, info.format)
+		}
+		return mountRootFs(symlink, info.format)
+	}
+
+	return nil
+}
+
 // handleGptBlockDevice accepts information about GPT partition table and tries to match
 // possible root= partition.
 func handleGptBlockDevice(info *blkInfo, devPath string) error {
