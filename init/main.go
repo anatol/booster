@@ -762,18 +762,18 @@ func readStartTime() {
 	var err error
 	startRealtime, err = readClock(unix.CLOCK_REALTIME)
 	if err != nil {
-		severe("read realtime clock: %v\n", err)
+		severe("read realtime clock: %v", err)
 	}
 	startMonotonic, err = readClock(unix.CLOCK_MONOTONIC)
 	if err != nil {
-		severe("read monotonic clock: %v\n", err)
+		severe("read monotonic clock: %v", err)
 	}
 }
 
 func emergencyShell() {
 	if _, err := os.Stat("/usr/bin/busybox"); !os.IsNotExist(err) {
 		if err := unix.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
-			severe("Unable to start an emergency shell: %v\n", err)
+			severe("Unable to start an emergency shell: %v", err)
 		}
 	}
 }
