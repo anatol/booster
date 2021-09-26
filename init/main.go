@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,14 +80,29 @@ func parseCmdline() error {
 		concurrentModuleLoading = false
 	}
 
-	cmdRoot, err = parseDeviceRef("root", cmdline["root"], true)
-	if err != nil {
-		return err
-	}
-	if param, ok := cmdline["resume"]; ok {
-		cmdResume, err = parseDeviceRef("resume", param, false)
+	if param, ok := cmdline["root"]; ok {
+		cmdRoot, err = parseDeviceRef(param)
+		if err != nil {
+			return fmt.Errorf("root=%s: %v", param, err)
+		}
+	} else {
+		// try to auto-discover gpt partition https://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/
+		autodiscoveryGUID, ok := autodiscoveryGptTypes[runtime.GOARCH]
+		if !ok {
+			return fmt.Errorf("root= boot option is not specified")
+		}
+		debug("root= param is not specified. Use GPT partition autodiscovery with guid type %s", autodiscoveryGUID)
+		gptType, err := parseUUID(autodiscoveryGUID)
 		if err != nil {
 			return err
+		}
+		cmdRoot = &deviceRef{refGptType, gptType}
+	}
+
+	if param, ok := cmdline["resume"]; ok {
+		cmdResume, err = parseDeviceRef(param)
+		if err != nil {
+			return fmt.Errorf("resume=%s: %v", param, err)
 		}
 	}
 

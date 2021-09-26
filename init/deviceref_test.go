@@ -8,7 +8,7 @@ import (
 
 func TestParseDeviceRef(t *testing.T) {
 	check := func(path string, format refFormat, data interface{}) {
-		ref, err := parseDeviceRef("test", path, true)
+		ref, err := parseDeviceRef(path)
 		require.NoError(t, err)
 
 		require.Equal(t, format, ref.format)
