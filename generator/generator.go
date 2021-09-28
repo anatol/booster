@@ -19,6 +19,7 @@ type generatorConfig struct {
 	networkStaticConfig     *networkStaticConfig
 	networkActiveInterfaces []net.HardwareAddr
 	universal               bool
+	defaultModules          []string
 	modules                 []string // extra modules to add
 	modulesForceLoad        []string // extra modules to load at the boot time
 	compression             string
@@ -73,7 +74,6 @@ var defaultModulesList = []string{
 	"kernel/crypto/",
 	"kernel/drivers/input/serio/",
 	"kernel/drivers/input/keyboard/",
-	"kernel/drivers/net/ethernet/",
 	"kernel/drivers/md/",
 	"kernel/drivers/char/tpm/",
 	"kernel/drivers/usb/host/",
@@ -105,6 +105,11 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendExtraFiles(conf.extraFiles); err != nil {
 		return err
+	}
+
+	conf.defaultModules = defaultModulesList
+	if conf.networkConfigType != netOff {
+		conf.defaultModules = append(conf.defaultModules, "kernel/drivers/net/ethernet/")
 	}
 
 	if conf.enableLVM {
@@ -272,7 +277,7 @@ func (img *Image) appendModules(conf *generatorConfig) (*Kmod, error) {
 
 	// some kernels might be compiled without some of the modules (e.g. virtio) from the predefined list
 	// generator should not fail if a module is not detected
-	if err := kmod.activateModules(true, false, defaultModulesList...); err != nil {
+	if err := kmod.activateModules(true, false, conf.defaultModules...); err != nil {
 		return nil, err
 	}
 	if err := kmod.activateModules(false, true, conf.modules...); err != nil {

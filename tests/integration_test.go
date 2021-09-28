@@ -157,6 +157,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 	conf.EnableLVM = opts.enableLVM
 	conf.EnableMdraid = opts.enableMdraid
 	conf.MdraidConfigPath = opts.mdraidConf
+	conf.Modules = opts.modules
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
 	data, err := yaml.Marshal(&conf)
@@ -177,6 +178,7 @@ type Opts struct {
 	compression          string
 	prompt               string
 	password             string
+	modules              string // extra modules to include into image
 	modulesForceLoad     string
 	enableTangd          bool
 	useDhcp              bool
@@ -541,6 +543,7 @@ func TestBooster(t *testing.T) {
 
 	// verifies module force loading + modprobe command-line parameters
 	t.Run("Vfio", boosterTest(Opts{
+		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 		disks:            []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
@@ -867,6 +870,7 @@ func TestBooster(t *testing.T) {
 		}
 		t.Run("ArchLinux.ext4."+pkg, boosterTest(Opts{
 			kernelVersion: ver,
+			modules:       "e1000",
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
@@ -878,6 +882,7 @@ func TestBooster(t *testing.T) {
 		// more complex setup with LUKS and btrfs subvolumes
 		t.Run("ArchLinux.btrfs."+pkg, boosterTest(Opts{
 			kernelVersion: ver,
+			modules:       "e1000",
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.btrfs.raw", Format: "raw"}},
