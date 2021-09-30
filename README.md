@@ -30,6 +30,12 @@ $ ls -lh /boot/booster-*.img
 -rwxr-xr-x 1 root root 3.9M Dec 10 20:51 /boot/booster-linux.img
 ```
 
+#### Void Linux
+Install booster with `xbps-install -S booster`.
+
+Run `xbps-reconfigure -f linux` to create the initramfs for a previously installed kernel.
+
+#### Manual
 Or optionally the image can be generated manually as `booster -o mybooster.img`. Note that by default booster generates
 host specific images with minimum binaries needed for the current host. Providing `-universal` flag to `booster` tool
 will add more modules and tools and the result image will be bigger.
