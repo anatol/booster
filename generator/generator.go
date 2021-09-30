@@ -19,7 +19,6 @@ type generatorConfig struct {
 	networkStaticConfig     *networkStaticConfig
 	networkActiveInterfaces []net.HardwareAddr
 	universal               bool
-	defaultModules          []string
 	modules                 []string // extra modules to add
 	modulesForceLoad        []string // extra modules to load at the boot time
 	compression             string
@@ -107,13 +106,38 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	conf.defaultModules = defaultModulesList
+	kmod, err := NewKmod(conf)
+	if err != nil {
+		return err
+	}
+
+	// some kernels might be compiled without some of the modules (e.g. virtio) from the predefined list
+	// generator should not fail if a module is not detected
+	if err := kmod.activateModules(true, false, defaultModulesList...); err != nil {
+		return err
+	}
+	if err := kmod.activateModules(false, true, conf.modules...); err != nil {
+		return err
+	}
+	if err := kmod.activateModules(false, true, conf.modulesForceLoad...); err != nil {
+		return err
+	}
+
+	// cbc module is a hard requirement for "encrypted_keys"
+	// https://github.com/torvalds/linux/blob/master/security/keys/encrypted-keys/encrypted.c#L42
+	kmod.addExtraDep("encrypted_keys", "cbc")
+
 	if conf.networkConfigType != netOff {
-		conf.defaultModules = append(conf.defaultModules, "kernel/drivers/net/ethernet/")
+		if err := kmod.activateModules(true, false, "kernel/drivers/net/ethernet/"); err != nil {
+			return err
+		}
 	}
 
 	if conf.enableLVM {
-		conf.modules = append(conf.modules, "dm_mod", "dm_snapshot", "dm_mirror", "dm_cache", "dm_cache_smq", "dm_thin_pool")
+		if err := kmod.activateModules(false, false, "dm_mod", "dm_snapshot", "dm_mirror", "dm_cache", "dm_cache_smq", "dm_thin_pool"); err != nil {
+			return err
+		}
+
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "dm_mod")
 		if err := img.appendExtraFiles([]string{"lvm"}); err != nil {
 			return err
@@ -121,6 +145,10 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	if conf.enableMdraid {
+		if err := kmod.activateModules(true, true, "kernel/drivers/md/"); err != nil {
+			return err
+		}
+
 		// preload md_mod for speed. Level-specific drivers (e.g. raid1, raid456) are going to be detected loaded at boot-time
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "md_mod")
 
@@ -141,16 +169,23 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
-	kmod, err := img.appendModules(conf)
-	if err != nil {
+	if err := kmod.resolveDependencies(); err != nil {
+		return err
+	}
+	if err := kmod.addModulesToImage(img); err != nil {
 		return err
 	}
 
-	if conf.enableMdraid {
-		if err := kmod.activateModules(true, true, "kernel/drivers/md/"); err != nil {
-			return err
-		}
+	// collect aliases for required modules only
+	aliases, err := kmod.filterAliasesForRequiredModules(conf)
+	if err != nil {
+		return err
 	}
+	if err := img.appendAliasesFile(aliases); err != nil {
+		return err
+	}
+
+	kmod.filterModprobeForRequiredModules()
 
 	var vconsole *VirtualConsole
 	if conf.enableVirtualConsole {
@@ -159,8 +194,6 @@ func generateInitRamfs(conf *generatorConfig) error {
 			return err
 		}
 	}
-
-	kmod.filterModprobeForRequiredModules()
 
 	if err := img.appendInitConfig(conf, kmod, vconsole); err != nil {
 		return err
@@ -267,53 +300,6 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	}
 
 	return img.AppendContent(initConfigPath, 0644, content)
-}
-
-func (img *Image) appendModules(conf *generatorConfig) (*Kmod, error) {
-	kmod, err := NewKmod(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	// some kernels might be compiled without some of the modules (e.g. virtio) from the predefined list
-	// generator should not fail if a module is not detected
-	if err := kmod.activateModules(true, false, conf.defaultModules...); err != nil {
-		return nil, err
-	}
-	if err := kmod.activateModules(false, true, conf.modules...); err != nil {
-		return nil, err
-	}
-	if err := kmod.activateModules(false, true, conf.modulesForceLoad...); err != nil {
-		return nil, err
-	}
-
-	// cbc module is a hard requirement for "encrypted_keys"
-	// https://github.com/torvalds/linux/blob/master/security/keys/encrypted-keys/encrypted.c#L42
-	kmod.addExtraDep("encrypted_keys", "cbc")
-
-	if err := kmod.resolveDependencies(); err != nil {
-		return nil, err
-	}
-	if err := kmod.addModulesToImage(img); err != nil {
-		return nil, err
-	}
-
-	// collect aliases for required modules only
-	aliases, err := kmod.filterAliasesForRequiredModules(conf)
-	if err != nil {
-		return nil, err
-	}
-	if err := img.appendAliasesFile(aliases); err != nil {
-		return nil, err
-	}
-
-	for m := range kmod.hostModules {
-		if !kmod.requiredModules[m] {
-			debug("module '%s' currently used at the host but was not added to the image", m)
-		}
-	}
-
-	return kmod, nil
 }
 
 func (img *Image) appendAliasesFile(aliases []alias) error {

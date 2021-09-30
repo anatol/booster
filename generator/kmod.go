@@ -344,6 +344,13 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			go unpackModule(modName)
 		}
 	}
+
+	for m := range k.hostModules {
+		if !k.requiredModules[m] {
+			debug("module '%s' currently used at the host but was not added to the image", m)
+		}
+	}
+
 	wg.Wait()
 
 	select {
