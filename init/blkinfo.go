@@ -41,11 +41,21 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	return nil, errUnknownBlockType
 }
 
+const (
+	gptPartitionAttributeSystem             = 1 << 0
+	gptPartitionAttributeHideFromEfi        = 1 << 1
+	gptPartitionAttributeLegacyBIOSBootable = 1 << 2
+	gptPartitionAttributeReadOnly           = 1 << 60
+	gptPartitionAttributeHidden             = 1 << 62
+	gptPartitionAttributeDoNotAutomount     = 1 << 63
+)
+
 type gptPart struct {
-	num      int // index of the partition int the gpt table
-	typeGUID []byte
-	uuid     []byte
-	name     string
+	num        int // index of the partition int the gpt table
+	typeGUID   []byte
+	uuid       []byte
+	name       string
+	attributes uint64
 }
 
 type gptData struct {
@@ -97,8 +107,9 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 			continue
 		}
 		partUUID := convertGptUUID(buf[0x10:0x20])
+		attributes := binary.LittleEndian.Uint64(buf[0x30:0x38])
 		name := fromUnicode16(buf[0x38:], binary.LittleEndian)
-		part := gptPart{int(i), typeGUID, partUUID, name}
+		part := gptPart{int(i), typeGUID, partUUID, name, attributes}
 
 		parts = append(parts, part)
 	}

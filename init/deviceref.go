@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type refFormat uint8
@@ -67,6 +69,14 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 				partitionPath := calculateDevPath(devPath, p.num)
 				if rootAutodiscoveryMode {
 					debug("autodiscovery: partition %s matches root", partitionPath)
+					if p.attributes&gptPartitionAttributeDoNotAutomount != 0 {
+						debug("autodiscovery: partition %s has 'do not mount' GPT attribute, skip it", partitionPath)
+						continue
+					}
+					if p.attributes&gptPartitionAttributeReadOnly != 0 {
+						debug("autodiscovery: partition %s has 'read-only' GPT attribute", partitionPath)
+						rootAutodiscoveryMountFlags |= unix.MS_RDONLY
+					}
 				}
 				return &deviceRef{refPath, partitionPath}
 			}

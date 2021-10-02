@@ -813,6 +813,10 @@ func TestBooster(t *testing.T) {
 	t.Run("Gpt.RootAutodiscovery.Ext4", boosterTest(Opts{
 		containsESP: true,
 		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
+		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+			require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x0, options="))
+			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+		},
 	}))
 	t.Run("Gpt.RootAutodiscovery.LUKS", boosterTest(Opts{
 		containsESP:   true,
@@ -820,6 +824,26 @@ func TestBooster(t *testing.T) {
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
 		prompt:        "Enter passphrase for root:",
 		password:      "66789",
+	}))
+	t.Run("Gpt.RootAutodiscovery.NoAuto", boosterTest(Opts{
+		containsESP:   true,
+		scriptEnvvars: []string{"GPT_ATTR=63"},
+		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
+		mountTimeout:  1,
+		forceKill:     true,
+		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+			require.NoError(t, vm.ConsoleExpect("booster: autodiscovery: partition /dev/sda2 has 'do not mount' GPT attribute, skip it"))
+			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
+		},
+	}))
+	t.Run("Gpt.RootAutodiscovery.ReadOnly", boosterTest(Opts{
+		containsESP:   true,
+		scriptEnvvars: []string{"GPT_ATTR=60"},
+		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
+		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+			require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x1, options="))
+			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+		},
 	}))
 
 	t.Run("Nvme", boosterTest(Opts{

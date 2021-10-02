@@ -9,7 +9,7 @@ import (
 
 func TestSunderMountFlags(t *testing.T) {
 	check := func(input string, flags uintptr, options string) {
-		f, o := sunderMountFlags(input)
+		f, o := sunderMountFlags(input, 0)
 		require.Equal(t, flags, f)
 		require.Equal(t, options, o)
 	}

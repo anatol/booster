@@ -30,6 +30,17 @@ w
 y
 "
 
+if [[ -v GPT_ATTR ]]; then
+  sudo gdisk $lodev <<<"x
+a
+2
+$GPT_ATTR
+
+w
+y
+"
+fi
+
 sudo partprobe $lodev
 
 sudo mkfs.fat -F32 ${lodev}p1

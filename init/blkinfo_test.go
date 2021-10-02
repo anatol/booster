@@ -86,17 +86,18 @@ func TestBlkInfo(t *testing.T) {
 	typeGUID := []byte{203, 52, 81, 177, 53, 176, 64, 249, 160, 234, 133, 102, 237, 5, 222, 109}
 	sector1UUID := []byte{83, 69, 58, 7, 155, 238, 67, 151, 166, 20, 158, 143, 163, 135, 10, 114}
 	sector2UUID := []byte{62, 161, 141, 185, 105, 31, 69, 94, 164, 13, 32, 212, 38, 177, 150, 95}
-	check(t, "gpt", "gpt", "c26fcabe-8010-4bff-a066-8c73e76dbb32", "", 10, "gdisk $OUTPUT <<< 'o\ny\nx\ng\n$UUID\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\nсектор1\nx\nc\n53453a07-9bee-4397-a614-9e8fa3870a72\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\n2\nhello\nx\nc\n2\n3ea18db9-691f-455e-a40d-20d426b1965f\nw\ny\n'",
+	check(t, "gpt", "gpt", "c26fcabe-8010-4bff-a066-8c73e76dbb32", "", 10, "gdisk $OUTPUT <<< 'o\ny\nx\ng\n$UUID\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\nсектор1\nx\nc\n53453a07-9bee-4397-a614-9e8fa3870a72\nm\nn\n\n\n+2M\ncb3451b1-35b0-40f9-a0ea-8566ed05de6d\nc\n2\nhello\nx\nc\n2\n3ea18db9-691f-455e-a40d-20d426b1965f\na\n2\n60\n\nw\ny\n'",
 		gptData{partitions: []gptPart{{
 			num:      0,
 			typeGUID: typeGUID,
 			uuid:     sector1UUID,
 			name:     "сектор1",
 		}, {
-			num:      1,
-			typeGUID: typeGUID,
-			uuid:     sector2UUID,
-			name:     "hello",
+			num:        1,
+			typeGUID:   typeGUID,
+			uuid:       sector2UUID,
+			name:       "hello",
+			attributes: gptPartitionAttributeReadOnly,
 		}}})
 	check(t, "mbr", "mbr", "2beab180", "", 1, "fdisk $OUTPUT <<< 'o\nx\ni\n0x$UUID\nr\nw\n'", nil)
 

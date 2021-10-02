@@ -40,8 +40,9 @@ var (
 
 	luksMappings []luksMapping // list of LUKS devices that booster unlocked during boot process
 
-	rootAutodiscoveryMode bool
-	activeEfiEspGUID      UUID // partition that was used as Efi system partition last time
+	rootAutodiscoveryMode       bool
+	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags
+	activeEfiEspGUID            UUID    // partition that was used as Efi system partition last time
 )
 
 type set map[string]bool
@@ -427,7 +428,7 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := sunderMountFlags(cmdline["rootflags"])
+	rootMountFlags, options := sunderMountFlags(cmdline["rootflags"], rootAutodiscoveryMountFlags)
 	if _, ro := cmdline["ro"]; ro {
 		rootMountFlags |= unix.MS_RDONLY
 	}
@@ -444,10 +445,10 @@ func mountRootFs(dev, fstype string) error {
 
 // sunderMountFlags separates list of mount parameters (usually provided by a user) into `flags` and `options`
 // consumable by mount() functions.
+// This function receives a parameter 'flags' that represents default flags coming from somewhere else (e.g. GPT attributes via autodiscovery)
 // for example 'noatime,user_xattr,nodev,nobarrier' becomes MS_NOATIME|MS_NODEV and 'user_xattr,nobarrier'
-func sunderMountFlags(options string) (uintptr, string) {
+func sunderMountFlags(options string, flags uintptr) (uintptr, string) {
 	var outOptions []string
-	var flags uintptr
 	for _, o := range strings.Split(options, ",") {
 		switch o {
 		case "dirsync":
