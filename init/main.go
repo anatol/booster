@@ -38,6 +38,8 @@ var (
 	cmdRoot   *deviceRef
 	cmdResume *deviceRef
 
+	luksMappings []luksMapping // list of LUKS devices that booster unlocked during boot process
+
 	rootAutodiscoveryMode bool
 	activeEfiEspGUID      UUID // partition that was used as Efi system partition last time
 )
@@ -118,6 +120,49 @@ func parseCmdline() error {
 		}
 	}
 
+	// parse LUKS-specific kernel parameters
+	var luksOptions []string
+	if param, ok := cmdline["rd.luks.options"]; ok {
+		for _, o := range strings.Split(param, ",") {
+			flag, ok := rdLuksOptions[o]
+			if !ok {
+				return fmt.Errorf("unknown value in rd.luks.options: %v", o)
+			}
+			luksOptions = append(luksOptions, flag)
+		}
+	}
+
+	if param, ok := cmdline["rd.luks.name"]; ok {
+		parts := strings.Split(param, "=")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
+		}
+		uuid, err := parseUUID(stripQuotes(parts[0]))
+		if err != nil {
+			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
+		}
+
+		dev := luksMapping{
+			ref:     &deviceRef{refFsUUID, uuid},
+			name:    parts[1],
+			options: luksOptions,
+		}
+		luksMappings = append(luksMappings, dev)
+	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
+		stripped := stripQuotes(uuid)
+		u, err := parseUUID(stripped)
+		if err != nil {
+			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
+		}
+
+		dev := luksMapping{
+			ref:     &deviceRef{refFsUUID, u},
+			name:    "luks-" + stripped,
+			options: luksOptions,
+		}
+		luksMappings = append(luksMappings, dev)
+	}
+
 	return nil
 }
 
@@ -176,7 +221,7 @@ func addBlockDevice(devpath string) error {
 	// check non-mountable types that require extra processing
 	switch info.format {
 	case "luks":
-		return handleLuksBlockDevice(info, devpath)
+		return handleLuksBlockDevice(info)
 	case "lvm":
 		return handleLvmBlockDevice(devpath)
 	case "mdraid":

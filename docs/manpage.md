@@ -87,6 +87,7 @@ It is a convenience script that performs the same type of image regeneration as 
 Some parts of booster boot functionality can be modified with kernel boot parameters. These parameters are usually set through bootloader config. Booster boot uses following kernel parameters:
 
  * `root=($PATH|UUID=$UUID|LABEL=$LABEL)` root device. It can be specified as a path to the block device (e.g. root=/dev/sda) or with filesystem UUID (e.g. root=UUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665, pay attention that it does not contain any quotes) or with filesystem label (e.g. root=LABEL=rootlabel, pay attention that label does not contain any quotes or whitespaces).
+    If `root=` points to a LUKS partition then it automatically unlocked as a device `/dev/mapper/root` and mounted to root.
     Booster also supports root [partition autodiscovery](https://systemd.io/DISCOVERABLE_PARTITIONS/) - if no `root=` parameter is specified then booster checks for partitions with specific GPT type and uses it to mount as root.
  * `rootfstype=$TYPE` (e.g. rootfstype=ext4). By default booster tries to detect the root filesystem type. But if the autodetection does not work then this kernel parameter is useful. Also please file a ticket so we can improve the code that detects filetypes.
  * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. rootflags=user_xattr,nobarrier.

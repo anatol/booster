@@ -189,7 +189,8 @@ type Opts struct {
 	disk                 string
 	disks                []vmtest.QemuDisk
 	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
-	mountTimeout         int  // in seconds
+	scriptEnvvars        []string
+	mountTimeout         int // in seconds
 	extraFiles           string
 	checkVMState         func(vm *vmtest.Qemu, t *testing.T)
 	forceKill            bool // if true then kill VM rather than do a graceful shutdown
@@ -308,6 +309,8 @@ func boosterTest(opts Opts) func(*testing.T) {
 				"KERNEL_OPTIONS=" + strings.Join(kernelArgs, " "),
 				"INITRAMFS_IMAGE=" + initRamfs,
 			}
+			env = append(env, opts.scriptEnvvars...)
+
 			if err := shell("generate_asset_esp.sh", env...); err != nil {
 				t.Fatal(err)
 			}
@@ -807,9 +810,16 @@ func TestBooster(t *testing.T) {
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
 	}))
-	t.Run("Gpt.RootAutodiscovery", boosterTest(Opts{
+	t.Run("Gpt.RootAutodiscovery.Ext4", boosterTest(Opts{
 		containsESP: true,
 		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
+	}))
+	t.Run("Gpt.RootAutodiscovery.LUKS", boosterTest(Opts{
+		containsESP:   true,
+		scriptEnvvars: []string{"ENABLE_LUKS=1"},
+		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
+		prompt:        "Enter passphrase for root:",
+		password:      "66789",
 	}))
 
 	t.Run("Nvme", boosterTest(Opts{

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -18,6 +17,14 @@ import (
 	"github.com/anatol/luks.go"
 )
 
+// specifies information needed to process/open a LUKS device
+// often these mappings specified by a user via command-line
+type luksMapping struct {
+	ref     *deviceRef
+	name    string
+	options []string
+}
+
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
 var rdLuksOptions = map[string]string{
 	"discard":                luks.FlagAllowDiscards,
@@ -25,24 +32,6 @@ var rdLuksOptions = map[string]string{
 	"submit-from-crypt-cpus": luks.FlagSubmitFromCryptCPUs,
 	"no-read-workqueue":      luks.FlagNoReadWorkqueue,
 	"no-write-workqueue":     luks.FlagNoWriteWorkqueue,
-}
-
-func luksApplyFlags(d luks.Device) error {
-	param, ok := cmdline["rd.luks.options"]
-	if !ok {
-		return nil
-	}
-
-	for _, o := range strings.Split(param, ",") {
-		flag, ok := rdLuksOptions[o]
-		if !ok {
-			return fmt.Errorf("Unknown value in rd.luks.options: %v", o)
-		}
-		if err := d.FlagsAdd(flag); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
@@ -267,7 +256,7 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
-func luksOpen(dev string, name string) error {
+func luksOpen(dev string, mapping *luksMapping) error {
 	wg := loadModules("dm_crypt")
 	wg.Wait()
 
@@ -281,7 +270,7 @@ func luksOpen(dev string, name string) error {
 		return fmt.Errorf("device %s has no slots to unlock", dev)
 	}
 
-	if err := luksApplyFlags(d); err != nil {
+	if err := d.FlagsAdd(mapping.options...); err != nil {
 		return err
 	}
 
@@ -313,7 +302,7 @@ func luksOpen(dev string, name string) error {
 		debug("recovered password from %s token #%d", t.Type, t.ID)
 
 		for _, s := range t.Slots {
-			err = d.Unlock(s, password, name)
+			err = d.Unlock(s, password, mapping.name)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
@@ -329,7 +318,7 @@ func luksOpen(dev string, name string) error {
 
 	// tokens did not work, let's unlock with a password
 	for {
-		fmt.Print("Enter passphrase for ", name, ":")
+		fmt.Print("Enter passphrase for ", mapping.name, ":")
 		password, err := readPassword()
 		if err != nil {
 			return err
@@ -341,7 +330,7 @@ func luksOpen(dev string, name string) error {
 
 		fmt.Println("   Unlocking...")
 		for _, s := range d.Slots() {
-			err = d.Unlock(s, password, name)
+			err = d.Unlock(s, password, mapping.name)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
@@ -357,43 +346,42 @@ func luksOpen(dev string, name string) error {
 	}
 }
 
-func handleLuksBlockDevice(info *blkInfo, devpath string) error {
-	var name string
-	var matches bool
+func matchLuksMapping(info *blkInfo) *luksMapping {
+	for _, m := range luksMappings {
+		if m.ref.matchesBlkInfo(info) {
+			return &m
+		}
+	}
 
-	if param, ok := cmdline["rd.luks.name"]; ok {
-		parts := strings.Split(param, "=")
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
+	// a special case coming from autodiscoverable partitions https://systemd.io/DISCOVERABLE_PARTITIONS/
+	// is to check whether this partition was specified as a 'root' and if yes - mount it and re-point root to the new location under /dev/mapper/xxx)
+	if cmdRoot.matchesBlkInfo(info) {
+		debug("LUKS device %s matches root=, unlock this device", info.path)
+		m := &luksMapping{
+			ref:  cmdRoot,
+			name: "root",
 		}
-		uuid, err := parseUUID(stripQuotes(parts[0]))
-		if err != nil {
-			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
-		}
-		if bytes.Equal(uuid, info.uuid) {
-			matches = true
-			name = parts[1]
-		}
-	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
-		stripped := stripQuotes(uuid)
-		u, err := parseUUID(stripped)
-		if err != nil {
-			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
-		}
-		if bytes.Equal(u, info.uuid) {
-			matches = true
-			name = "luks-" + stripped
-		}
+		cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/root"}
+		return m
 	}
-	if matches {
-		go func() {
-			// opening a luks device is a slow operation, run it in a separate goroutine
-			if err := luksOpen(devpath, name); err != nil {
-				severe("%v", err)
-			}
-		}()
-	} else {
-		debug("luks device %s does not match rd.luks.xx param", devpath)
+
+	return nil
+}
+
+func handleLuksBlockDevice(info *blkInfo) error {
+	m := matchLuksMapping(info)
+	if m == nil {
+		// did not find any mappings for the given device
+		return nil
 	}
+	debug("a mapping for LUKS device %s has been found", info.path)
+
+	go func() {
+		// opening a luks device is a slow operation, run it in a separate goroutine
+		if err := luksOpen(info.path, m); err != nil {
+			severe("%v", err)
+		}
+	}()
+
 	return nil
 }

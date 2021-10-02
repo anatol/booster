@@ -1,11 +1,14 @@
 # generates an image with 2 partitions, one for ESP (EFI bootloader) and one for root
 trap 'quit' EXIT ERR
 
+LUKS_PASSWORD=66789
+LUKS_DEV_NAME=booster_auto_root
+
 quit() {
   set +o errexit
-  sudo umount $mount/boot
-  sudo umount $mount
-  rm -r $mount
+  sudo umount $boot_mount
+  sudo umount $root_mount
+  sudo cryptsetup close $LUKS_DEV_NAME
   sudo losetup -d $lodev
 }
 
@@ -30,23 +33,31 @@ y
 sudo partprobe $lodev
 
 sudo mkfs.fat -F32 ${lodev}p1
-sudo mkfs.ext4 ${lodev}p2
-mount=$(mktemp -d)
-sudo mount ${lodev}p2 $mount
-sudo mkdir $mount/boot
-sudo mount ${lodev}p1 $mount/boot
-sudo mkdir -p $mount/{boot/loader/entries,boot/EFI/BOOT,sbin}
+boot_mount=$(mktemp -d)
+sudo mount ${lodev}p1 $boot_mount
+sudo mkdir -p $boot_mount/{loader/entries,EFI/BOOT}
 
 echo "default booster
 timeout 0
-" | sudo tee $mount/boot/loader/loader.conf
+" | sudo tee $boot_mount/loader/loader.conf
 echo "title Booster
 linux /vmlinuz-linux
 initrd /booster-linux.img
 options $KERNEL_OPTIONS
-" | sudo tee $mount/boot/loader/entries/booster.conf
+" | sudo tee $boot_mount/loader/entries/booster.conf
+sudo cp $KERNEL_IMAGE $boot_mount/vmlinuz-linux
+sudo cp $INITRAMFS_IMAGE $boot_mount/booster-linux.img
+sudo cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi $boot_mount/EFI/BOOT/BOOTX64.EFI
 
-sudo cp assets/init $mount/sbin/init
-sudo cp $KERNEL_IMAGE $mount/boot/vmlinuz-linux
-sudo cp $INITRAMFS_IMAGE $mount/boot/booster-linux.img
-sudo cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi $mount/boot/EFI/BOOT/BOOTX64.EFI
+root_dev=${lodev}p2
+if [[ -v ENABLE_LUKS ]]; then
+  sudo cryptsetup luksFormat $root_dev <<<"$LUKS_PASSWORD"
+  sudo cryptsetup open $root_dev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
+  root_dev="/dev/mapper/$LUKS_DEV_NAME"
+fi
+
+sudo mkfs.ext4 $root_dev
+root_mount=$(mktemp -d)
+sudo mount $root_dev $root_mount
+sudo mkdir -p $root_mount/sbin
+sudo cp assets/init $root_mount/sbin/init
