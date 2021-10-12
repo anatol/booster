@@ -241,7 +241,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			params = append(params, "-enable-kvm", "-cpu", "host")
 		}
 
-		kernelArgs := append(opts.kernelArgs, "booster.debug")
+		kernelArgs := append(opts.kernelArgs, "booster.log=debug")
 
 		require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
 

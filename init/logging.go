@@ -1,49 +1,66 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 )
 
 const (
 	// TOTHINK rename to debug/info/warning
-	levelSevere = iota
+	levelError = iota
 	levelWarning
+	levelInfo
 	levelDebug
 )
 
 var (
-	verbosityLevel = levelWarning // by default show warnings and errors
+	verbosityLevel = levelInfo // by default show info messages and errors
+	printToConsole bool
 
 	kmsg *os.File
 )
 
-func printMessage(format string, level int, v ...interface{}) {
+func printMessage(format string, requestedLevel, kernelLevel int, v ...interface{}) {
+	if verbosityLevel < requestedLevel {
+		return
+	}
+
 	msg := fmt.Sprintf(format, v...)
-	fmt.Println(msg)
-	_, _ = fmt.Fprint(kmsg, "<", level, ">booster: ", msg, "\n")
+	_, _ = fmt.Fprint(kmsg, "<", kernelLevel, ">booster: ", msg, "\n")
+	if printToConsole {
+		fmt.Println(msg)
+	}
 }
 
 func debug(format string, v ...interface{}) {
-	if verbosityLevel >= levelDebug {
-		printMessage(format, 7, v...)
-	}
+	printMessage(format, levelDebug, 7, v...)
+}
+
+func info(format string, v ...interface{}) {
+	printMessage(format, levelInfo, 6, v...)
 }
 
 func warning(format string, v ...interface{}) {
-	if verbosityLevel >= levelWarning {
-		printMessage(format, 6, v...)
-	}
+	printMessage(format, levelWarning, 4, v...)
 }
 
+// this is for critical error messages, call this function 'severe' to avoid name clashing with error class
 func severe(format string, v ...interface{}) {
-	if verbosityLevel >= levelSevere {
-		printMessage(format, 4, v...)
-	}
+	printMessage(format, levelError, 2, v...)
 }
 
 const sysKmsgFile = "/proc/sys/kernel/printk_devkmsg"
 
 func disableKmsgThrottling() error {
-	return os.WriteFile(sysKmsgFile, []byte("on\n"), 0644)
+	data, err := os.ReadFile(sysKmsgFile)
+	if err != nil {
+		return err
+	}
+	enable := []byte("on\n")
+	if bytes.Equal(data, enable) {
+		return nil
+	}
+
+	return os.WriteFile(sysKmsgFile, enable, 0644)
 }

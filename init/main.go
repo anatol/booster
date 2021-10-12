@@ -71,17 +71,38 @@ func parseCmdline() error {
 		}
 	}
 
-	if _, ok := cmdline["booster.debug"]; ok {
+	if param, ok := cmdline["booster.log"]; ok {
+		for _, p := range strings.Split(param, ",") {
+			switch p {
+			case "debug":
+				verbosityLevel = levelDebug
+			case "info":
+				verbosityLevel = levelInfo
+			case "warning":
+				verbosityLevel = levelWarning
+			case "error":
+				verbosityLevel = levelError
+			case "console":
+				printToConsole = true
+			default:
+				warning("unknown booster.log key: %s", p)
+			}
+		}
+	} else if _, ok := cmdline["booster.debug"]; ok {
+		// booster.debug is an obsolete parameter
 		verbosityLevel = levelDebug
+		printToConsole = true
+	} else if _, ok := cmdline["quiet"]; ok {
+		verbosityLevel = levelError
+	}
 
+	if verbosityLevel >= levelDebug {
 		// booster debug generates a lot of kmsg logs, to be able to preserve all these logs we disable kmsg throttling
 		if err := disableKmsgThrottling(); err != nil {
 			// user might set 'printk.devkmsg' param and it disables changing the throttling level
 			// in this case ignore the error
 			debug("%v", err)
 		}
-	} else if _, ok := cmdline["quiet"]; ok {
-		verbosityLevel = levelSevere
 	}
 
 	if _, ok := cmdline["booster.disable_concurrent_module_loading"]; ok {
