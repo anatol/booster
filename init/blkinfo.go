@@ -30,11 +30,11 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	type probeFn func(r io.ReaderAt) *blkInfo
 	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
 	for _, fn := range probes {
-		info := fn(r)
-		if info != nil {
-			debug("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, info.format, info.uuid.toString(), info.label)
-			info.path = path
-			return info, nil
+		blk := fn(r)
+		if blk != nil {
+			info("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, blk.format, blk.uuid.toString(), blk.label)
+			blk.path = path
+			return blk, nil
 		}
 	}
 

@@ -21,13 +21,13 @@ import (
 func validDmEvent(ev *uevent.Uevent) bool {
 	dmCookie := ev.Vars["DM_COOKIE"]
 	if dmCookie == "" {
-		debug("udev event does not contain DM_COOKIE")
+		info("udev event does not contain DM_COOKIE")
 		return false
 	}
 
 	cookie, err := strconv.ParseUint(dmCookie, 0, 32)
 	if err != nil {
-		debug("unable to parse DM_COOKIE value: %s", dmCookie)
+		info("unable to parse DM_COOKIE value: %s", dmCookie)
 		return false
 	}
 
@@ -48,7 +48,7 @@ func validDmEvent(ev *uevent.Uevent) bool {
 	// generated as a result of "udevadm trigger" command or as a result
 	// of the "watch" udev rule).
 	if flags&DM_UDEV_PRIMARY_SOURCE_FLAG == 0 {
-		debug("device mapper event: not a primary source")
+		info("device mapper event: not a primary source")
 		return false
 	}
 
@@ -57,7 +57,7 @@ func validDmEvent(ev *uevent.Uevent) bool {
 	// DM_UDEV_DISABLE_DM_RULES_FLAG is set in case we need to disable
 	// basic device-mapper udev rules that create symlinks in /dev/<DM_DIR>
 	if flags&DM_UDEV_DISABLE_DM_RULES_FLAG != 0 {
-		debug("device mapper event: dm rules disabled")
+		info("device mapper event: dm rules disabled")
 		return false
 	}
 
@@ -113,7 +113,7 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 	}
 
 	if config.Network == nil {
-		debug("network is disabled, skipping interface %s", ifname)
+		info("network is disabled, skipping interface %s", ifname)
 		return nil
 	}
 
@@ -124,7 +124,7 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 		}
 
 		if !macListContains(i.HardwareAddr, config.Network.Interfaces) {
-			debug("interface %s is not in 'active' list, skipping it", ifname)
+			info("interface %s is not in 'active' list, skipping it", ifname)
 			return nil
 		}
 	}
@@ -227,6 +227,6 @@ func devMapperUpdateUdevDb(major, minor int) error {
 	}
 
 	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
-	debug("writing udev state to %s", dbFile)
+	info("writing udev state to %s", dbFile)
 	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
 }

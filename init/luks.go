@@ -54,7 +54,7 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 	for i := 0; i < retryNum; i++ {
 		password, err := clevis.Decrypt(payload)
 		if err != nil {
-			debug("%v", err)
+			info("%v", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -102,11 +102,11 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 
 		// TODO: find better way to identify devices that support FIDO2
 		if !strings.Contains(string(content), "FIDO") {
-			debug("HID %s does not support FIDO", devName)
+			info("HID %s does not support FIDO", devName)
 			continue
 		}
 
-		debug("HID %s supports FIDO, trying it to recover the password", devName)
+		info("HID %s supports FIDO, trying it to recover the password", devName)
 
 		var challenge strings.Builder
 		const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
@@ -134,30 +134,30 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		cmd := exec.Command("fido2-assert", args...)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			debug("%v", err)
+			info("%v", err)
 			continue
 		}
 		stdoutReader := bufio.NewReader(stdout)
 
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
-			debug("%v", err)
+			info("%v", err)
 			continue
 		}
 
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
-			debug("%v", err)
+			info("%v", err)
 			continue
 		}
 
 		if err := cmd.Start(); err != nil {
-			debug("%v", err)
+			info("%v", err)
 			continue
 		}
 
 		if _, err := stdin.Write([]byte(challenge.String())); err != nil {
-			debug("%v", err)
+			info("%v", err)
 			continue
 		}
 
@@ -165,7 +165,7 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 			// wait till the command requests the pin
 			buff := make([]byte, 500)
 			if _, err := stderr.Read(buff); err != nil {
-				debug("%v", err)
+				info("%v", err)
 				continue
 			}
 			// Dealing with Yubikey using command-line tools is getting out of control
@@ -176,12 +176,12 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 				fmt.Print(prompt)
 				pin, err := readPassword()
 				if err != nil {
-					debug("%v", err)
+					info("%v", err)
 					continue
 				}
 				pin = append(pin, '\n')
 				if _, err := stdin.Write(pin); err != nil {
-					debug("%v", err)
+					info("%v", err)
 					continue
 				}
 			}
@@ -195,7 +195,7 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		hmac, err = stdoutReader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				debug("%v", err)
+				info("%v", err)
 			}
 			continue
 		}
@@ -204,7 +204,7 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		if err := cmd.Wait(); err != nil {
 			buff := make([]byte, 500)
 			_, _ = io.ReadFull(stderr, buff)
-			debug("%v: %v", err, string(buff))
+			info("%v: %v", err, string(buff))
 			continue
 		}
 		return []byte(hmac), nil
@@ -290,7 +290,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		case "systemd-tpm2":
 			password, err = recoverSystemdTPM2Password(t)
 		default:
-			debug("token #%d has unknown type: %s", tokenNum, t.Type)
+			info("token #%d has unknown type: %s", tokenNum, t.Type)
 			continue
 		}
 
@@ -299,7 +299,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			continue // continue trying other tokens
 		}
 
-		debug("recovered password from %s token #%d", t.Type, t.ID)
+		info("recovered password from %s token #%d", t.Type, t.ID)
 
 		for _, s := range t.Slots {
 			err = d.Unlock(s, password, mapping.name)
@@ -308,12 +308,12 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			}
 			memZeroBytes(password)
 			if err == nil {
-				debug("password from %s token #%d matches", t.Type, tokenNum)
+				info("password from %s token #%d matches", t.Type, tokenNum)
 			}
 			return err
 		}
 		memZeroBytes(password)
-		debug("password from %s token #%d does not match", t.Type, tokenNum)
+		info("password from %s token #%d does not match", t.Type, tokenNum)
 	}
 
 	// tokens did not work, let's unlock with a password
@@ -346,17 +346,17 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 }
 
-func matchLuksMapping(info *blkInfo) *luksMapping {
+func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
-		if m.ref.matchesBlkInfo(info) {
+		if m.ref.matchesBlkInfo(blk) {
 			return &m
 		}
 	}
 
 	// a special case coming from autodiscoverable partitions https://systemd.io/DISCOVERABLE_PARTITIONS/
 	// is to check whether this partition was specified as a 'root' and if yes - mount it and re-point root to the new location under /dev/mapper/xxx)
-	if cmdRoot.matchesBlkInfo(info) {
-		debug("LUKS device %s matches root=, unlock this device", info.path)
+	if cmdRoot.matchesBlkInfo(blk) {
+		info("LUKS device %s matches root=, unlock this device", blk.path)
 		m := &luksMapping{
 			ref:  cmdRoot,
 			name: "root",
@@ -368,17 +368,17 @@ func matchLuksMapping(info *blkInfo) *luksMapping {
 	return nil
 }
 
-func handleLuksBlockDevice(info *blkInfo) error {
-	m := matchLuksMapping(info)
+func handleLuksBlockDevice(blk *blkInfo) error {
+	m := matchLuksMapping(blk)
 	if m == nil {
 		// did not find any mappings for the given device
 		return nil
 	}
-	debug("a mapping for LUKS device %s has been found", info.path)
+	info("a mapping for LUKS device %s has been found", blk.path)
 
 	go func() {
 		// opening a luks device is a slow operation, run it in a separate goroutine
-		if err := luksOpen(info.path, m); err != nil {
+		if err := luksOpen(blk.path, m); err != nil {
 			severe("%v", err)
 		}
 	}()

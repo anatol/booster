@@ -101,7 +101,7 @@ func parseCmdline() error {
 		if err := disableKmsgThrottling(); err != nil {
 			// user might set 'printk.devkmsg' param and it disables changing the throttling level
 			// in this case ignore the error
-			debug("%v", err)
+			info("%v", err)
 		}
 	}
 
@@ -120,7 +120,7 @@ func parseCmdline() error {
 		if !ok {
 			return fmt.Errorf("root= boot option is not specified")
 		}
-		debug("root= param is not specified. Use GPT partition autodiscovery with guid type %s", rootUUIDType)
+		info("root= param is not specified. Use GPT partition autodiscovery with guid type %s", rootUUIDType)
 		gptType, err := parseUUID(rootUUIDType)
 		if err != nil {
 			return err
@@ -225,12 +225,12 @@ func addBlockDevice(devpath string) error {
 		return nil
 	}
 
-	debug("found a new device %s", devpath)
+	info("found a new device %s", devpath)
 
-	info, err := readBlkInfo(devpath)
+	blk, err := readBlkInfo(devpath)
 	if err == errUnknownBlockType {
 		// even if booster unable to detect a filesystem we might still try to mount with the type specified by the user
-		info = &blkInfo{
+		blk = &blkInfo{
 			path: devpath,
 		}
 		err = nil
@@ -241,35 +241,35 @@ func addBlockDevice(devpath string) error {
 	}
 
 	// check non-mountable types that require extra processing
-	switch info.format {
+	switch blk.format {
 	case "luks":
-		return handleLuksBlockDevice(info)
+		return handleLuksBlockDevice(blk)
 	case "lvm":
 		return handleLvmBlockDevice(devpath)
 	case "mdraid":
-		return handleMdraidBlockDevice(info, devpath)
+		return handleMdraidBlockDevice(blk, devpath)
 	case "gpt":
-		return handleGptBlockDevice(info, devpath)
+		return handleGptBlockDevice(blk, devpath)
 	}
 
-	if cmdResume != nil && cmdResume.matchesBlkInfo(info) {
+	if cmdResume != nil && cmdResume.matchesBlkInfo(blk) {
 		if err := resume(devpath); err != nil {
 			return err
 		}
 	}
 
-	if cmdRoot.matchesBlkInfo(info) {
-		if info.format == "" && cmdline["rootfstype"] != "" {
-			info.format = cmdline["rootfstype"]
-			info.isFs = true
+	if cmdRoot.matchesBlkInfo(blk) {
+		if blk.format == "" && cmdline["rootfstype"] != "" {
+			blk.format = cmdline["rootfstype"]
+			blk.isFs = true
 		}
-		if info.format == "" {
+		if blk.format == "" {
 			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", devpath)
 		}
-		if !info.isFs {
-			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, info.format)
+		if !blk.isFs {
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, blk.format)
 		}
-		return mountRootFs(devpath, info.format)
+		return mountRootFs(devpath, blk.format)
 	}
 
 	return nil
@@ -285,12 +285,12 @@ func addBlockDeviceSymlink(symlink string) error {
 		return nil
 	}
 
-	debug("found a new device symlink %s", symlink)
+	info("found a new device symlink %s", symlink)
 
-	info, err := readBlkInfo(symlink)
+	blk, err := readBlkInfo(symlink)
 	if err == errUnknownBlockType {
 		// even if booster unable to detect a filesystem we might still try to mount with the type specified by the user
-		info = &blkInfo{
+		blk = &blkInfo{
 			path: symlink,
 		}
 		err = nil
@@ -300,24 +300,24 @@ func addBlockDeviceSymlink(symlink string) error {
 		return fmt.Errorf("%s: %v", symlink, err)
 	}
 
-	if cmdResume != nil && cmdResume.format == refPath && cmdResume.matchesBlkInfo(info) {
+	if cmdResume != nil && cmdResume.format == refPath && cmdResume.matchesBlkInfo(blk) {
 		if err := resume(symlink); err != nil {
 			return err
 		}
 	}
 
-	if cmdRoot.format == refPath && cmdRoot.matchesBlkInfo(info) {
-		if info.format == "" && cmdline["rootfstype"] != "" {
-			info.format = cmdline["rootfstype"]
-			info.isFs = true
+	if cmdRoot.format == refPath && cmdRoot.matchesBlkInfo(blk) {
+		if blk.format == "" && cmdline["rootfstype"] != "" {
+			blk.format = cmdline["rootfstype"]
+			blk.isFs = true
 		}
-		if info.format == "" {
+		if blk.format == "" {
 			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", symlink)
 		}
-		if !info.isFs {
-			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", symlink, info.format)
+		if !blk.isFs {
+			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", symlink, blk.format)
 		}
-		return mountRootFs(symlink, info.format)
+		return mountRootFs(symlink, blk.format)
 	}
 
 	return nil
@@ -325,13 +325,13 @@ func addBlockDeviceSymlink(symlink string) error {
 
 // handleGptBlockDevice accepts information about GPT partition table and tries to match
 // possible root= partition.
-func handleGptBlockDevice(info *blkInfo, devPath string) error {
-	gptParts := info.data.(gptData).partitions
+func handleGptBlockDevice(blk *blkInfo, devPath string) error {
+	gptParts := blk.data.(gptData).partitions
 
 	if rootAutodiscoveryMode {
 		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
 		if gptContainsEsp(gptParts) {
-			debug("%s table contains active ESP, use it to discover root", devPath)
+			info("%s table contains active ESP, use it to discover root", devPath)
 		} else {
 			return nil
 		}
@@ -352,14 +352,14 @@ var raidModules = map[uint32]string{
 	levelRaid10:    "raid10",
 }
 
-func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
+func handleMdraidBlockDevice(blk *blkInfo, devpath string) error {
 	if !config.EnableMdraid {
-		debug("MdRaid support is disabled, ignoring mdraid device %s", devpath)
+		info("MdRaid support is disabled, ignoring mdraid device %s", devpath)
 		return nil
 	}
-	debug("trying to assemble mdraid array %s", info.uuid.toString())
+	info("trying to assemble mdraid array %s", blk.uuid.toString())
 
-	if mod, ok := raidModules[info.data.(mdraidData).level]; ok {
+	if mod, ok := raidModules[blk.data.(mdraidData).level]; ok {
 		wg := loadModules(mod)
 		wg.Wait()
 	} else {
@@ -374,11 +374,11 @@ func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
 	props := parseProperties(string(out))
 	arrayName, hasArrayName := props["MD_DEVNAME"]
 	if !hasArrayName {
-		return fmt.Errorf("mdraid array at %s does not have a MD_DEVNAME property", info.uuid.toString())
+		return fmt.Errorf("mdraid array at %s does not have a MD_DEVNAME property", blk.uuid.toString())
 	}
 
 	if started, ok := props["MD_STARTED"]; !ok || started != "yes" {
-		debug("mdraid array %s is not complete, ignore it", arrayName)
+		info("mdraid array %s is not complete, ignore it", arrayName)
 		return nil
 	}
 
@@ -387,11 +387,11 @@ func handleMdraidBlockDevice(info *blkInfo, devpath string) error {
 
 func handleLvmBlockDevice(devpath string) error {
 	if !config.EnableLVM {
-		debug("LVM support is disabled, ignoring lvm physical volume %s", devpath)
+		info("LVM support is disabled, ignoring lvm physical volume %s", devpath)
 		return nil
 	}
 
-	debug("scanning lvm physical volume %s", devpath)
+	info("scanning lvm physical volume %s", devpath)
 	cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", devpath)
 	if verbosityLevel >= levelDebug {
 		cmd.Stderr = os.Stderr
@@ -408,7 +408,7 @@ func resume(devpath string) error {
 	major := unix.Major(devNo)
 	minor := unix.Minor(devNo)
 
-	debug("resuming device %s, devno=(%d,%d)", devpath, major, minor)
+	info("resuming device %s, devno=(%d,%d)", devpath, major, minor)
 	rd := fmt.Sprintf("%d:%d", major, minor)
 	return os.WriteFile("/sys/power/resume", []byte(rd), 0644)
 }
@@ -456,6 +456,7 @@ func mountRootFs(dev, fstype string) error {
 	if _, rw := cmdline["rw"]; rw {
 		rootMountFlags &^= unix.MS_RDONLY
 	}
+	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
 	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
 		return err
 	}
@@ -699,7 +700,7 @@ func switchRoot() error {
 	}
 
 	// Run the OS init
-	debug("Switching to the new userspace now. Да пабачэння!")
+	info("Switching to the new userspace now. Да пабачэння!")
 	if err := unix.Exec(newInitBin, initArgs, nil); err != nil {
 		return fmt.Errorf("Can't run the rootfs init (%v): %v", newInitBin, err)
 	}
@@ -743,7 +744,7 @@ func scanSysBlock() error {
 	return nil
 }
 
-func scanSysModaliases(path string, info os.FileInfo, err error) error {
+func scanSysModaliases(path string, fi os.FileInfo, err error) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// /dev/sys has a number of ephemeral files (like 'waiting_for_supplier') that might be added/removed
@@ -752,10 +753,10 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 		}
 		return err
 	}
-	if info.IsDir() {
+	if fi.IsDir() {
 		return nil
 	}
-	if info.Name() != "modalias" {
+	if fi.Name() != "modalias" {
 		return nil
 	}
 
@@ -768,14 +769,14 @@ func scanSysModaliases(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 	if err := loadModalias(alias); err != nil {
-		debug("%v", err)
+		info("%v", err)
 	}
 
 	return nil
 }
 
 func boost() error {
-	debug("Starting booster initramfs")
+	info("Starting booster initramfs")
 
 	var err error
 	if err := mount("dev", "/dev", "devtmpfs", unix.MS_NOSUID, "mode=0755"); err != nil {
@@ -883,7 +884,6 @@ func mount(source, target, fstype string, flags uintptr, options string) error {
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return err
 	}
-	debug("mounting %s->%s, fs=%s, flags=0x%x, options=%s", source, target, fstype, flags, options)
 	if err := unix.Mount(source, target, fstype, flags, options); err != nil {
 		return fmt.Errorf("mount(%v): %v", source, err)
 	}

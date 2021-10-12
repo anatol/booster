@@ -13,11 +13,11 @@ import (
 
 func consoleSetFont(c *VirtualConsole) error {
 	if c.FontFile == "" {
-		debug("setfont parameters are not specified")
+		info("setfont parameters are not specified")
 		return nil
 	}
 
-	debug("loading font file %s", c.FontFile)
+	info("loading font file %s", c.FontFile)
 	args := []string{c.FontFile}
 	if c.FontMapFile != "" {
 		args = append(args, "-m", c.FontMapFile)
@@ -87,12 +87,12 @@ func loadKmap(fd uintptr, file string) error {
 
 func consoleLoadKeymap(c *VirtualConsole) error {
 	if c.KeymapFile == "" {
-		debug("loadkey keymap is not specified")
+		info("loadkey keymap is not specified")
 		return nil
 	}
 	isUtf := c.Utf
 
-	debug("loading keymap file %s", c.KeymapFile)
+	info("loading keymap file %s", c.KeymapFile)
 
 	cons, err := os.OpenFile("/dev/tty0", os.O_RDWR, 0)
 	if err != nil {
