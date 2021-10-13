@@ -338,6 +338,9 @@ func handleGptBlockDevice(blk *blkInfo, devPath string) error {
 	}
 
 	cmdRoot = cmdRoot.resolveFromGptTable(devPath, gptParts)
+	if cmdResume != nil {
+		cmdResume = cmdResume.resolveFromGptTable(devPath, gptParts)
+	}
 	return nil
 }
 

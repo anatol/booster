@@ -86,7 +86,7 @@ It is a convenience script that performs the same type of image regeneration as 
 ## BOOT TIME KERNEL PARAMETERS
 Some parts of booster boot functionality can be modified with kernel boot parameters. These parameters are usually set through bootloader config. Booster boot uses following kernel parameters:
 
- * `root=($PATH|UUID=$UUID|LABEL=$LABEL)` root device. It can be specified as a path to the block device (e.g. root=/dev/sda) or with filesystem UUID (e.g. root=UUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665, pay attention that it does not contain any quotes) or with filesystem label (e.g. root=LABEL=rootlabel, pay attention that label does not contain any quotes or whitespaces).
+ * `root=$deviceref` device reference to root device. See notes below for how to specify the device reference.
     If `root=` points to a LUKS partition then it automatically unlocked as a device `/dev/mapper/root` and mounted to root.
     Booster also supports root [partition autodiscovery](https://systemd.io/DISCOVERABLE_PARTITIONS/) - if no `root=` parameter is specified then booster checks for partitions with specific GPT type and uses it to mount as root.
  * `rootfstype=$TYPE` (e.g. rootfstype=ext4). By default booster tries to detect the root filesystem type. But if the autodetection does not work then this kernel parameter is useful. Also please file a ticket so we can improve the code that detects filetypes.
@@ -95,7 +95,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
- * `resume={$PATH|UUID=$UUID|LABEL=$LABEL}` suspend-to-disk device. Like `root`, can be specified as a path to the block device, fs UUID, or a fs label.
+ * `resume=$deviceref` device reference to suspend-to-disk device.
  * `booster.log` configures booster init logging. It accepts a comma separated list of following values:
 
    One of the level values (from more verbose to less verbose) - `debug`, `info`, `warning`, `error`. If the level is not specified then `info` used by default.
@@ -109,6 +109,18 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `quiet` Set booster init verbosity to minimum. This option is ignored if `booster.debug` or `booster.log` is set.
 
 ## NOTES
+
+### Device Reference
+Device reference is a way to specify a device or partition in kernel parameters. It is labeled as `$deviceref` above.
+Device reference has one of the following values:
+
+* `/dev/XXX` path to specific device file, it can be either a path to real device/partition like `/dev/sda1`, `/dev/nvme0n1` or path to dm-mapper virtual device like
+   `/dev/mapper/root` or `/dev/vg_mesos/lv_mesos_containers`.
+ * `UUID=$UUID` or `/dev/disk/by-uuid/$UUID` references device by its filesystem/LUKS UUID. See notes about UUID formatting rules below.
+ * `LABEL=$LABEL` or `/dev/disk/by-label/$LABEL` references device by its filesystem/LUKS label.
+ * `PARTUUID=$UUID` or `/dev/disk/by-partuuid/$UUID` references device by GPT partition UUID.
+ * `PARTUUID=$UUID/PARTNROFF=$OFFSET` references device by $OFFSET from a GPT partition specified by $UUID e.g. `PARTUUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665/PARTNROFF=2`.
+ * `PARTLABEL=$LABEL` or `/dev/disk/by-partlabel/$LABEL` references device by GPT partition label.
 
 ### UUID parameters
 Boot parameters such as `root=UUID=$UUID` and `rd.luks.uuid=$UUID` allow you to specify the block device by its UUID.
