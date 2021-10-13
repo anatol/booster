@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"tests/israce"
 	"time"
 
 	"github.com/anatol/vmtest"
@@ -378,8 +379,15 @@ func compileBinaries(dir string) error {
 	if err := os.Chdir("../init"); err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-o", dir+"/init")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	raceFlag := ""
+	if israce.Enabled {
+		raceFlag = "-race"
+	}
+	cmd := exec.Command("go", "build", "-o", dir+"/init", raceFlag)
+	cmd.Env = os.Environ()
+	if !israce.Enabled {
+		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+	}
 	if testing.Verbose() {
 		log.Print("Call 'go build' for init")
 		cmd.Stdout = os.Stdout
@@ -393,7 +401,7 @@ func compileBinaries(dir string) error {
 	if err := os.Chdir("../generator"); err != nil {
 		return err
 	}
-	cmd = exec.Command("go", "build", "-o", dir+"/generator")
+	cmd = exec.Command("go", "build", "-o", dir+"/generator", raceFlag)
 	if testing.Verbose() {
 		log.Print("Call 'go build' for generator")
 		cmd.Stdout = os.Stdout
