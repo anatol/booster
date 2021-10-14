@@ -244,7 +244,7 @@ func addBlockDevice(devpath string) error {
 	case "mdraid":
 		return handleMdraidBlockDevice(blk, devpath)
 	case "gpt":
-		return handleGptBlockDevice(blk, devpath)
+		return handleGptBlockDevice(blk)
 	}
 
 	if cmdResume != nil && cmdResume.matchesBlkInfo(blk) {
@@ -320,21 +320,21 @@ func addBlockDeviceSymlink(symlink string) error {
 
 // handleGptBlockDevice accepts information about GPT partition table and tries to match
 // possible root= partition.
-func handleGptBlockDevice(blk *blkInfo, devPath string) error {
-	gptParts := blk.data.(gptData).partitions
+func handleGptBlockDevice(blk *blkInfo) error {
+	gpt := blk.data.(gptData)
 
 	if rootAutodiscoveryMode {
 		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
-		if gptContainsEsp(gptParts) {
-			info("%s table contains active ESP, use it to discover root", devPath)
+		if gpt.containsEsp() {
+			info("%s table contains active ESP, use it to discover root", blk.path)
 		} else {
 			return nil
 		}
 	}
 
-	cmdRoot = cmdRoot.resolveFromGptTable(devPath, gptParts)
+	cmdRoot.resolveGptRef(blk.path, gpt)
 	if cmdResume != nil {
-		cmdResume = cmdResume.resolveFromGptTable(devPath, gptParts)
+		cmdResume.resolveGptRef(blk.path, gpt)
 	}
 	return nil
 }

@@ -57,16 +57,16 @@ func calculateDevPath(parent string, partition int) string {
 }
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
-func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef {
+func (d *deviceRef) resolveGptRef(gptPath string, gpt gptData) {
 	if d.format != refGptType && d.format != refGptUUID && d.format != refGptLabel && d.format != refGptUUIDPartoff {
-		return d
+		return
 	}
 
-	for _, p := range t {
+	for _, p := range gpt.partitions {
 		switch d.format {
 		case refGptType:
 			if bytes.Equal(d.data.(UUID), p.typeGUID) {
-				partitionPath := calculateDevPath(devPath, p.num)
+				partitionPath := calculateDevPath(gptPath, p.num)
 				if rootAutodiscoveryMode {
 					info("autodiscovery: partition %s matches root", partitionPath)
 					if p.attributes&gptPartitionAttributeDoNotAutomount != 0 {
@@ -78,30 +78,28 @@ func (d *deviceRef) resolveFromGptTable(devPath string, t []gptPart) *deviceRef 
 						rootAutodiscoveryMountFlags |= unix.MS_RDONLY
 					}
 				}
-				return &deviceRef{refPath, partitionPath}
+				*d = deviceRef{refPath, partitionPath}
 			}
 		case refGptUUID:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
-				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
+				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num)}
 			}
 		case refGptUUIDPartoff:
 			data := d.data.(gptPartoffData)
 			if bytes.Equal(data.uuid, p.uuid) {
-				return &deviceRef{refPath, calculateDevPath(devPath, p.num+data.offset)}
+				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num+data.offset)}
 			}
 		case refGptLabel:
 			if d.data.(string) == p.name {
-				return &deviceRef{refPath, calculateDevPath(devPath, p.num)}
+				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num)}
 			}
 		}
 	}
-
-	return d
 }
 
 // checks whether given partition table contains active EFI service partition
-func gptContainsEsp(t []gptPart) bool {
-	for _, p := range t {
+func (gpt *gptData) containsEsp() bool {
+	for _, p := range gpt.partitions {
 		if bytes.Equal(activeEfiEspGUID, p.uuid) {
 			return true
 		}
