@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/hex"
 	"os"
 	"os/exec"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -36,10 +34,8 @@ func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script
 
 	info, err := readBlkInfo(asset)
 	require.NoError(t, err)
-	if info.format != fstype {
-		t.Errorf("blkinfo(%s) format = %v, want %v", asset, info.format, fstype)
-	}
-	var uuid []byte
+	require.Equal(t, fstype, info.format)
+	var uuid UUID
 	if fstype == "mbr" || fstype == "mdraid" {
 		uuid, err = hex.DecodeString(uuidStr)
 	} else if fstype == "lvm" {
@@ -48,15 +44,9 @@ func check(t *testing.T, name, fstype, uuidStr, label string, size int64, script
 		uuid, err = parseUUID(uuidStr)
 	}
 	require.NoError(t, err)
-	if !bytes.Equal(info.uuid, uuid) {
-		t.Errorf("blkinfo(%s) uuid = %v, want %v", fstype, info.uuid.toString(), uuidStr)
-	}
-	if info.label != label {
-		t.Errorf("blkinfo(%s) label = %v, want %v", fstype, info.label, label)
-	}
-	if !reflect.DeepEqual(info.data, data) {
-		t.Errorf("blkinfo(%s) data = %v, want %v", fstype, info.data, data)
-	}
+	require.Equal(t, uuid, info.uuid)
+	require.Equal(t, label, info.label)
+	require.Equal(t, data, info.data)
 }
 
 func shell(script string, env ...string) error {
