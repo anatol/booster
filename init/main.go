@@ -30,10 +30,9 @@ var (
 	cmdline = make(map[string]string)
 	// all boot params (from cmdline) that look like module.name=value considered as potential module parameters for 'module'
 	// it preserved to moduleParams for later use. cmdline is not modified.
-	moduleParams            = make(map[string][]string)
-	rootMounting            int32          // shows if there is a mounting operation in progress
-	rootMounted             sync.WaitGroup // waits until the root partition is mounted
-	concurrentModuleLoading = true
+	moduleParams = make(map[string][]string)
+	rootMounting int32          // shows if there is a mounting operation in progress
+	rootMounted  sync.WaitGroup // waits until the root partition is mounted
 
 	cmdRoot   *deviceRef
 	cmdResume *deviceRef
@@ -103,10 +102,6 @@ func parseCmdline() error {
 			// in this case ignore the error
 			info("%v", err)
 		}
-	}
-
-	if _, ok := cmdline["booster.disable_concurrent_module_loading"]; ok {
-		concurrentModuleLoading = false
 	}
 
 	if param, ok := cmdline["root"]; ok {

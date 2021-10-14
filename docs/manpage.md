@@ -105,7 +105,6 @@ Some parts of booster boot functionality can be modified with kernel boot parame
    The debug log is also printed to the kernel kmsg buffer and available for reading either with `dmesg` or with `journalctl -b`.
    If debug level is enabled then kmsg throttling gets disabled automatically.
  * `booster.debug` an obsolete option that is equivalent to `booster.log=debug,console`.
- * `booster.disable_concurrent_module_loading` to disable parallel module loading. With this flag set booster will load modules one-by-one sequentially.
  * `quiet` Set booster init verbosity to minimum. This option is ignored if `booster.debug` or `booster.log` is set.
 
 ## NOTES

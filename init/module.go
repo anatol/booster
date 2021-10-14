@@ -61,10 +61,8 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			return
 		}
 
-		if concurrentModuleLoading {
-			modulesMutex.Lock()
-			defer modulesMutex.Unlock()
-		}
+		modulesMutex.Lock()
+		defer modulesMutex.Unlock()
 
 		for _, w := range loadingModules[mod] {
 			// signal waiters that the module is loaded
@@ -104,11 +102,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 			loadModuleUnlocked(&depsWg, deps...)
 		}
 
-		if concurrentModuleLoading {
-			go loadModule(module, &depsWg)
-		} else {
-			loadModule(module, &depsWg)
-		}
+		go loadModule(module, &depsWg)
 	}
 }
 

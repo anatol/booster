@@ -577,12 +577,6 @@ func TestBooster(t *testing.T) {
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 	}))
 
-	t.Run("DisableConcurrentModuleLoading", boosterTest(Opts{
-		disk:       "assets/luks2.img",
-		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
-		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385", "booster.disable_concurrent_module_loading"},
-	}))
-
 	// verifies module force loading + modprobe command-line parameters
 	t.Run("Vfio", boosterTest(Opts{
 		modules:          "e1000", // add network module needed for ssh
