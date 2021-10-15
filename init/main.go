@@ -240,9 +240,9 @@ func addBlockDevice(devpath string) error {
 	case "luks":
 		return handleLuksBlockDevice(blk)
 	case "lvm":
-		return handleLvmBlockDevice(devpath)
+		return handleLvmBlockDevice(blk)
 	case "mdraid":
-		return handleMdraidBlockDevice(blk, devpath)
+		return handleMdraidBlockDevice(blk)
 	case "gpt":
 		return handleGptBlockDevice(blk)
 	}
@@ -350,9 +350,9 @@ var raidModules = map[uint32]string{
 	levelRaid10:    "raid10",
 }
 
-func handleMdraidBlockDevice(blk *blkInfo, devpath string) error {
+func handleMdraidBlockDevice(blk *blkInfo) error {
 	if !config.EnableMdraid {
-		info("MdRaid support is disabled, ignoring mdraid device %s", devpath)
+		info("MdRaid support is disabled, ignoring mdraid device %s", blk.path)
 		return nil
 	}
 	info("trying to assemble mdraid array %s", blk.uuid.toString())
@@ -361,10 +361,10 @@ func handleMdraidBlockDevice(blk *blkInfo, devpath string) error {
 		wg := loadModules(mod)
 		wg.Wait()
 	} else {
-		return fmt.Errorf("unknown raid level for device %s", devpath)
+		return fmt.Errorf("unknown raid level for device %s", blk.path)
 	}
 
-	out, err := exec.Command("mdadm", "--export", "--incremental", devpath).CombinedOutput()
+	out, err := exec.Command("mdadm", "--export", "--incremental", blk.path).CombinedOutput()
 	if err != nil {
 		return err
 	}
@@ -383,14 +383,14 @@ func handleMdraidBlockDevice(blk *blkInfo, devpath string) error {
 	return addBlockDevice("/dev/md/" + arrayName)
 }
 
-func handleLvmBlockDevice(devpath string) error {
+func handleLvmBlockDevice(blk *blkInfo) error {
 	if !config.EnableLVM {
-		info("LVM support is disabled, ignoring lvm physical volume %s", devpath)
+		info("LVM support is disabled, ignoring lvm physical volume %s", blk.path)
 		return nil
 	}
 
-	info("scanning lvm physical volume %s", devpath)
-	cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", devpath)
+	info("scanning lvm physical volume %s", blk.path)
+	cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", blk.path)
 	if verbosityLevel >= levelDebug {
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
