@@ -160,7 +160,7 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	if ev.Action != "add" {
 		return nil
 	}
-	return addBlockDevice("/dev/" + devName)
+	return addBlockDevice("/dev/"+devName, nil)
 }
 
 // handleMapperDeviceUevent handles device mapper related uevent
@@ -188,19 +188,15 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 		return err
 	}
 
+	symlinks := make([]string, 0)
 	devPath := "/dev/" + devName
-	if err := addBlockDevice(devPath); err != nil {
-		return err
-	}
 
 	dmLinkPath := "/dev/mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
 	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
 	if err := os.Symlink(devPath, dmLinkPath); err != nil {
 		return err
 	}
-	if err := addBlockDeviceSymlink(dmLinkPath); err != nil {
-		return err
-	}
+	symlinks = append(symlinks, dmLinkPath)
 
 	if strings.HasPrefix(info.UUID, "LVM-") {
 		// for LVM there is a special case - add /dev/VG/LG symlink
@@ -211,12 +207,10 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 		if err := os.Symlink(devPath, lvmLinkPath); err != nil {
 			return err
 		}
-		if err := addBlockDeviceSymlink(lvmLinkPath); err != nil {
-			return err
-		}
+		symlinks = append(symlinks, lvmLinkPath)
 	}
 
-	return nil
+	return addBlockDevice(devPath, symlinks)
 }
 
 // devMapperUpdateUdevDb writes Udev state to the database.

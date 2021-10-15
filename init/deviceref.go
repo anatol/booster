@@ -33,14 +33,25 @@ type gptPartoffData struct {
 	offset int
 }
 
-func (d *deviceRef) matchesBlkInfo(info *blkInfo) bool {
+func (d *deviceRef) matchesBlkInfo(blk *blkInfo) bool {
 	switch d.format {
 	case refPath:
-		return d.data.(string) == info.path
+		path := d.data.(string)
+
+		if path == blk.path {
+			return true
+		}
+		for _, sym := range blk.symlinks {
+			if path == sym {
+				return true
+			}
+		}
+
+		return false
 	case refFsUUID:
-		return bytes.Equal(d.data.(UUID), info.uuid)
+		return bytes.Equal(d.data.(UUID), blk.uuid)
 	case refFsLabel:
-		return d.data.(string) == info.label
+		return d.data.(string) == blk.label
 	default:
 		return false
 	}

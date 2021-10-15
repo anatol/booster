@@ -9,12 +9,13 @@ import (
 )
 
 type blkInfo struct {
-	path   string
-	format string // gpt, dos, ext4, btrfs, ...
-	isFs   bool   // specifies if the format a mountable filesystem
-	uuid   UUID
-	label  string
-	data   interface{} // type specific data
+	path     string
+	symlinks []string // symlinks to 'path'
+	format   string   // gpt, dos, ext4, btrfs, ...
+	isFs     bool     // specifies if the format a mountable filesystem
+	uuid     UUID
+	label    string
+	data     interface{} // type specific data
 }
 
 var errUnknownBlockType = fmt.Errorf("cannot detect block device type")

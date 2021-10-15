@@ -212,7 +212,8 @@ var (
 // addBlockDevice is called upon receiving a uevent from the kernel with action “add”
 // from subsystem “block”.
 // devpath is a full path to the block device and should include /dev/... prefix
-func addBlockDevice(devpath string) error {
+// symlinks is an array of symlinks to the given block device
+func addBlockDevice(devpath string, symlinks []string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these nodes twice by tracking what has been added already
 	if _, alreadyAdded := addedDevices.LoadOrStore(devpath, true); alreadyAdded {
@@ -234,6 +235,8 @@ func addBlockDevice(devpath string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
+
+	blk.symlinks = symlinks
 
 	// check non-mountable types that require extra processing
 	switch blk.format {
@@ -265,54 +268,6 @@ func addBlockDevice(devpath string) error {
 			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", devpath, blk.format)
 		}
 		return mountRootFs(devpath, blk.format)
-	}
-
-	return nil
-}
-
-// if symlink is provided then it is expected that target device already processed
-// the only thing that is interesting to us whether it matches root= by path
-func addBlockDeviceSymlink(symlink string) error {
-	// Some devices might receive multiple udev add events
-	// Avoid processing these nodes twice by tracking what has been added already
-	if _, alreadyAdded := addedDevices.LoadOrStore(symlink, true); alreadyAdded {
-		// this devpath has been processed already
-		return nil
-	}
-
-	info("found a new device symlink %s", symlink)
-
-	blk, err := readBlkInfo(symlink)
-	if err == errUnknownBlockType {
-		// even if booster unable to detect a filesystem we might still try to mount with the type specified by the user
-		blk = &blkInfo{
-			path: symlink,
-		}
-		err = nil
-	}
-
-	if err != nil {
-		return fmt.Errorf("%s: %v", symlink, err)
-	}
-
-	if cmdResume != nil && cmdResume.format == refPath && cmdResume.matchesBlkInfo(blk) {
-		if err := resume(symlink); err != nil {
-			return err
-		}
-	}
-
-	if cmdRoot.format == refPath && cmdRoot.matchesBlkInfo(blk) {
-		if blk.format == "" && cmdline["rootfstype"] != "" {
-			blk.format = cmdline["rootfstype"]
-			blk.isFs = true
-		}
-		if blk.format == "" {
-			return fmt.Errorf("unable to detect filesystem type for device %s and no 'rootfstype' boot parameter specified", symlink)
-		}
-		if !blk.isFs {
-			return fmt.Errorf("specified root %s has type %s and cannot be mounted as a filesystem", symlink, blk.format)
-		}
-		return mountRootFs(symlink, blk.format)
 	}
 
 	return nil
@@ -380,7 +335,7 @@ func handleMdraidBlockDevice(blk *blkInfo) error {
 		return nil
 	}
 
-	return addBlockDevice("/dev/md/" + arrayName)
+	return addBlockDevice("/dev/md/"+arrayName, nil)
 }
 
 func handleLvmBlockDevice(blk *blkInfo) error {
@@ -717,7 +672,7 @@ func scanSysBlock() error {
 	}
 	for _, d := range devs {
 		target := filepath.Join("/sys/block/", d.Name())
-		if err := addBlockDevice("/dev/" + d.Name()); err != nil {
+		if err := addBlockDevice("/dev/"+d.Name(), nil); err != nil {
 			// some unimportant block devices (e.g. /dev/sr0) might return errors like 'no medium found'
 			// just ignore failing devices and keep enumerating
 			warning("%v", err)
@@ -734,7 +689,7 @@ func scanSysBlock() error {
 			if !strings.HasPrefix(p.Name(), d.Name()) {
 				continue
 			}
-			if err := addBlockDevice("/dev/" + p.Name()); err != nil {
+			if err := addBlockDevice("/dev/"+p.Name(), nil); err != nil {
 				return err
 			}
 		}
