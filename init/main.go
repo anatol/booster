@@ -194,15 +194,17 @@ func getActiveEfiEsp() (UUID, error) {
 	return parseUUID(uuid)
 }
 
-func readEfiVar(name, uuid string) (attribute uint32, data []byte, err error) {
-	data, err = os.ReadFile("/sys/firmware/efi/efivars/" + name + "-" + uuid)
+// readEfiVar reads efi variable from Linux's sysfs
+// returns var attribute, efi var value and error
+func readEfiVar(name, uuid string) (uint32, []byte, error) {
+	data, err := os.ReadFile("/sys/firmware/efi/efivars/" + name + "-" + uuid)
 	if err != nil {
-		return
+		return 0, nil, err
 	}
 
-	attribute = binary.LittleEndian.Uint32(data[:4])
+	attribute := binary.LittleEndian.Uint32(data[:4])
 	data = data[4:]
-	return
+	return attribute, data, nil
 }
 
 var (
