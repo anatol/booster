@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"init/quirk"
 	"os"
 )
 
@@ -63,4 +64,16 @@ func disableKmsgThrottling() error {
 	}
 
 	return os.WriteFile(sysKmsgFile, enable, 0644)
+}
+
+// console prints message to console
+// but if we are compiling the binary with "tets" tag (e.g. for integration tests) then it prints message to kmsg to avoid
+// messing log output in qemu console
+func console(format string, v ...interface{}) {
+	if quirk.TestEnabled {
+		msg := fmt.Sprintf(format, v...)
+		_, _ = fmt.Fprint(kmsg, "<", 2, ">booster: ", msg, "\n")
+	} else {
+		fmt.Printf(format, v...)
+	}
 }

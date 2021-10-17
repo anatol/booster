@@ -866,7 +866,7 @@ func emergencyShell() {
 }
 
 func reboot() {
-	fmt.Println("Press ENTER to reboot")
+	console("Press ENTER to reboot")
 	_, _ = fmt.Scanln()
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
 }

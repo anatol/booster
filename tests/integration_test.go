@@ -383,7 +383,7 @@ func compileBinaries(dir string) error {
 	if israce.Enabled {
 		raceFlag = "-race"
 	}
-	cmd := exec.Command("go", "build", "-o", dir+"/init", raceFlag)
+	cmd := exec.Command("go", "build", "-o", dir+"/init", "-tags", "test", raceFlag)
 	cmd.Env = os.Environ()
 	if !israce.Enabled {
 		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
@@ -401,7 +401,7 @@ func compileBinaries(dir string) error {
 	if err := os.Chdir("../generator"); err != nil {
 		return err
 	}
-	cmd = exec.Command("go", "build", "-o", dir+"/generator", raceFlag)
+	cmd = exec.Command("go", "build", "-o", dir+"/generator", "-tags", "test", raceFlag)
 	if testing.Verbose() {
 		log.Print("Call 'go build' for generator")
 		cmd.Stdout = os.Stdout

@@ -173,7 +173,7 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 			prompt := "Enter PIN for " + device + ":"
 			if strings.HasPrefix(string(buff), prompt) {
 				// fido2-assert tool requests for PIN
-				fmt.Print(prompt)
+				console(prompt)
 				pin, err := readPassword()
 				if err != nil {
 					info("%v", err)
@@ -318,17 +318,17 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	// tokens did not work, let's unlock with a password
 	for {
-		fmt.Print("Enter passphrase for ", mapping.name, ":")
+		console("Enter passphrase for %s:", mapping.name)
 		password, err := readPassword()
 		if err != nil {
 			return err
 		}
 		if len(password) == 0 {
-			fmt.Println("")
+			console("\n")
 			continue
 		}
 
-		fmt.Println("   Unlocking...")
+		console("   Unlocking...")
 		for _, s := range d.Slots() {
 			err = d.Unlock(s, password, mapping.name)
 			if err == luks.ErrPassphraseDoesNotMatch {
@@ -342,7 +342,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		memZeroBytes(password)
 
 		// retry password
-		fmt.Println("   Incorrect passphrase, please try again")
+		console("   Incorrect passphrase, please try again")
 	}
 }
 
