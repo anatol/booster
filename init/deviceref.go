@@ -69,7 +69,7 @@ func calculateDevPath(parent string, partition int) string {
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
 func (d *deviceRef) resolveGptRef(gptPath string, gpt gptData) {
-	if d.format != refGptType && d.format != refGptUUID && d.format != refGptLabel && d.format != refGptUUIDPartoff {
+	if !d.dependsOnGpt() {
 		return
 	}
 
@@ -106,6 +106,13 @@ func (d *deviceRef) resolveGptRef(gptPath string, gpt gptData) {
 			}
 		}
 	}
+}
+
+func (d *deviceRef) dependsOnGpt() bool {
+	return d.format == refGptType ||
+		d.format == refGptUUID ||
+		d.format == refGptUUIDPartoff ||
+		d.format == refGptLabel
 }
 
 // checks whether given partition table contains active EFI service partition
