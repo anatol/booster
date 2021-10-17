@@ -513,16 +513,22 @@ func fileExists(file string) bool {
 	return err == nil
 }
 
-type yubikey struct {
+type usbdev struct {
 	bus, device string
 }
 
-// detectYubikey checks if a yubikey is present and uses its slot #2 for tests
-func detectYubikey() (*yubikey, error) {
+func (usb usbdev) toQemuParams() []string {
+	return []string{"-usb", "-device", "usb-host,hostbus=" + usb.bus + ",hostaddr=" + usb.device}
+}
+
+// detectYubikeys checks if yubikeys tokens are present and uses it slot for tests
+func detectYubikeys() ([]usbdev, error) {
 	out, err := exec.Command("lsusb").CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
+
+	yubikeys := make([]usbdev, 0)
 
 	for _, l := range strings.Split(string(out), "\n") {
 		if !strings.Contains(l, "Yubikey") {
@@ -539,10 +545,10 @@ func detectYubikey() (*yubikey, error) {
 			return nil, fmt.Errorf("lsusb does not match bus/device")
 		}
 
-		return &yubikey{m[0][1], m[0][2]}, nil
+		yubikeys = append(yubikeys, usbdev{m[0][1], m[0][2]})
 	}
 
-	return nil, nil
+	return yubikeys, nil
 }
 
 func TestBooster(t *testing.T) {
@@ -554,7 +560,7 @@ func TestBooster(t *testing.T) {
 	require.NoError(t, compileBinaries(binariesDir))
 	require.NoError(t, initAssetsGenerators())
 
-	yubikey, err := detectYubikey()
+	yubikeys, err := detectYubikeys()
 	require.NoError(t, err)
 
 	// TODO: add a test to verify the emergency shell functionality
@@ -685,12 +691,17 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
 	}))
 
-	if yubikey != nil {
+	if len(yubikeys) != 0 {
+		params := make([]string, 0)
+		for _, y := range yubikeys {
+			params = append(params, y.toQemuParams()...)
+		}
+
 		t.Run("LUKS2.Clevis.Yubikey", boosterTest(Opts{
 			disk:       "assets/luks2.clevis.yubikey.img",
 			kernelArgs: []string{"rd.luks.uuid=f2473f71-9a61-4b16-ae54-8f942b2daf52", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 			extraFiles: "ykchalresp",
-			params:     []string{"-usb", "-device", "usb-host,hostbus=" + yubikey.bus + ",hostaddr=" + yubikey.device},
+			params:     params,
 		}))
 	}
 	t.Run("LUKS1.Clevis.Tang", boosterTest(Opts{
@@ -859,17 +870,32 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"root=/dev/sda3"},
 	}))
 
-	if yubikey != nil {
+	if len(yubikeys) != 0 {
+		params := make([]string, 0)
+		for _, y := range yubikeys {
+			params = append(params, y.toQemuParams()...)
+		}
+
 		t.Run("Systemd.Fido2", boosterTest(Opts{
 			disk:       "assets/systemd-fido2.img",
 			kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
-			params:     []string{"-usb", "-device", "usb-host,hostbus=" + yubikey.bus + ",hostaddr=" + yubikey.device},
+			params:     params,
 			extraFiles: "fido2-assert",
 			checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
 				pin := "1111"
-				require.NoError(t, vm.ConsoleExpect("Enter PIN for /dev/hidraw"))
-				require.NoError(t, vm.ConsoleWrite(pin+"\n"))
-				require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+				// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
+				re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
+				require.NoError(t, err)
+				for {
+					matches, err := vm.ConsoleExpectRE(re)
+					require.NoError(t, err)
+
+					if matches[0] == "Hello, booster!" {
+						break
+					} else {
+						require.NoError(t, vm.ConsoleWrite(pin+"\n"))
+					}
+				}
 			},
 		}))
 	}
