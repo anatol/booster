@@ -168,3 +168,9 @@ func fromUnicode16(data []byte, by binary.ByteOrder) string {
 	}
 	return string(utf16.Decode(runes))
 }
+
+func check(err error) {
+	if err != nil {
+		severe("%v", err)
+	}
+}

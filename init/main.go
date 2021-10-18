@@ -315,7 +315,10 @@ func handleMdraidBlockDevice(blk *blkInfo) error {
 	info("trying to assemble mdraid array %s", blk.uuid.toString())
 
 	if mod, ok := raidModules[blk.data.(mdraidData).level]; ok {
-		wg := loadModules(mod)
+		wg, err := loadModules(mod)
+		if err != nil {
+			return err
+		}
 		wg.Wait()
 	} else {
 		return fmt.Errorf("unknown raid level for device %s", blk.path)
@@ -397,7 +400,10 @@ func mountRootFs(dev, fstype string) error {
 		return nil // mount process is in progress
 	}
 
-	wg := loadModules(fstype)
+	wg, err := loadModules(fstype)
+	if err != nil {
+		return err
+	}
 	wg.Wait()
 
 	if err := fsck(dev); err != nil {
@@ -793,9 +799,12 @@ func boost() error {
 
 	rootMounted.Add(1)
 
-	go udevListener()
+	go func() { check(udevListener()) }()
 
-	loadModulesWg := loadModules(config.ModulesForceLoad...)
+	loadModulesWg, err := loadModules(config.ModulesForceLoad...)
+	if err != nil {
+		return err
+	}
 
 	if err := configureVirtualConsole(); err != nil {
 		return err

@@ -257,7 +257,10 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 }
 
 func luksOpen(dev string, mapping *luksMapping) error {
-	wg := loadModules("dm_crypt")
+	wg, err := loadModules("dm_crypt")
+	if err != nil {
+		return err
+	}
 	wg.Wait()
 
 	d, err := luks.Open(dev)

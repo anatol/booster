@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path"
@@ -66,11 +65,11 @@ func validDmEvent(ev *uevent.Uevent) bool {
 
 var udevReader io.ReadCloser
 
-func udevListener() {
+func udevListener() error {
 	var err error
 	udevReader, err = uevent.NewReader()
 	if err != nil {
-		log.Fatalf("uevent: %v", err)
+		return err
 	}
 	defer udevReader.Close()
 
@@ -80,11 +79,10 @@ func udevListener() {
 		ev, err := dec.Decode()
 		if err == io.EOF {
 			// EOF is returned if uevent reader is closed concurrently
-			return
+			return nil
 		}
 		if err != nil {
-			severe("uevent: %v", err)
-			return
+			return err
 		}
 		debug("udev event %+v", *ev)
 

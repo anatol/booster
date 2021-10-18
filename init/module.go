@@ -30,8 +30,8 @@ func loadModalias(alias string) error {
 		debug("no match found for alias %s", alias)
 		return nil
 	}
-	_ = loadModules(mods...)
-	return nil
+	_, err = loadModules(mods...)
+	return err
 }
 
 var aliases []alias
@@ -53,12 +53,11 @@ func readAliases() error {
 	return s.Err()
 }
 
-func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
-	loadModule := func(mod string, depsWg *sync.WaitGroup) {
+func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) error {
+	loadModule := func(mod string, depsWg *sync.WaitGroup) error {
 		depsWg.Wait()
 		if err := finitModule(mod); err != nil {
-			severe("%v", err)
-			return
+			return fmt.Errorf("finit(%v): %v", mod, err)
 		}
 
 		modulesMutex.Lock()
@@ -74,11 +73,14 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 		// post deps
 		var postDepsWg sync.WaitGroup
 		if deps, ok := config.ModuleDependencies[mod]; ok {
-			loadModuleUnlocked(&postDepsWg, deps...)
+			return loadModuleUnlocked(&postDepsWg, deps...)
 		}
+		return nil
 	}
 
 	for _, module := range modules {
+		module := module
+
 		if _, ok := loadedModules[module]; ok {
 			continue // the module is already loaded
 		}
@@ -99,11 +101,15 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 
 		var depsWg sync.WaitGroup
 		if deps, ok := config.ModuleDependencies[module]; ok {
-			loadModuleUnlocked(&depsWg, deps...)
+			if err := loadModuleUnlocked(&depsWg, deps...); err != nil {
+				return err
+			}
 		}
 
-		go loadModule(module, &depsWg)
+		go func() { check(loadModule(module, &depsWg)) }()
 	}
+
+	return nil
 }
 
 func finitModule(module string) error {
@@ -128,21 +134,17 @@ func finitModule(module string) error {
 	} else {
 		debug("loading module %s params=\"%s\"", module, params)
 	}
-	if err := unix.FinitModule(int(f.Fd()), params, 0); err != nil {
-		return fmt.Errorf("finit(%v): %v", module, err)
-	}
-
-	return nil
+	return unix.FinitModule(int(f.Fd()), params, 0)
 }
 
-func loadModules(modules ...string) *sync.WaitGroup {
+func loadModules(modules ...string) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
 
 	modulesMutex.Lock()
 	defer modulesMutex.Unlock()
 
-	loadModuleUnlocked(&wg, modules...)
-	return &wg
+	err := loadModuleUnlocked(&wg, modules...)
+	return &wg, err
 }
 
 // returns all module names that match given alias
