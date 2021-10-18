@@ -351,6 +351,9 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
+		if m.ref.dependsOnGpt() {
+			waitForTableToProcess(blk.path)
+		}
 		if m.ref.matchesBlkInfo(blk) {
 			return &m
 		}
@@ -379,12 +382,5 @@ func handleLuksBlockDevice(blk *blkInfo) error {
 	}
 	info("a mapping for LUKS device %s has been found", blk.path)
 
-	go func() {
-		// opening a luks device is a slow operation, run it in a separate goroutine
-		if err := luksOpen(blk.path, m); err != nil {
-			severe("%v", err)
-		}
-	}()
-
-	return nil
+	return luksOpen(blk.path, m)
 }

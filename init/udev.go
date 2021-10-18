@@ -86,16 +86,13 @@ func udevListener() error {
 		}
 		debug("udev event %+v", *ev)
 
+		// TODO: run each udev in a separate goroutine
 		if modalias, ok := ev.Vars["MODALIAS"]; ok {
-			err = loadModalias(modalias)
+			go func() { check(loadModalias(modalias)) }()
 		} else if ev.Subsystem == "block" {
-			err = handleBlockDeviceUevent(ev)
+			go func() { check(handleBlockDeviceUevent(ev)) }()
 		} else if ev.Subsystem == "net" {
-			err = handleNetworkUevent(ev)
-		}
-
-		if err != nil {
-			warning("%v", err)
+			go func() { check(handleNetworkUevent(ev)) }()
 		}
 	}
 }
@@ -127,14 +124,7 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 		}
 	}
 
-	go func() {
-		// run network init in a separate goroutine to avoid it blocking with clevis+tang unlocking
-		if err := initializeNetworkInterface(ifname); err != nil {
-			warning("unable to initialize network interface %s: %v\n", ifname, err)
-		}
-	}()
-
-	return nil
+	return initializeNetworkInterface(ifname)
 }
 
 var (
@@ -158,7 +148,17 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	if ev.Action != "add" {
 		return nil
 	}
-	return addBlockDevice("/dev/"+devName, nil)
+
+	devPath := "/dev/" + devName
+
+	if ev.Vars["DEVTYPE"] == "partition" {
+		// if this device represents a partition inside a table (like GPT) then wait till the table is processed
+		parts := strings.Split(ev.Devpath, "/")
+		tablePath := "/dev/" + parts[len(parts)-2]
+		addTableNameForDevice(devPath, tablePath)
+	}
+
+	return addBlockDevice(devPath, nil)
 }
 
 // handleMapperDeviceUevent handles device mapper related uevent
