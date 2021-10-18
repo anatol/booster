@@ -208,20 +208,64 @@ func readEfiVar(name, uuid string) (uint32, []byte, error) {
 }
 
 var (
-	addedDevices sync.Map
+	devicesMutex sync.Mutex
+
+	seenDevices       = make(set) // devices that are already seen by the system, the devices might be fully processed or processing right now
+	processingDevices = make(map[string]*sync.WaitGroup)
+	partitionTables   = make(map[string]string) // devicePath -> tablePath map e.g. "/dev/sda1"->"/dev/sda"
 )
 
-// addBlockDevice is called upon receiving a uevent from the kernel with action “add”
-// from subsystem “block”.
+func addTableNameForDevice(devPath string, tablePath string) {
+	devicesMutex.Lock()
+	partitionTables[devPath] = tablePath
+	devicesMutex.Unlock()
+}
+
+func waitForTableToProcess(dev string) {
+	devicesMutex.Lock()
+
+	table, ok := partitionTables[dev]
+	if !ok {
+		devicesMutex.Unlock()
+		return
+	}
+
+	wg, ok := processingDevices[table]
+	if !ok {
+		devicesMutex.Unlock()
+		return
+	}
+	devicesMutex.Unlock()
+
+	wg.Wait()
+}
+
+func markDeviceProcessed(dev string) {
+	devicesMutex.Lock()
+	defer devicesMutex.Unlock()
+
+	wg := processingDevices[dev]
+	wg.Done()
+	delete(processingDevices, dev)
+}
+
+// addBlockDevice is called upon discovering a new block device e.g. via udev events or scanning sysfs.
 // devpath is a full path to the block device and should include /dev/... prefix
 // symlinks is an array of symlinks to the given block device
 func addBlockDevice(devpath string, symlinks []string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these nodes twice by tracking what has been added already
-	if _, alreadyAdded := addedDevices.LoadOrStore(devpath, true); alreadyAdded {
-		// this devpath has been processed already
+	devicesMutex.Lock()
+	if _, alreadyAdded := seenDevices[devpath]; alreadyAdded {
+		// this devpath has been seen already
+		devicesMutex.Unlock()
 		return nil
 	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	processingDevices[devpath] = wg
+	devicesMutex.Unlock()
+	defer markDeviceProcessed(devpath)
 
 	info("found a new device %s", devpath)
 
@@ -252,12 +296,21 @@ func addBlockDevice(devpath string, symlinks []string) error {
 		return handleGptBlockDevice(blk)
 	}
 
-	if cmdResume != nil && cmdResume.matchesBlkInfo(blk) {
-		if err := resume(devpath); err != nil {
-			return err
+	if cmdResume != nil {
+		if cmdResume.dependsOnGpt() {
+			waitForTableToProcess(devpath)
+		}
+
+		if cmdResume.matchesBlkInfo(blk) {
+			if err := resume(devpath); err != nil {
+				return err
+			}
 		}
 	}
 
+	if cmdRoot.dependsOnGpt() {
+		waitForTableToProcess(devpath)
+	}
 	if cmdRoot.matchesBlkInfo(blk) {
 		if blk.format == "" && cmdline["rootfstype"] != "" {
 			blk.format = cmdline["rootfstype"]
@@ -284,15 +337,20 @@ func handleGptBlockDevice(blk *blkInfo) error {
 		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
 		if gpt.containsEsp() {
 			info("%s table contains active ESP, use it to discover root", blk.path)
-		} else {
-			return nil
+			cmdRoot.resolveGptRef(blk.path, gpt)
 		}
+	} else {
+		cmdRoot.resolveGptRef(blk.path, gpt)
 	}
 
-	cmdRoot.resolveGptRef(blk.path, gpt)
 	if cmdResume != nil {
 		cmdResume.resolveGptRef(blk.path, gpt)
 	}
+
+	for _, m := range luksMappings {
+		m.ref.resolveGptRef(blk.path, gpt)
+	}
+
 	return nil
 }
 
@@ -679,15 +737,13 @@ func scanSysBlock() error {
 		return err
 	}
 	for _, d := range devs {
-		target := filepath.Join("/sys/block/", d.Name())
-		if err := addBlockDevice("/dev/"+d.Name(), nil); err != nil {
-			// some unimportant block devices (e.g. /dev/sr0) might return errors like 'no medium found'
-			// just ignore failing devices and keep enumerating
-			warning("%v", err)
-			continue
-		}
+		// some unimportant block devices (e.g. /dev/sr0) might return errors like 'no medium found'
+		// just ignore failing devices and keep enumerating
+		path := "/dev/" + d.Name()
+		go func() { check(addBlockDevice(path, nil)) }()
 
 		// Probe all partitions of this block device, too:
+		target := filepath.Join("/sys/block/", d.Name())
 		parts, err := os.ReadDir(target)
 		if err != nil {
 			return err
@@ -697,15 +753,19 @@ func scanSysBlock() error {
 			if !strings.HasPrefix(p.Name(), d.Name()) {
 				continue
 			}
-			if err := addBlockDevice("/dev/"+p.Name(), nil); err != nil {
-				return err
-			}
+			partitionPath := "/dev/" + p.Name()
+			addTableNameForDevice(partitionPath, path)
+			go func() { check(addBlockDevice(partitionPath, nil)) }()
 		}
 	}
 	return nil
 }
 
-func scanSysModaliases(path string, fi os.FileInfo, err error) error {
+func scanSysModaliases() error {
+	return filepath.Walk("/sys/devices", walkSysModaliases)
+}
+
+func walkSysModaliases(path string, fi os.FileInfo, err error) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// /dev/sys has a number of ephemeral files (like 'waiting_for_supplier') that might be added/removed
@@ -729,9 +789,7 @@ func scanSysModaliases(path string, fi os.FileInfo, err error) error {
 	if alias == "" {
 		return nil
 	}
-	if err := loadModalias(alias); err != nil {
-		info("%v", err)
-	}
+	go func() { check(loadModalias(alias)) }()
 
 	return nil
 }
@@ -810,14 +868,11 @@ func boost() error {
 		return err
 	}
 
-	if err := filepath.Walk("/sys/devices", scanSysModaliases); err != nil {
-		return err
-	}
-	if err := scanSysBlock(); err != nil {
-		return err
-	}
+	go func() { check(scanSysModaliases()) }()
+	go func() { check(scanSysBlock()) }()
 
 	if config.MountTimeout != 0 {
+		// TODO: cancellable, timeout context?
 		timeout := waitTimeout(&rootMounted, time.Duration(config.MountTimeout)*time.Second)
 		if timeout {
 			return fmt.Errorf("Timeout waiting for root filesystem")
