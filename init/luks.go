@@ -305,15 +305,13 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		info("recovered password from %s token #%d", t.Type, t.ID)
 
 		for _, s := range t.Slots {
-			err = d.Unlock(s, password, mapping.name)
+			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
 			memZeroBytes(password)
-			if err == nil {
-				info("password from %s token #%d matches", t.Type, tokenNum)
-			}
-			return err
+			info("password from %s token #%d matches", t.Type, tokenNum)
+			return v.SetupMapper(mapping.name)
 		}
 		memZeroBytes(password)
 		info("password from %s token #%d does not match", t.Type, tokenNum)
@@ -333,12 +331,12 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 		console("   Unlocking...")
 		for _, s := range d.Slots() {
-			err = d.Unlock(s, password, mapping.name)
+			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
 			}
 			memZeroBytes(password)
-			return err
+			return v.SetupMapper(mapping.name)
 		}
 
 		// zeroify the password so we do not keep the sensitive data in the memory

@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/anatol/clevis.go v0.0.0-20210819160903-117fd670c26a
 	github.com/anatol/devmapper.go v0.0.0-20210818022933-f8f04407d1ed
-	github.com/anatol/luks.go v0.0.0-20210908180322-d9003e7f7df8
+	github.com/anatol/luks.go v0.0.0-20211023171624-c2828c9403e2
 	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.0 // indirect
 	github.com/goccy/go-json v0.7.10 // indirect
@@ -18,7 +18,7 @@ require (
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	github.com/yookoala/realpath v1.0.0
 	golang.org/x/net v0.0.0-20211015210444-4f30a5c0130f // indirect
-	golang.org/x/sys v0.0.0-20211015200801-69063c4bb744
+	golang.org/x/sys v0.0.0-20211022215931-8e5104632af7
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
 
