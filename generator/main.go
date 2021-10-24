@@ -65,6 +65,8 @@ func runGenerator() error {
 		defer pprof.StopCPUProfile()
 	}
 
+	increaseOpenFileLimit()
+
 	conf, err := readGeneratorConfig(*configFile)
 	if err != nil {
 		return err
