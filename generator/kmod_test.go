@@ -20,6 +20,8 @@ import (
 func TestModuleNames(t *testing.T) {
 	t.Parallel()
 
+	increaseOpenFileLimit()
+
 	ver, err := readKernelVersion()
 	require.NoError(t, err)
 
