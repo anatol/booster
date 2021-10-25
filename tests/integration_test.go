@@ -887,14 +887,16 @@ func TestBooster(t *testing.T) {
 				// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
 				re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
 				require.NoError(t, err)
+			loop:
 				for {
 					matches, err := vm.ConsoleExpectRE(re)
 					require.NoError(t, err)
 
-					if matches[0] == "Hello, booster!" {
-						break
-					} else {
+					switch matches[0] {
+					case "Enter PIN for /dev/hidraw":
 						require.NoError(t, vm.ConsoleWrite(pin+"\n"))
+					case "Hello, booster!":
+						break loop
 					}
 				}
 			},
