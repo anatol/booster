@@ -93,6 +93,8 @@ func udevListener() error {
 			go func() { check(handleBlockDeviceUevent(ev)) }()
 		} else if ev.Subsystem == "net" {
 			go func() { check(handleNetworkUevent(ev)) }()
+		} else if ev.Subsystem == "hidraw" && ev.Action == "add" {
+			go func() { hidrawDevices <- ev.Vars["DEVNAME"] }()
 		}
 	}
 }
