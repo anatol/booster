@@ -256,12 +256,75 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
+func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token) {
+	var password []byte
+	var err error
+
+	switch t.Type {
+	case "clevis":
+		password, err = recoverClevisPassword(t, d.Version())
+	case "systemd-fido2":
+		password, err = recoverSystemdFido2Password(t)
+	case "systemd-tpm2":
+		password, err = recoverSystemdTPM2Password(t)
+	default:
+		info("token #%d has unknown type: %s", t.ID, t.Type)
+		return
+	}
+
+	if err != nil {
+		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
+		return
+	}
+
+	info("recovered password from %s token #%d", t.Type, t.ID)
+
+	for _, s := range t.Slots {
+		v, err := d.UnsealVolume(s, password)
+		if err == luks.ErrPassphraseDoesNotMatch {
+			continue
+
+		}
+		info("password from %s token #%d matches", t.Type, t.ID)
+		volumes <- v
+		return
+	}
+	info("password from %s token #%d does not match", t.Type, t.ID)
+}
+
+func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, mappingName string) {
+	for {
+		console("Enter passphrase for %s:", mappingName)
+		password, err := readPassword()
+		if err != nil {
+			warning("reading password: %v", err)
+			return
+		}
+		if len(password) == 0 {
+			console("\n")
+			continue
+		}
+
+		console("   Unlocking...")
+		for _, s := range d.Slots() {
+			v, err := d.UnsealVolume(s, password)
+			if err == luks.ErrPassphraseDoesNotMatch {
+				continue
+			}
+			volumes <- v
+			return
+		}
+
+		// retry password
+		console("   Incorrect passphrase, please try again")
+	}
+}
+
 func luksOpen(dev string, mapping *luksMapping) error {
-	wg, err := loadModules("dm_crypt")
+	module, err := loadModules("dm_crypt")
 	if err != nil {
 		return err
 	}
-	wg.Wait()
 
 	d, err := luks.Open(dev)
 	if err != nil {
@@ -277,74 +340,22 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		return err
 	}
 
-	// first try to unlock with tokens
+	volumes := make(chan *luks.Volume)
+
 	tokens, err := d.Tokens()
 	if err != nil {
 		return err
 	}
-	for tokenNum, t := range tokens {
-		var password []byte
-
-		switch t.Type {
-		case "clevis":
-			password, err = recoverClevisPassword(t, d.Version())
-		case "systemd-fido2":
-			password, err = recoverSystemdFido2Password(t)
-		case "systemd-tpm2":
-			password, err = recoverSystemdTPM2Password(t)
-		default:
-			info("token #%d has unknown type: %s", tokenNum, t.Type)
-			continue
-		}
-
-		if err != nil {
-			warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
-			continue // continue trying other tokens
-		}
-
-		info("recovered password from %s token #%d", t.Type, t.ID)
-
-		for _, s := range t.Slots {
-			v, err := d.UnsealVolume(s, password)
-			if err == luks.ErrPassphraseDoesNotMatch {
-				continue
-			}
-			memZeroBytes(password)
-			info("password from %s token #%d matches", t.Type, tokenNum)
-			return v.SetupMapper(mapping.name)
-		}
-		memZeroBytes(password)
-		info("password from %s token #%d does not match", t.Type, tokenNum)
+	for _, t := range tokens {
+		go recoverTokenPassword(volumes, d, t)
 	}
 
-	// tokens did not work, let's unlock with a password
-	for {
-		console("Enter passphrase for %s:", mapping.name)
-		password, err := readPassword()
-		if err != nil {
-			return err
-		}
-		if len(password) == 0 {
-			console("\n")
-			continue
-		}
+	go requestKeyboardPassword(volumes, d, mapping.name)
 
-		console("   Unlocking...")
-		for _, s := range d.Slots() {
-			v, err := d.UnsealVolume(s, password)
-			if err == luks.ErrPassphraseDoesNotMatch {
-				continue
-			}
-			memZeroBytes(password)
-			return v.SetupMapper(mapping.name)
-		}
+	v := <-volumes
 
-		// zeroify the password so we do not keep the sensitive data in the memory
-		memZeroBytes(password)
-
-		// retry password
-		console("   Incorrect passphrase, please try again")
-	}
+	module.Wait()
+	return v.SetupMapper(mapping.name)
 }
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
