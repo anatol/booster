@@ -181,8 +181,7 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 			prompt := "Enter PIN for " + device + ":"
 			if strings.HasPrefix(string(buff), prompt) {
 				// fido2-assert tool requests for PIN
-				console(prompt)
-				pin, err := readPassword()
+				pin, err := readPassword(prompt, "")
 				if err != nil {
 					info("%v", err)
 					continue
@@ -302,18 +301,16 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 
 func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
 	for {
-		console("Enter passphrase for %s:", mappingName)
-		password, err := readPassword()
+		prompt := fmt.Sprintf("Enter passphrase for %s:", mappingName)
+		password, err := readPassword(prompt, "   Unlocking...")
 		if err != nil {
 			warning("reading password: %v", err)
 			return
 		}
 		if len(password) == 0 {
-			console("\n")
 			continue
 		}
 
-		console("   Unlocking...")
 		for _, s := range checkSlots {
 			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
@@ -324,7 +321,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 		}
 
 		// retry password
-		console("   Incorrect passphrase, please try again")
+		console("   Incorrect passphrase, please try again\n")
 	}
 }
 
