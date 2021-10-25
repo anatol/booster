@@ -300,7 +300,7 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	info("password from %s token #%d does not match", t.Type, t.ID)
 }
 
-func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, mappingName string) {
+func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
 	for {
 		console("Enter passphrase for %s:", mappingName)
 		password, err := readPassword()
@@ -314,7 +314,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, mappingNa
 		}
 
 		console("   Unlocking...")
-		for _, s := range d.Slots() {
+		for _, s := range checkSlots {
 			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
@@ -350,15 +350,31 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	volumes := make(chan *luks.Volume)
 
+	slotsWithTokens := make(map[int]bool)
 	tokens, err := d.Tokens()
 	if err != nil {
 		return err
 	}
 	for _, t := range tokens {
+		if t.Type == "systemd-recovery" {
+			continue // skip systemd-recovery tokens as they are supposed to be entered by a keyboard later
+		}
 		go recoverTokenPassword(volumes, d, t)
+		for _, s := range t.Slots {
+			slotsWithTokens[s] = true
+		}
 	}
 
-	go requestKeyboardPassword(volumes, d, mapping.name)
+	var checkSlotsWithPassword []int
+	for _, s := range d.Slots() {
+		if !slotsWithTokens[s] {
+			// only slots that do not have tokens will be checked with keyboard password
+			checkSlotsWithPassword = append(checkSlotsWithPassword, s)
+		}
+	}
+	if len(checkSlotsWithPassword) > 0 {
+		go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
+	}
 
 	v := <-volumes
 
