@@ -13,15 +13,23 @@ import (
 
 const imageModulesDir = "/usr/lib/modules"
 
-type alias struct{ pattern, module string } // module alias info
-
 var (
 	loadedModules  = make(map[string]bool)
 	loadingModules = make(map[string][]*sync.WaitGroup)
 	modulesMutex   sync.Mutex
 )
 
+type alias struct{ pattern, module string } // module alias info
+var (
+	aliases          []alias      // all aliases from initramfs
+	processedAliases = sync.Map{} // aliases that have been seen/processed by booster
+)
+
 func loadModalias(alias string) error {
+	if _, existed := processedAliases.LoadOrStore(alias, true); existed {
+		return nil
+	}
+
 	mods, err := matchAlias(alias)
 	if err != nil {
 		return fmt.Errorf("unable to match modalias %s: %v", alias, err)
@@ -33,8 +41,6 @@ func loadModalias(alias string) error {
 	_, err = loadModules(mods...)
 	return err
 }
-
-var aliases []alias
 
 func readAliases() error {
 	f, err := os.Open(imageModulesDir + "/booster.alias")
