@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"init/quirk"
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -178,7 +180,14 @@ func readPasswordLine(reader io.Reader) ([]byte, error) {
 	}
 }
 
-func readPassword() ([]byte, error) {
+var inputMutex sync.Mutex
+
+func readPassword(prompt, postPrompt string) ([]byte, error) {
+	inputMutex.Lock()
+	defer inputMutex.Unlock()
+
+	console(prompt)
+
 	stdin := os.Stdin
 	fd := int(stdin.Fd())
 
@@ -197,5 +206,12 @@ func readPassword() ([]byte, error) {
 
 	defer unix.IoctlSetTermios(fd, unix.TCSETS, termios)
 
-	return readPasswordLine(stdin)
+	password, err := readPasswordLine(stdin)
+	if postPrompt != "" {
+		console(postPrompt)
+	}
+	if !quirk.TestEnabled {
+		console("\n")
+	}
+	return password, err
 }
