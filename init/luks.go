@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -73,6 +73,101 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 	}
 }
 
+func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
+	if err != nil {
+		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
+	}
+
+	// TODO: find better way to identify devices that support FIDO2
+	if !strings.Contains(string(ueventContent), "FIDO") {
+		return nil, fmt.Errorf("HID %s does not support FIDO", devName)
+	}
+
+	info("HID %s supports FIDO, trying it to recover the password", devName)
+
+	var challenge strings.Builder
+	const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
+	challenge.WriteString(zeroString)                                 // client data, an empty string
+	challenge.WriteRune('\n')
+	challenge.WriteString(relyingParty)
+	challenge.WriteRune('\n')
+	challenge.WriteString(credential)
+	challenge.WriteRune('\n')
+	challenge.WriteString(salt)
+	challenge.WriteRune('\n')
+
+	device := "/dev/" + devName
+	args := []string{"-G", "-h", device}
+	if userPresenceRequired {
+		args = append(args, "-t", "up=true")
+	}
+	if userVerificationRequired {
+		args = append(args, "-t", "uv=true")
+	}
+	if pinRequired {
+		args = append(args, "-t", "pin=true")
+	}
+
+	cmd := exec.Command("fido2-assert", args...)
+	pipeOut, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	pipeErr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	pipeIn, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	if _, err := pipeIn.Write([]byte(challenge.String())); err != nil {
+		return nil, err
+	}
+
+	if pinRequired {
+		// wait till the command requests the pin
+		buff := make([]byte, 500)
+		if _, err := pipeErr.Read(buff); err != nil {
+			return nil, err
+		}
+		// Dealing with Yubikey using command-line tools is getting out of control
+		// TODO: find a way to do the same using libfido2
+		prompt := "Enter PIN for " + device + ":"
+		if strings.HasPrefix(string(buff), prompt) {
+			// fido2-assert tool requests for PIN
+			pin, err := readPassword(prompt, "")
+			if err != nil {
+				return nil, err
+			}
+			pin = append(pin, '\n')
+			if _, err := pipeIn.Write(pin); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	content, err := io.ReadAll(pipeOut)
+	if err != nil {
+		return nil, err
+	}
+	lines := bytes.Split(content, []byte{'\n'})
+	if len(lines) < 5 {
+		msg, _ := io.ReadAll(pipeErr)
+		msg = bytes.TrimRight(msg, "\n")
+		return nil, fmt.Errorf("%s", string(msg))
+	}
+
+	// hmac is the 5th line in the output
+	return lines[4], nil
+}
+
 func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
@@ -102,119 +197,14 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	for _, d := range dir {
 		devName := d.Name()
 
-		content, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
-		if err != nil {
-			warning("unable to read uevent file for %s", devName)
-			continue
-		}
-
-		// TODO: find better way to identify devices that support FIDO2
-		if !strings.Contains(string(content), "FIDO") {
-			info("HID %s does not support FIDO", devName)
-			continue
-		}
-
-		info("HID %s supports FIDO, trying it to recover the password", devName)
-
-		var challenge strings.Builder
-		const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
-		challenge.WriteString(zeroString)                                 // client data, an empty string
-		challenge.WriteRune('\n')
-		challenge.WriteString(node.RelyingParty)
-		challenge.WriteRune('\n')
-		challenge.WriteString(node.Credential)
-		challenge.WriteRune('\n')
-		challenge.WriteString(node.Salt)
-		challenge.WriteRune('\n')
-
-		device := "/dev/" + devName
-		args := []string{"-G", "-h", device}
-		if node.UserPresenceRequired {
-			args = append(args, "-t", "up=true")
-		}
-		if node.UserVerificationRequired {
-			args = append(args, "-t", "uv=true")
-		}
-		if node.PinRequired {
-			args = append(args, "-t", "pin=true")
-		}
-
-		cmd := exec.Command("fido2-assert", args...)
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			info("%v", err)
-			continue
-		}
-		stdoutReader := bufio.NewReader(stdout)
-
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			info("%v", err)
-			continue
-		}
-
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			info("%v", err)
-			continue
-		}
-
-		if err := cmd.Start(); err != nil {
-			info("%v", err)
-			continue
-		}
-
-		if _, err := stdin.Write([]byte(challenge.String())); err != nil {
-			info("%v", err)
-			continue
-		}
-
-		if node.PinRequired {
-			// wait till the command requests the pin
-			buff := make([]byte, 500)
-			if _, err := stderr.Read(buff); err != nil {
-				info("%v", err)
-				continue
-			}
-			// Dealing with Yubikey using command-line tools is getting out of control
-			// TODO: find a way to do the same using libfido2
-			prompt := "Enter PIN for " + device + ":"
-			if strings.HasPrefix(string(buff), prompt) {
-				// fido2-assert tool requests for PIN
-				pin, err := readPassword(prompt, "")
-				if err != nil {
-					info("%v", err)
-					continue
-				}
-				pin = append(pin, '\n')
-				if _, err := stdin.Write(pin); err != nil {
-					info("%v", err)
-					continue
-				}
-			}
-		}
-
-		// hmac is the 5th element in output, skip 4 first lines
-		var hmac string
-		for i := 0; i < 4; i++ {
-			_, _ = stdoutReader.ReadString('\n')
-		}
-		hmac, err = stdoutReader.ReadString('\n')
+		password, err := recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired)
 		if err != nil {
 			if err != io.EOF {
 				info("%v", err)
 			}
 			continue
 		}
-
-		hmac = strings.TrimRight(hmac, "\n")
-		if err := cmd.Wait(); err != nil {
-			buff := make([]byte, 500)
-			_, _ = io.ReadFull(stderr, buff)
-			info("%v: %v", err, string(buff))
-			continue
-		}
-		return []byte(hmac), nil
+		return password, nil
 	}
 
 	return nil, fmt.Errorf("no matching fido2 devices available")
