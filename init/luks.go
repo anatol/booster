@@ -168,6 +168,8 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	return lines[4], nil
 }
 
+var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
+
 func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
@@ -185,17 +187,25 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
 
-	// Temporary workaround for a race condition when LUKS is detected faster than kernel is able to detect Yubikey
-	// TODO: replace it with proper synchronization
-	time.Sleep(2 * time.Second)
-
 	dir, err := os.ReadDir("/sys/class/hidraw/")
 	if err != nil {
 		return nil, err
 	}
 
-	for _, d := range dir {
-		devName := d.Name()
+	go func() {
+		for _, d := range dir {
+			// run it in a separate goroutine to avoid blocking on channel
+			hidrawDevices <- d.Name()
+		}
+	}()
+
+	seenHidrawDevices := make(set)
+
+	for devName := range hidrawDevices {
+		if seenHidrawDevices[devName] {
+			continue
+		}
+		seenHidrawDevices[devName] = true
 
 		password, err := recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired)
 		if err != nil {
