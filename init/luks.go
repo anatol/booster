@@ -6,8 +6,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -49,20 +51,26 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 		payload = node.Jwe
 	}
 
-	const retryNum = 40
-	// in case of a (network) error retry it several times. or maybe retry logic needs to be inside the clevis itself?
-	for i := 0; i < retryNum; i++ {
+	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
+	for {
 		password, err := clevis.Decrypt(payload)
 		if err != nil {
-			info("%v", err)
+			var netError *net.OpError
+			if !errors.As(err, &netError) {
+				return nil, err
+			}
+
+			// it takes a bit of time to initialize network and DHCP
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("timeout waiting for network")
+			}
+			// else let's sleep and retry
 			time.Sleep(time.Second)
 			continue
 		}
 
 		return password, nil
 	}
-
-	return nil, fmt.Errorf("unable to recover the password due to clevis failures")
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
