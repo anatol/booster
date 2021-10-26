@@ -597,15 +597,23 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 
 		// filter out only aliases known to kernel
 		var newFilteredAliases []alias // aliases for the given devices
+		uniqAliases := make(map[alias]bool)
 		for a := range devAliases {
 			matched, err := matchAlias(a, filteredAliases)
 			if err != nil {
 				return nil, err
 			}
-			if len(matched) > 0 {
-				newFilteredAliases = append(newFilteredAliases, matched...)
-			} else {
+			if len(matched) == 0 {
 				debug("no matches found for a device alias '%s'", a)
+				continue
+			}
+
+			for _, m := range matched {
+				if _, exists := uniqAliases[m]; exists {
+					continue
+				}
+				uniqAliases[m] = true
+				newFilteredAliases = append(newFilteredAliases, m)
 			}
 		}
 		filteredAliases = newFilteredAliases
