@@ -11,7 +11,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/ulikunitz/xz v0.5.10
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
-	golang.org/x/sys v0.0.0-20211015200801-69063c4bb744
+	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
 
