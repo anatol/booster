@@ -263,6 +263,63 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
+func recoverSystemdPkcs11Password(t luks.Token) ([]byte, error) {
+	time.Sleep(2 * time.Second)
+
+	daemon := exec.Command("pcscd", "--foreground")
+	//if verbosityLevel >= levelDebug {
+	daemon.Stderr = os.Stderr
+	daemon.Stdout = os.Stdout
+	//}
+	if err := daemon.Start(); err != nil {
+		return nil, err
+	}
+	defer daemon.Process.Kill()
+
+	if err := waitForFile("/run/pcscd/pcscd.comm", 2*time.Second); err != nil {
+		return nil, err
+	}
+
+	var node struct {
+		URI string `json:"pkcs11-uri"`
+		Key string `json:"pkcs11-key"` // base64
+	}
+	if err := json.Unmarshal(t.Payload, &node); err != nil {
+		return nil, err
+	}
+
+	encrypted, err := base64.StdEncoding.DecodeString(node.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	console("%s", node.URI)
+
+	tmpFile, err := os.Create("/.tmp.pkcs11.key")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write(encrypted); err != nil {
+		return nil, err
+	}
+
+	outFile := "/.tmp.pkcs11.key.out"
+	cmd := exec.Command("pkcs11-tool", "--decrypt", "-p", "123456", "-i", tmpFile.Name(), "-o", outFile)
+	//if verbosityLevel >= levelDebug {
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	//}
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	defer os.Remove(outFile)
+
+	// if failed wait for more HID devices to appear?
+
+	return os.ReadFile(outFile)
+}
+
 func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token) {
 	var password []byte
 	var err error
@@ -274,6 +331,8 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 		password, err = recoverSystemdFido2Password(t)
 	case "systemd-tpm2":
 		password, err = recoverSystemdTPM2Password(t)
+	case "systemd-pkcs11":
+		password, err = recoverSystemdPkcs11Password(t)
 	default:
 		info("token #%d has unknown type: %s", t.ID, t.Type)
 		return
@@ -370,6 +429,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
 	}
 
+	// check if we do not have any running recovery goroutines. if not - exit this function with error.
 	v := <-volumes
 
 	module.Wait()
