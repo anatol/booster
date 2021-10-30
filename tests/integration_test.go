@@ -885,7 +885,7 @@ func TestBooster(t *testing.T) {
 			checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
 				pin := "1111"
 				// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
-				re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!|Enter passphrase for luks-b12cbfef-da87-429f-ac96-7dda7232c189:)`)
+				re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
 				require.NoError(t, err)
 			loop:
 				for {
@@ -893,9 +893,6 @@ func TestBooster(t *testing.T) {
 					require.NoError(t, err)
 
 					switch matches[0] {
-					case "Enter passphrase for luks-b12cbfef-da87-429f-ac96-7dda7232c189:":
-						require.NoError(t, vm.ConsoleWrite("fakepassword\n")) // print something to make this prompt go away
-						continue loop
 					case "Enter PIN for /dev/hidraw":
 						require.NoError(t, vm.ConsoleWrite(pin+"\n"))
 					case "Hello, booster!":
