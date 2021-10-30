@@ -26,3 +26,5 @@ sudo mount /dev/mapper/$LUKS_DEV_NAME $dir
 sudo chown $USER $dir
 mkdir $dir/sbin
 cp assets/init $dir/sbin/init
+
+sudo cryptsetup -v luksKillSlot $lodev 0
