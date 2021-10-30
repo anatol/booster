@@ -242,7 +242,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 			params = append(params, "-enable-kvm", "-cpu", "host")
 		}
 
-		kernelArgs := []string{"booster.log=debug", "printk.devkmsg=on"}
+		kernelArgs := []string{"printk.devkmsg=on"}
 		kernelArgs = append(kernelArgs, opts.kernelArgs...)
 
 		require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
@@ -469,7 +469,8 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
 	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.img"}}
 	assetGenerators["assets/alpinelinux.img"] = assetGenerator{"generate_asset_alpinelinux.sh", []string{"OUTPUT=assets/alpinelinux.img"}}
-	assetGenerators["assets/systemd-fido2.img"] = assetGenerator{"generate_asset_systemd_fido2.sh", []string{"OUTPUT=assets/systemd-fido2.img", "LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}} // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
+	assetGenerators["assets/systemd-fido2.img"] = assetGenerator{"generate_asset_systemd_fido2.sh", []string{"OUTPUT=assets/systemd-fido2.img", "LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}}    // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
+	assetGenerators["assets/systemd-pkcs11.img"] = assetGenerator{"generate_asset_systemd_pkcs11.sh", []string{"OUTPUT=assets/systemd-pkcs11.img", "LUKS_UUID=9fb82e32-02b6-4fbf-9c17-2535d501750e", "FS_UUID=39d1d0d5-3b22-4570-9e33-83507f4bd5c1", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}} // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
 	assetGenerators["assets/systemd-tpm2.img"] = assetGenerator{"generate_asset_systemd_tpm2.sh", []string{"OUTPUT=assets/systemd-tpm2.img", "LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}}
 
 	return nil
@@ -901,7 +902,15 @@ func TestBooster(t *testing.T) {
 				}
 			},
 		}))
+
+		t.Run("Systemd.Pkcs11", boosterTest(Opts{
+			disk:       "assets/systemd-pkcs11.img",
+			kernelArgs: []string{"rd.luks.uuid=9fb82e32-02b6-4fbf-9c17-2535d501750e", "root=UUID=39d1d0d5-3b22-4570-9e33-83507f4bd5c1"},
+			extraFiles: "pkcs11-tool,pcscd,/usr/lib/libykcs11.so,/usr/lib/opensc-pkcs11.so,/usr/lib/libgcc_s.so.1,/usr/lib/pcsc/drivers",
+			params:     params,
+		}))
 	}
+
 	t.Run("Systemd.TPM2", boosterTest(Opts{
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},

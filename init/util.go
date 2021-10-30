@@ -174,3 +174,22 @@ func check(err error) {
 		severe("%v", err)
 	}
 }
+
+func waitForFile(filename string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		_, err := os.Stat(filename)
+		if err == nil {
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("waitForFile: %v", err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for %v", filename)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
