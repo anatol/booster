@@ -67,7 +67,7 @@ func generateInitRamfs(opts Opts) (string, error) {
 	}
 	defer os.Remove(config)
 
-	cmd := exec.Command(binariesDir+"/generator", "-force", "-initBinary", binariesDir+"/init", "-kernelVersion", opts.kernelVersion, "-output", output, "-config", config)
+	cmd := exec.Command(binariesDir+"/generator", "build", "--force", "--init-binary", binariesDir+"/init", "--kernel-version", opts.kernelVersion, "--config", config, output)
 	if testing.Verbose() {
 		log.Print("Create booster.img with " + cmd.String())
 		cmd.Stdout = os.Stdout

@@ -85,7 +85,7 @@ var defaultModulesList = []string{
 
 func generateInitRamfs(conf *generatorConfig) error {
 	if _, err := os.Stat(conf.output); (err == nil || !os.IsNotExist(err)) && !conf.forceOverwrite {
-		return fmt.Errorf("File %v exists, please specify -force if you want to overwrite it", conf.output)
+		return fmt.Errorf("File %v exists, please specify --force if you want to overwrite it", conf.output)
 	}
 
 	img, err := NewImage(conf.output, conf.compression, conf.stripBinaries)
