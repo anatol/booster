@@ -10,7 +10,7 @@ for kernel in "${kernels[@]}"; do
     fi
     read -r pkgbase < "${kernel}/pkgbase"
 
-    booster -force -output /boot/booster-${pkgbase}.img -kernelVersion ${kernel##/usr/lib/modules/} &
+    booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-${pkgbase}.img &
     install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 done
 

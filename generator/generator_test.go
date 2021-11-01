@@ -530,7 +530,7 @@ func testModprobeOptions(t *testing.T) {
 }
 
 func TestGenerator(t *testing.T) {
-	*debugEnabled = testing.Verbose()
+	opts.Verbose = testing.Verbose()
 
 	prepareAssets(t)
 

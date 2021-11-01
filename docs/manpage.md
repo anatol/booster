@@ -73,15 +73,32 @@ Once you are done modifying your config file and want to regenerate booster imag
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
 
 ## COMMAND-LINE FLAGS
- `booster` command accepts following flags:
 
- * `-config` config file to use. Default value is `/etc/booster.yaml`.
- * `-universal` generate a universal image
- * `-kernelVersion` use modules for the given kernel version. If the flag is not specified then the current kernel is used (as reported by "uname -r").
- * `-output` output file, by default booster.img used
- * `-compression` output file compression. Currently supported compression algorithms are "zstd" (default), "gzip" and "none".
- * `-strip` strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image
- * `-force` overwrite output file if it exists
+### Application Options
+
+* `-v`, `--verbose` Enable verbose output
+
+### SUBCOMMANDS
+
+### build
+Build initrd image. Usage: `booster [OPTIONS] build [build-OPTIONS] output`
+
+* `-f`, `--force` Overwrite existing initrd file.
+* `--init-binary` <default: _/usr/lib/booster/init_> Booster 'init' binary location.
+* `--compression` <default: _zstd_> Output file compression. Possible values: _zstd_, _gzip_, _xz_, _lz4_, _none_.
+* `--kernel-version` Linux kernel version to generate initramfs for.
+* `--config` <default: _/etc/booster.yaml_> Configuration file path.
+* `--universal` Add wide range of modules/tools to allow this image boot at different machines.
+* `--strip` Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image.
+
+### cat
+Show content of the file inside the image. Usage: `booster [OPTIONS] cat image file-in-image`
+
+### ls
+List content of the image. Usage: `booster [OPTIONS] ls image`
+
+### unpack
+Unpack image. Usage: `booster [OPTIONS] unpack image output-dir`
 
 ## BOOT TIME KERNEL PARAMETERS
 Some parts of booster boot functionality can be modified with kernel boot parameters. These parameters are usually set through bootloader config. Booster boot uses following kernel parameters:
@@ -167,19 +184,15 @@ provide additional logs.
 ## EXAMPLES
 Create an initramfs file specific for the current kernel/host. The output file is booster.img:
 
-    $ booster
-
-The same as above but output image to /tmp/foobar.img:
-
-    $ booster /tmp/foobar.img
+    $ booster build booster.img
 
 Create an universal image with many modules (such as SATA/TPM/NVME/... drivers) included:
 
-    $ booster -universal
+    $ booster build --universal booster.img
 
 Create an initramfs for kernel version 5.4.91-1-lts and copy it to /boot/booster-lts.img:
 
-    $ booster -kernelVersion 5.4.91-1-lts -output /boot/booster-lts.img
+    $ booster build --kernel-kersion 5.4.91-1-lts /boot/booster-lts.img
 
 Here is a `systemd-boot` configuration stored at /boot/loader/entries/booster.conf. In this example e122d09e-87a9-4b35-83f7-2592ef40cefa is a UUID for the LUKS partition and 08684949-bcbb-47bb-1c17-089aaa59e17e is a UUID for the encrypted filesystem (e.g. ext4). Please refer to your bootloader documentation for more info about its configuration.
 
