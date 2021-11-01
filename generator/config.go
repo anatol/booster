@@ -92,7 +92,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			}
 		}
 	}
-	conf.universal = u.Universal || *universal
+	conf.universal = u.Universal || opts.BuildCommand.Universal
 	if u.Modules != "" {
 		conf.modules = strings.Split(u.Modules, ",")
 	}
@@ -112,17 +112,17 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	}
 
 	// now check command line flags
-	conf.output = *outputFile
-	conf.forceOverwrite = *forceOverwriteFile
-	conf.initBinary = *initBinary
-	if *compression != "" {
-		conf.compression = *compression
+	conf.output = opts.BuildCommand.Args.Output
+	conf.forceOverwrite = opts.BuildCommand.Force
+	conf.initBinary = opts.BuildCommand.InitBinary
+	if opts.BuildCommand.Compression != "" {
+		conf.compression = opts.BuildCommand.Compression
 	}
 	if conf.compression == "" {
 		conf.compression = "zstd"
 	}
-	if *kernelVersion != "" {
-		conf.kernelVersion = *kernelVersion
+	if opts.BuildCommand.KernelVersion != "" {
+		conf.kernelVersion = opts.BuildCommand.KernelVersion
 	} else {
 		ver, err := readKernelVersion()
 		if err != nil {
@@ -131,11 +131,11 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.kernelVersion = ver
 	}
 	conf.modulesDir = path.Join("/usr/lib/modules", conf.kernelVersion)
-	conf.debug = *debugEnabled
+	conf.debug = opts.Verbose
 	conf.readDeviceAliases = readDeviceAliases
 	conf.readHostModules = readHostModules
 	conf.readModprobeOptions = readModprobeOptions
-	conf.stripBinaries = u.StripBinaries || *strip
+	conf.stripBinaries = u.StripBinaries || opts.BuildCommand.Strip
 	conf.enableLVM = u.EnableLVM
 	conf.enableMdraid = u.EnableMdraid
 	conf.mdraidConfigPath = u.MdraidConfigPath
