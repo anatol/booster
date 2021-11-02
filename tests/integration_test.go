@@ -312,10 +312,7 @@ func boosterTest(opts Opts) func(*testing.T) {
 				"INITRAMFS_IMAGE=" + initRamfs,
 			}
 			env = append(env, opts.scriptEnvvars...)
-
-			if err := shell("generate_asset_esp.sh", env...); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, shell("generate_asset_esp.sh", env...))
 
 			disks = append(disks, vmtest.QemuDisk{Path: output, Format: "raw"})
 		}
