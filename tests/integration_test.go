@@ -468,6 +468,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/alpinelinux.img"] = assetGenerator{"generate_asset_alpinelinux.sh", []string{"OUTPUT=assets/alpinelinux.img"}}
 	assetGenerators["assets/systemd-fido2.img"] = assetGenerator{"generate_asset_systemd_fido2.sh", []string{"OUTPUT=assets/systemd-fido2.img", "LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}} // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
 	assetGenerators["assets/systemd-tpm2.img"] = assetGenerator{"generate_asset_systemd_tpm2.sh", []string{"OUTPUT=assets/systemd-tpm2.img", "LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}}
+	assetGenerators["assets/systemd-recovery.img"] = assetGenerator{"generate_asset_systemd_recovery.sh", []string{"OUTPUT=assets/systemd-recovery.img", "LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}}
 
 	return nil
 }
@@ -902,6 +903,19 @@ func TestBooster(t *testing.T) {
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
 		enableTpm2: true,
 		extraFiles: "fido2-assert",
+	}))
+
+	t.Run("Systemd.Recovery", boosterTest(Opts{
+		disk:       "assets/systemd-recovery.img",
+		kernelArgs: []string{"rd.luks.uuid=62020168-58b9-4095-a3d0-176403353d20", "root=UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24"},
+		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+			// enter password manually as recovery file might not be ready at the time test initialized
+			require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-62020168-58b9-4095-a3d0-176403353d20:"))
+
+			password, err := os.ReadFile("assets/systemd.recovery.key")
+			require.NoError(t, err)
+			require.NoError(t, vm.ConsoleWrite(string(password)+"\n"))
+		},
 	}))
 
 	t.Run("VoidLinux", boosterTest(Opts{
