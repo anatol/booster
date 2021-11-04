@@ -23,6 +23,7 @@ func runDhcp(ifname string) error {
 		if err == nil {
 			break
 		}
+		debug("%s got error from DHCP exhange: %v", ifname, err)
 		time.Sleep(time.Second)
 	}
 	var ack *dhcpv4.DHCPv4
@@ -33,7 +34,7 @@ func runDhcp(ifname string) error {
 		}
 	}
 	if ack == nil {
-		return fmt.Errorf("DHCP: no ACK received")
+		return fmt.Errorf("%s: no DHCP ACK received", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
@@ -69,6 +70,7 @@ func runDhcp(ifname string) error {
 
 func shutdownNetwork() {
 	for _, ifname := range initializedIfnames {
+		debug("shutting down network interface %s", ifname)
 		link, err := netlink.LinkByName(ifname)
 		if err != nil {
 			continue
@@ -91,6 +93,7 @@ func shutdownNetwork() {
 var initializedIfnames []string
 
 func initializeNetworkInterface(ifname string) error {
+	debug("%s: start initializing network interface", ifname)
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
 		return err
@@ -109,11 +112,13 @@ func initializeNetworkInterface(ifname string) error {
 	initializedIfnames = append(initializedIfnames, ifname)
 
 	timeout := time.After(20 * time.Second)
+	debug("%s waiting interface to be UP", ifname)
 linkReadinessLoop:
 	for {
 		select {
 		case ev := <-ch:
 			if ifname == ev.Link.Attrs().Name && (ev.IfInfomsg.Flags&unix.IFF_UP != 0) {
+				debug("%s: interface is UP", ifname)
 				break linkReadinessLoop
 			}
 		case <-timeout:
@@ -123,6 +128,7 @@ linkReadinessLoop:
 
 	c := config.Network
 	if c.Dhcp {
+		debug("%s: run DHCP", ifname)
 		if err := runDhcp(ifname); err != nil {
 			return err
 		}
