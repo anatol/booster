@@ -16,7 +16,7 @@ import (
 	"github.com/cavaliercoder/go-cpio"
 	"github.com/google/renameio"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4"
+	"github.com/pierrec/lz4/v4"
 	"github.com/ulikunitz/xz"
 )
 
@@ -52,7 +52,11 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 		}
 		compressor, err = conf.NewWriter(file)
 	case "lz4":
-		compressor = lz4.NewWriterLegacy(file)
+		writer := lz4.NewWriter(file)
+		if err := writer.Apply(lz4.LegacyOption(true)); err != nil {
+			return nil, err
+		}
+		compressor = writer
 	case "none":
 		compressor = file
 	default:

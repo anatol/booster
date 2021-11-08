@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4"
+	"github.com/pierrec/lz4/v4"
 	// github.com/xi2/xz is faster so we use it here https://github.com/ulikunitz/xz/issues/23
 	"github.com/xi2/xz"
 )

@@ -7,7 +7,7 @@ require (
 	github.com/google/renameio v1.0.1
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/klauspost/compress v1.13.6
-	github.com/pierrec/lz4 v2.6.1+incompatible
+	github.com/pierrec/lz4/v4 v4.1.11
 	github.com/stretchr/testify v1.7.0
 	github.com/ulikunitz/xz v0.5.10
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
@@ -17,6 +17,5 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/frankban/quicktest v1.11.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 )

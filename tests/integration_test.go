@@ -110,7 +110,7 @@ func generateInitRamfs(opts Opts) (string, error) {
 }
 
 type NetworkConfig struct {
-	Interfaces string `yaml:",omitempty"` // comma-separaed list of interfaces to initialize at early-userspace
+	Interfaces string `yaml:",omitempty"` // comma-separated list of interfaces to initialize at early-userspace
 
 	Dhcp bool `yaml:",omitempty"`
 
