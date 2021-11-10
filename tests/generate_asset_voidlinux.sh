@@ -2,7 +2,6 @@ trap 'quit' EXIT ERR
 
 quit() {
   set +o errexit
-  rm -rf assets/voidlinux/{modules,config,vmlinuz}
   sudo umount $mount
   rm -rf $mount
   sudo losetup -d $lodev
@@ -22,7 +21,8 @@ sudo mv 60:ae:0c:d6:f0:95:17:80:bc:93:46:7a:89:af:a3:2d.plist $mount/var/db/xbps
 
 sudo xbps-install -y -R https://alpha.de.repo.voidlinux.org/current -c /var/cache/xbps -r $mount -Su base-system linux
 
-kernelver=$(ls $mount/usr/lib/modules/)
+kernelver=$(ls -t $mount/usr/lib/modules/ | head -1)
+echo -n $kernelver > assets/voidlinux/vmlinuz-version
 sudo cp -r $mount/usr/lib/modules/$kernelver assets/voidlinux/modules
 sudo mv $mount/boot/config-$kernelver assets/voidlinux/config
 sudo mv $mount/boot/vmlinuz-$kernelver assets/voidlinux/vmlinuz

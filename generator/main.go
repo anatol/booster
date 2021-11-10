@@ -16,14 +16,15 @@ var opts struct {
 	Pprofmem string `long:"pprof.mem" description:"Write memory profile to file" hidden:"true"`
 
 	BuildCommand struct {
-		Force         bool   `short:"f" long:"force" description:"Overwrite existing initrd file"`
-		InitBinary    string `long:"init-binary" default:"/usr/lib/booster/init" description:"Booster 'init' binary location"`
-		Compression   string `long:"compression" choice:"zstd" choice:"gzip" choice:"xz" choice:"lz4" choice:"none" description:"Output file compression"`
-		KernelVersion string `long:"kernel-version" description:"Linux kernel version to generate initramfs for"`
-		ConfigFile    string `long:"config" default:"/etc/booster.yaml" description:"Configuration file path"`
-		Universal     bool   `long:"universal" description:"Add wide range of modules/tools to allow this image boot at different machines"`
-		Strip         bool   `long:"strip" description:"Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image"`
-		Args          struct {
+		Force            bool   `short:"f" long:"force" description:"Overwrite existing initrd file"`
+		InitBinary       string `long:"init-binary" default:"/usr/lib/booster/init" description:"Booster 'init' binary location"`
+		Compression      string `long:"compression" choice:"zstd" choice:"gzip" choice:"xz" choice:"lz4" choice:"none" description:"Output file compression"`
+		KernelVersion    string `long:"kernel-version" description:"Linux kernel version to generate initramfs for"`
+		ModulesDirectory string `long:"modules-dir" description:"Directory with kernel modules, if not set then /usr/lib/modules/$kernel-version is used"`
+		ConfigFile       string `long:"config" default:"/etc/booster.yaml" description:"Configuration file path"`
+		Universal        bool   `long:"universal" description:"Add wide range of modules/tools to allow this image boot at different machines"`
+		Strip            bool   `long:"strip" description:"Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image"`
+		Args             struct {
 			Output string `positional-arg-name:"output" required:"true"`
 		} `positional-args:"true"`
 	} `command:"build" description:"Build initrd image"`

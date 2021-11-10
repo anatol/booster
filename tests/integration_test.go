@@ -67,7 +67,12 @@ func generateInitRamfs(opts Opts) (string, error) {
 	}
 	defer os.Remove(config)
 
-	cmd := exec.Command(binariesDir+"/generator", "build", "--force", "--init-binary", binariesDir+"/init", "--kernel-version", opts.kernelVersion, "--config", config, output)
+	generatorArgs := []string{"build", "--force", "--init-binary", binariesDir + "/init", "--kernel-version", opts.kernelVersion, "--config", config}
+	if opts.modulesDirectory != "" {
+		generatorArgs = append(generatorArgs, "--modules-dir", opts.modulesDirectory)
+	}
+	generatorArgs = append(generatorArgs, output)
+	cmd := exec.Command(binariesDir+"/generator", generatorArgs...)
 	if testing.Verbose() {
 		log.Print("Create booster.img with " + cmd.String())
 		cmd.Stdout = os.Stdout
@@ -186,6 +191,8 @@ type Opts struct {
 	activeNetIfaces      string
 	enableTpm2           bool
 	kernelVersion        string // kernel version
+	kernelPath           string
+	modulesDirectory     string
 	kernelArgs           []string
 	disk                 string
 	disks                []vmtest.QemuDisk
@@ -296,7 +303,10 @@ func boosterTest(opts Opts) func(*testing.T) {
 		// provide host's directory as a guest block device
 		// disks = append(disks, vmtest.QemuDisk{Path: fmt.Sprintf("fat:ro:%s,read-only=on", filepath.Join(kernelsDir, opts.kernelVersion)), Format: "raw"})
 
-		vmlinuzPath := filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz")
+		vmlinuzPath := opts.kernelPath
+		if vmlinuzPath == "" {
+			vmlinuzPath = filepath.Join(kernelsDir, opts.kernelVersion, "vmlinuz")
+		}
 
 		if opts.containsESP {
 			params = append(params, "-bios", "/usr/share/ovmf/x64/OVMF.fd")
@@ -918,10 +928,15 @@ func TestBooster(t *testing.T) {
 		},
 	}))
 
+	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
+	require.NoError(t, err)
 	t.Run("VoidLinux", boosterTest(Opts{
-		disk:       "assets/voidlinux.img",
-		kernelArgs: []string{"root=/dev/sda"},
-		forceKill:  true,
+		modulesDirectory: "assets/voidlinux/modules",
+		kernelPath:       "assets/voidlinux/vmlinuz",
+		kernelVersion:    string(voidlinuxKernelVersion),
+		disk:             "assets/voidlinux.img",
+		kernelArgs:       []string{"root=/dev/sda"},
+		forceKill:        true,
 		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
 			require.NoError(t, vm.ConsoleExpect("runsvchdir: default: current."))
 		},

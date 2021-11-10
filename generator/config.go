@@ -130,7 +130,11 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		}
 		conf.kernelVersion = ver
 	}
-	conf.modulesDir = path.Join("/usr/lib/modules", conf.kernelVersion)
+	if opts.BuildCommand.ModulesDirectory != "" {
+		conf.modulesDir = opts.BuildCommand.ModulesDirectory
+	} else {
+		conf.modulesDir = path.Join("/usr/lib/modules", conf.kernelVersion)
+	}
 	conf.debug = opts.Verbose
 	conf.readDeviceAliases = readDeviceAliases
 	conf.readHostModules = readHostModules
