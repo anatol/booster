@@ -942,10 +942,15 @@ func TestBooster(t *testing.T) {
 		},
 	}))
 
+	alpinelinuxKernelVersion, err := os.ReadFile("assets/alpinelinux/vmlinuz-version")
+	require.NoError(t, err)
 	t.Run("AlpineLinux", boosterTest(Opts{
-		disk:       "assets/alpinelinux.img",
-		kernelArgs: []string{"root=/dev/sda"},
-		forceKill:  true,
+		modulesDirectory: "assets/alpinelinux/modules",
+		kernelPath:       "assets/alpinelinux/vmlinuz",
+		kernelVersion:    string(alpinelinuxKernelVersion),
+		disk:             "assets/alpinelinux.img",
+		kernelArgs:       []string{"root=/dev/sda"},
+		forceKill:        true,
 		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
 			require.NoError(t, vm.ConsoleExpect("Welcome to Alpine Linux"))
 		},
