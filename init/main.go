@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	newRoot    = "/booster.root"
-	newInitBin = "/sbin/init"
+	newRoot = "/booster.root"
 )
 
 var (
@@ -36,6 +35,8 @@ var (
 
 	cmdRoot   *deviceRef
 	cmdResume *deviceRef
+
+	initBinary = "/sbin/init" // path to init binary inside the user's chroot
 
 	luksMappings []luksMapping // list of LUKS devices that booster unlocked during boot process
 
@@ -135,6 +136,10 @@ func parseCmdline() error {
 		if err != nil {
 			return fmt.Errorf("resume=%s: %v", param, err)
 		}
+	}
+
+	if param, ok := cmdline["init"]; ok {
+		initBinary = param
 	}
 
 	// parse LUKS-specific kernel parameters
@@ -696,8 +701,12 @@ func switchRoot() error {
 		return fmt.Errorf("chdir: %v", err)
 	}
 
-	initArgs := []string{newInitBin}
-	isSystemdInit, err := isSystemd(newInitBin)
+	if _, err := os.Stat(initBinary); os.IsNotExist(err) {
+		return fmt.Errorf("init binary %s does not exist in the user's chroot", initBinary)
+	}
+
+	initArgs := []string{initBinary}
+	isSystemdInit, err := isSystemd(initBinary)
 	if err != nil {
 		return err
 	}
@@ -720,8 +729,8 @@ func switchRoot() error {
 
 	// Run the OS init
 	info("Switching to the new userspace now. Да пабачэння!")
-	if err := unix.Exec(newInitBin, initArgs, nil); err != nil {
-		return fmt.Errorf("Can't run the rootfs init (%v): %v", newInitBin, err)
+	if err := unix.Exec(initBinary, initArgs, nil); err != nil {
+		return fmt.Errorf("Can't run the rootfs init (%v): %v", initBinary, err)
 	}
 	return nil // unreachable
 }

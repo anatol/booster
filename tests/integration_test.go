@@ -592,6 +592,15 @@ func TestBooster(t *testing.T) {
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 	}))
 
+	t.Run("InvalidInitBinary", boosterTest(Opts{
+		disk:       "assets/ext4.img",
+		kernelArgs: []string{"root=/dev/sda", "init=/foo/bar", "rw"},
+		forceKill:  true,
+		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
+			require.NoError(t, vm.ConsoleExpect("booster: init binary /foo/bar does not exist in the user's chroot"))
+		},
+	}))
+
 	// verifies module force loading + modprobe command-line parameters
 	t.Run("Vfio", boosterTest(Opts{
 		modules:          "e1000", // add network module needed for ssh
