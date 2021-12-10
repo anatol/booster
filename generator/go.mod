@@ -7,11 +7,11 @@ require (
 	github.com/google/renameio v1.0.1
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/klauspost/compress v1.13.6
-	github.com/pierrec/lz4/v4 v4.1.11
+	github.com/pierrec/lz4/v4 v4.1.12
 	github.com/stretchr/testify v1.7.0
 	github.com/ulikunitz/xz v0.5.10
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
-	golang.org/x/sys v0.0.0-20211113001501-0c823b97ae02
+	golang.org/x/sys v0.0.0-20211214170744-3b038e5940ed
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
 
