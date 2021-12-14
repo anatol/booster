@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 type blkInfo struct {
@@ -28,7 +29,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	}
 	defer r.Close()
 
-	type probeFn func(r io.ReaderAt) *blkInfo
+	type probeFn func(f *os.File) *blkInfo
 	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
 	for _, fn := range probes {
 		blk := fn(r)
@@ -63,17 +64,25 @@ type gptData struct {
 	partitions []gptPart
 }
 
-func probeGpt(r io.ReaderAt) *blkInfo {
+func probeGpt(f *os.File) *blkInfo {
 	const (
 		// https://wiki.osdev.org/GPT
-		lbaSize            = 0x200
-		tableHeaderOffset  = 1 * lbaSize
-		signatureOffset    = 0x0
-		guidOffset         = 0x38
-		partLocationOffset = 0x48
+		tableHeaderOffsetSector = 1
+		signatureOffset         = 0x0
+		guidOffset              = 0x38
+		partLocationOffset      = 0x48
+
+		defaultSectorSize = 512
 	)
+
+	lbaSize, err := unix.IoctlGetInt(int(f.Fd()), unix.BLKSSZGET)
+	if err != nil {
+		lbaSize = defaultSectorSize
+	}
+	tableHeaderOffset := tableHeaderOffsetSector * int64(lbaSize)
+
 	signature := make([]byte, 8)
-	if _, err := r.ReadAt(signature, tableHeaderOffset+signatureOffset); err != nil {
+	if _, err := f.ReadAt(signature, tableHeaderOffset+signatureOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(signature, []byte("EFI PART")) {
@@ -82,25 +91,25 @@ func probeGpt(r io.ReaderAt) *blkInfo {
 
 	buff := make([]byte, 16)
 
-	if _, err := r.ReadAt(buff, tableHeaderOffset+guidOffset); err != nil {
+	if _, err := f.ReadAt(buff, tableHeaderOffset+guidOffset); err != nil {
 		return nil
 	}
 	uuid := convertGptUUID(buff)
 
-	if _, err := r.ReadAt(buff[:16], tableHeaderOffset+partLocationOffset); err != nil {
+	if _, err := f.ReadAt(buff[:16], tableHeaderOffset+partLocationOffset); err != nil {
 		return nil
 	}
 	partLba := binary.LittleEndian.Uint64(buff[0:8])
 	partNum := binary.LittleEndian.Uint32(buff[8:12])
 	partSize := binary.LittleEndian.Uint32(buff[12:16])
-	lbaOffset := partLba * lbaSize
+	lbaOffset := partLba * uint64(lbaSize)
 
 	var parts []gptPart
 	buf := make([]byte, partSize)
 	zeroUUID := make([]byte, 16) // zero UUID used as a marker for unused partitions
 	for i := uint32(0); i < partNum; i++ {
 		start := lbaOffset + uint64(i*partSize)
-		if _, err := r.ReadAt(buf, int64(start)); err != nil {
+		if _, err := f.ReadAt(buf, int64(start)); err != nil {
 			return nil
 		}
 		typeGUID := convertGptUUID(buf[0:0x10])
@@ -126,7 +135,7 @@ func convertGptUUID(d []byte) []byte {
 		d[10], d[11], d[12], d[13], d[14], d[15]}
 }
 
-func probeMbr(r io.ReaderAt) *blkInfo {
+func probeMbr(f *os.File) *blkInfo {
 	const (
 		// https://wiki.osdev.org/GPT
 		bootSignatureOffset = 0x1fe
@@ -135,14 +144,14 @@ func probeMbr(r io.ReaderAt) *blkInfo {
 		idOffset            = 0x1b8
 	)
 	signature := make([]byte, 2)
-	if _, err := r.ReadAt(signature, bootSignatureOffset); err != nil {
+	if _, err := f.ReadAt(signature, bootSignatureOffset); err != nil {
 		return nil
 	}
 	if string(signature) != bootSignature {
 		return nil
 	}
 
-	if _, err := r.ReadAt(signature, diskSignatureOffset); err != nil {
+	if _, err := f.ReadAt(signature, diskSignatureOffset); err != nil {
 		return nil
 	}
 	if string(signature) != "\x00\x00" && string(signature) != "\x5a\x5a" {
@@ -150,14 +159,14 @@ func probeMbr(r io.ReaderAt) *blkInfo {
 	}
 
 	b := make([]byte, 4)
-	if _, err := r.ReadAt(b, idOffset); err != nil {
+	if _, err := f.ReadAt(b, idOffset); err != nil {
 		return nil
 	}
 	id := []byte{b[3], b[2], b[1], b[0]} // little endian
 	return &blkInfo{format: "mbr", uuid: id}
 }
 
-func probeLuks(r io.ReaderAt) *blkInfo {
+func probeLuks(f *os.File) *blkInfo {
 	// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/LUKS-standard/on-disk-format.pdf
 	// both LUKS v1 and v2 have the same magic and UUID offset
 	const (
@@ -165,7 +174,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 		labelV2Offset = 0x18
 	)
 	magic := make([]byte, 6)
-	if _, err := r.ReadAt(magic, 0x0); err != nil {
+	if _, err := f.ReadAt(magic, 0x0); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte("LUKS\xba\xbe")) {
@@ -173,13 +182,13 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 	}
 
 	buff := make([]byte, 2)
-	if _, err := r.ReadAt(buff, 6); err != nil {
+	if _, err := f.ReadAt(buff, 6); err != nil {
 		return nil
 	}
 	version := int(buff[0])<<8 + int(buff[1])
 
 	data := make([]byte, 40)
-	if _, err := r.ReadAt(data, uuidOffset); err != nil {
+	if _, err := f.ReadAt(data, uuidOffset); err != nil {
 		return nil
 	}
 	uuidStr := string(data[:uuidLen])
@@ -193,7 +202,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 	if version == 2 {
 		// Only LUKS 2 has label support
 		buff := make([]byte, 48)
-		if _, err := r.ReadAt(buff, labelV2Offset); err != nil {
+		if _, err := f.ReadAt(buff, labelV2Offset); err != nil {
 			return nil
 		}
 		label = fixedArrayToString(buff)
@@ -202,7 +211,7 @@ func probeLuks(r io.ReaderAt) *blkInfo {
 	return &blkInfo{format: "luks", uuid: uuid, label: label}
 }
 
-func probeExt4(r io.ReaderAt) *blkInfo {
+func probeExt4(f *os.File) *blkInfo {
 	const (
 		// from fs/ext4/ext4.h
 		extSuperblockOffset = 0x400
@@ -213,24 +222,24 @@ func probeExt4(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 2)
-	if _, err := r.ReadAt(magic, extSuperblockOffset+extMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, extSuperblockOffset+extMagicOffset); err != nil {
 		return nil
 	}
 	if string(magic) != extMagic {
 		return nil
 	}
 	uuid := make([]byte, 16)
-	if _, err := r.ReadAt(uuid, extSuperblockOffset+extUUIDOffset); err != nil {
+	if _, err := f.ReadAt(uuid, extSuperblockOffset+extUUIDOffset); err != nil {
 		return nil
 	}
 	label := make([]byte, 16)
-	if _, err := r.ReadAt(label, extSuperblockOffset+extLabelOffset); err != nil {
+	if _, err := f.ReadAt(label, extSuperblockOffset+extLabelOffset); err != nil {
 		return nil
 	}
 	return &blkInfo{format: "ext4", isFs: true, uuid: uuid, label: fixedArrayToString(label)}
 }
 
-func probeBtrfs(r io.ReaderAt) *blkInfo {
+func probeBtrfs(f *os.File) *blkInfo {
 	// https://btrfs.wiki.kernel.org/index.php/On-disk_Format
 	const (
 		btrfsSuperblockOffset = 0x10000
@@ -241,24 +250,24 @@ func probeBtrfs(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 8)
-	if _, err := r.ReadAt(magic, btrfsSuperblockOffset+btrfsMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, btrfsSuperblockOffset+btrfsMagicOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte(btrfsMagic)) {
 		return nil
 	}
 	uuid := make([]byte, 16)
-	if _, err := r.ReadAt(uuid, btrfsSuperblockOffset+btrfsUUIDOffset); err != nil {
+	if _, err := f.ReadAt(uuid, btrfsSuperblockOffset+btrfsUUIDOffset); err != nil {
 		return nil
 	}
 	label := make([]byte, 256)
-	if _, err := r.ReadAt(label, btrfsSuperblockOffset+btrfsLabelOffset); err != nil {
+	if _, err := f.ReadAt(label, btrfsSuperblockOffset+btrfsLabelOffset); err != nil {
 		return nil
 	}
 	return &blkInfo{format: "btrfs", isFs: true, uuid: uuid, label: fixedArrayToString(label)}
 }
 
-func probeXfs(r io.ReaderAt) *blkInfo {
+func probeXfs(f *os.File) *blkInfo {
 	// https://righteousit.wordpress.com/2018/05/21/xfs-part-1-superblock
 	const (
 		xfsSuperblockOffset = 0x0
@@ -269,24 +278,24 @@ func probeXfs(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 4)
-	if _, err := r.ReadAt(magic, xfsSuperblockOffset+xfsMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, xfsSuperblockOffset+xfsMagicOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte(xfsMagic)) {
 		return nil
 	}
 	id := make([]byte, 16)
-	if _, err := r.ReadAt(id, xfsSuperblockOffset+xfsUUIDOffset); err != nil {
+	if _, err := f.ReadAt(id, xfsSuperblockOffset+xfsUUIDOffset); err != nil {
 		return nil
 	}
 	label := make([]byte, 12)
-	if _, err := r.ReadAt(label, xfsSuperblockOffset+xfsLabelOffset); err != nil {
+	if _, err := f.ReadAt(label, xfsSuperblockOffset+xfsLabelOffset); err != nil {
 		return nil
 	}
 	return &blkInfo{format: "xfs", isFs: true, uuid: id, label: fixedArrayToString(label)}
 }
 
-func probeF2fs(r io.ReaderAt) *blkInfo {
+func probeF2fs(f *os.File) *blkInfo {
 	// https://github.com/torvalds/linux/blob/master/include/linux/f2fs_fs.h
 	const (
 		f2fsSuperblockOffset = 0x400
@@ -297,25 +306,25 @@ func probeF2fs(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 4)
-	if _, err := r.ReadAt(magic, f2fsSuperblockOffset+f2fsMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, f2fsSuperblockOffset+f2fsMagicOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte(f2fsMagic)) {
 		return nil
 	}
 	uuid := make([]byte, 16)
-	if _, err := r.ReadAt(uuid, f2fsSuperblockOffset+f2fsUUIDOffset); err != nil {
+	if _, err := f.ReadAt(uuid, f2fsSuperblockOffset+f2fsUUIDOffset); err != nil {
 		return nil
 	}
 	buf := make([]byte, 512)
-	if _, err := r.ReadAt(buf, f2fsSuperblockOffset+f2fsLabelOffset); err != nil {
+	if _, err := f.ReadAt(buf, f2fsSuperblockOffset+f2fsLabelOffset); err != nil {
 		return nil
 	}
 	label := fromUnicode16(buf, binary.LittleEndian)
 	return &blkInfo{format: "f2fs", isFs: true, uuid: uuid, label: label}
 }
 
-func probeLvmPv(r io.ReaderAt) *blkInfo {
+func probeLvmPv(f *os.File) *blkInfo {
 	// https://github.com/libyal/libvslvm/blob/main/documentation/Logical%20Volume%20Manager%20(LVM)%20format.asciidoc
 	const (
 		lvmHeaderOffset     = 0x200
@@ -328,13 +337,13 @@ func probeLvmPv(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 8)
-	if _, err := r.ReadAt(magic, lvmHeaderOffset+lvmMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, lvmHeaderOffset+lvmMagicOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte(lvmMagic)) {
 		return nil
 	}
-	if _, err := r.ReadAt(magic, lvmHeaderOffset+lvmTypeMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, lvmHeaderOffset+lvmTypeMagicOffset); err != nil {
 		return nil
 	}
 	if !bytes.Equal(magic, []byte(lvmTypeMagic)) {
@@ -342,13 +351,13 @@ func probeLvmPv(r io.ReaderAt) *blkInfo {
 	}
 
 	buf := make([]byte, 4)
-	if _, err := r.ReadAt(buf, lvmHeaderOffset+lvmHeaderSizeOffset); err != nil {
+	if _, err := f.ReadAt(buf, lvmHeaderOffset+lvmHeaderSizeOffset); err != nil {
 		return nil
 	}
 	headerSize := binary.LittleEndian.Uint32(buf)
 
 	uuid := make([]byte, 32)
-	if _, err := r.ReadAt(uuid, int64(lvmHeaderOffset+headerSize+lvmUUIDOffset)); err != nil {
+	if _, err := f.ReadAt(uuid, int64(lvmHeaderOffset+headerSize+lvmUUIDOffset)); err != nil {
 		return nil
 	}
 	return &blkInfo{format: "lvm", isFs: true, uuid: uuid}
@@ -369,7 +378,7 @@ type mdraidData struct {
 	level uint32
 }
 
-func probeMdraid(r io.ReaderAt) *blkInfo {
+func probeMdraid(f *os.File) *blkInfo {
 	// https://raid.wiki.kernel.org/index.php/RAID_superblock_formats
 	const (
 		mdraidHeaderOffset = 0x1000
@@ -381,7 +390,7 @@ func probeMdraid(r io.ReaderAt) *blkInfo {
 	)
 
 	magic := make([]byte, 4)
-	if _, err := r.ReadAt(magic, mdraidHeaderOffset+mdraidMagicOffset); err != nil {
+	if _, err := f.ReadAt(magic, mdraidHeaderOffset+mdraidMagicOffset); err != nil {
 		return nil
 	}
 	if binary.LittleEndian.Uint32(magic) != mdraidMagic {
@@ -389,7 +398,7 @@ func probeMdraid(r io.ReaderAt) *blkInfo {
 	}
 
 	version := make([]byte, 4)
-	if _, err := r.ReadAt(version, mdraidHeaderOffset+mdraidVersioOffset); err != nil {
+	if _, err := f.ReadAt(version, mdraidHeaderOffset+mdraidVersioOffset); err != nil {
 		return nil
 	}
 	if binary.LittleEndian.Uint32(version) != 1 {
@@ -397,12 +406,12 @@ func probeMdraid(r io.ReaderAt) *blkInfo {
 	}
 
 	uuid := make([]byte, 16)
-	if _, err := r.ReadAt(uuid, int64(mdraidHeaderOffset+mdraidUUIDOffset)); err != nil {
+	if _, err := f.ReadAt(uuid, int64(mdraidHeaderOffset+mdraidUUIDOffset)); err != nil {
 		return nil
 	}
 
 	levelBuff := make([]byte, 4)
-	if _, err := r.ReadAt(levelBuff, int64(mdraidHeaderOffset+mdraidLevelOffset)); err != nil {
+	if _, err := f.ReadAt(levelBuff, int64(mdraidHeaderOffset+mdraidLevelOffset)); err != nil {
 		return nil
 	}
 	level := binary.LittleEndian.Uint32(levelBuff)

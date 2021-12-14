@@ -1,5 +1,5 @@
-github.com/anatol/vmtest v0.0.0-20211004221854-3a36b6b86cc0 h1:1my48uvB1J9Gpe9Jl03rdyHY2U4j0uRGQ6zmeGAMFao=
-github.com/anatol/vmtest v0.0.0-20211004221854-3a36b6b86cc0/go.mod h1:JiDFhD1zjgMx9ONsHhhucGwMvCLrJMl/yu/l5qP4XFw=
+github.com/anatol/vmtest v0.0.0-20211215032353-afd7b1dd38ef h1:YQzm9r8/ArTsQ6C3/h+w4Dz5dfkYkQbK/3ETLWW2i7Q=
+github.com/anatol/vmtest v0.0.0-20211215032353-afd7b1dd38ef/go.mod h1:JiDFhD1zjgMx9ONsHhhucGwMvCLrJMl/yu/l5qP4XFw=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

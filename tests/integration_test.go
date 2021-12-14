@@ -469,6 +469,7 @@ func initAssetsGenerators() error {
 	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.jwk"}`}}
 	assetGenerators["assets/luks2.clevis.yubikey.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.yubikey.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}}
 	assetGenerators["assets/gpt.img"] = assetGenerator{"generate_asset_gpt.sh", []string{"OUTPUT=assets/gpt.img", "FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}}
+	assetGenerators["assets/gpt_4ksector.img"] = assetGenerator{"generate_asset_gpt_4ksector.sh", []string{"OUTPUT=assets/gpt_4ksector.img"}}
 	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
 	assetGenerators["assets/mdraid_raid1.img"] = assetGenerator{"generate_asset_mdraid_raid1.sh", []string{"OUTPUT=assets/mdraid_raid1.img", "FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}}
 	assetGenerators["assets/mdraid_raid5.img"] = assetGenerator{"generate_asset_mdraid_raid5.sh", []string{"OUTPUT=assets/mdraid_raid5.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
@@ -886,6 +887,11 @@ func TestBooster(t *testing.T) {
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
 		params:     []string{"-device", "usb-ehci,id=ehci"},
 		kernelArgs: []string{"root=/dev/sda3"},
+	}))
+
+	t.Run("Gpt.4kSector", boosterTest(Opts{
+		disks:      []vmtest.QemuDisk{{Path: "assets/gpt_4ksector.img", Format: "raw", DeviceParams: []string{"physical_block_size=4096", "logical_block_size=4096"}}},
+		kernelArgs: []string{"root=PARTUUID=d4699213-6e73-41d5-ad81-3daf5dfcecfb"},
 	}))
 
 	if len(yubikeys) != 0 {
