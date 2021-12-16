@@ -142,7 +142,7 @@ func generateBoosterConfig(opts Opts) (string, error) {
 
 	var conf GeneratorConfig
 
-	if opts.enableTangd { // tang requires network enabled
+	if opts.enableNetwork {
 		net := &NetworkConfig{}
 		conf.Network = net
 
@@ -182,14 +182,11 @@ func generateBoosterConfig(opts Opts) (string, error) {
 type Opts struct {
 	params               []string
 	compression          string
-	prompt               string
-	password             string
 	modules              string // extra modules to include into image
 	modulesForceLoad     string
-	enableTangd          bool
+	enableNetwork        bool
 	useDhcp              bool
 	activeNetIfaces      string
-	enableTpm2           bool
 	kernelVersion        string // kernel version
 	kernelPath           string
 	modulesDirectory     string
@@ -200,8 +197,6 @@ type Opts struct {
 	scriptEnvvars        []string
 	mountTimeout         int // in seconds
 	extraFiles           string
-	checkVMState         func(vm *vmtest.Qemu, t *testing.T)
-	forceKill            bool // if true then kill VM rather than do a graceful shutdown
 	stripBinaries        bool
 	enableVirtualConsole bool
 	enableLVM            bool
@@ -209,24 +204,46 @@ type Opts struct {
 	mdraidConf           string
 }
 
-func boosterTest(t *testing.T, opts Opts) {
+func startSwtpm() (*os.Process, []string, error) {
+	_ = os.Remove("assets/tpm2/.lock")
+	_ = os.Remove("assets/swtpm-sock") // sometimes process crash and leaves this file
+	if _, err := copy("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
+		return nil, nil, err
+	}
+
+	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
+	if testing.Verbose() {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+
+	// wait till swtpm really starts
+	if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
+		return nil, nil, err
+	}
+
+	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+}
+
+func startTangd() (*tang.NativeServer, []string, error) {
+	tangd, err := tang.NewNativeServer("assets/tang", 0)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return tangd, []string{"-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port)}, nil
+}
+
+func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	kernelVersions, err := detectKernelVersion()
 	require.NoError(t, err, "unable to detect current Linux version")
 
 	binariesDir = t.TempDir()
 	require.NoError(t, compileBinaries(binariesDir))
 	require.NoError(t, initAssetsGenerators())
-
-	if opts.checkVMState == nil {
-		// default simple check
-		opts.checkVMState = func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
-		}
-	}
-	const defaultLuksPassword = "1234"
-	if opts.prompt != "" && opts.password == "" {
-		opts.password = defaultLuksPassword
-	}
 
 	if opts.disk != "" {
 		require.NoError(t, checkAsset(opts.disk))
@@ -246,7 +263,7 @@ func boosterTest(t *testing.T, opts Opts) {
 
 	initRamfs, err := generateInitRamfs(opts)
 	require.NoError(t, err)
-	defer os.Remove(initRamfs)
+	//defer os.Remove(initRamfs) TODO cleanup test files
 
 	params := []string{"-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
 	if os.Getenv("TEST_DISABLE_KVM") != "1" {
@@ -266,37 +283,6 @@ func boosterTest(t *testing.T, opts Opts) {
 	}
 	for _, d := range disks {
 		require.NoError(t, checkAsset(d.Path))
-	}
-
-	if opts.enableTangd {
-		tangd, err := tang.NewNativeServer("assets/tang", 0)
-		require.NoError(t, err)
-		defer tangd.Stop()
-		// using command directly like one below does not work as extra info is printed to stderr and QEMU incorrectly
-		// assumes it is a part of HTTP reply
-		// guestfwd=tcp:10.0.2.100:5697-cmd:/usr/lib/tangd ./assets/tang 2>/dev/null
-
-		params = append(params, "-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port))
-	}
-
-	if opts.enableTpm2 {
-		_ = os.Remove("assets/tpm2/.lock")
-		_, err := copy("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall")
-		require.NoError(t, err)
-
-		cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
-		if testing.Verbose() {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-		}
-		require.NoError(t, cmd.Start())
-		defer cmd.Process.Kill()
-		defer os.Remove("assets/swtpm-sock") // sometimes process crash leaves this file
-
-		// wait till swtpm really starts
-		require.NoError(t, waitForFile("assets/swtpm-sock", 5*time.Second))
-
-		params = append(params, "-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0")
 	}
 
 	// to enable network dump
@@ -345,19 +331,7 @@ func boosterTest(t *testing.T, opts Opts) {
 		options.Append = kernelArgs
 	}
 
-	vm, err := vmtest.NewQemu(&options)
-	require.NoError(t, err)
-	if opts.forceKill {
-		defer vm.Kill()
-	} else {
-		defer vm.Shutdown()
-	}
-
-	if opts.prompt != "" {
-		require.NoError(t, vm.ConsoleExpect(opts.prompt))
-		require.NoError(t, vm.ConsoleWrite(opts.password+"\n"))
-	}
-	opts.checkVMState(vm, t)
+	return vmtest.NewQemu(&options)
 }
 
 func waitForFile(filename string, timeout time.Duration) error {
@@ -565,72 +539,84 @@ func detectYubikeys() ([]usbdev, error) {
 }
 
 func TestExt4UUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "zstd",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestExt4MountFlags(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,noatime,nobarrier,nodev,dirsync,lazytime,nolazytime,dev,rw,ro", "rw"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestExt4Label(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestInvalidInitBinary(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=/dev/sda", "init=/foo/bar", "rw"},
-		forceKill:  true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("booster: init binary /foo/bar does not exist in the user's chroot"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("booster: init binary /foo/bar does not exist in the user's chroot"))
 }
 
 // verifies module force loading + modprobe command-line parameters
 func TestVfio(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 		disks:            []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw"}},
 		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
-
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			config := &ssh.ClientConfig{
-				User:            "root",
-				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			}
-
-			conn, err := ssh.Dial("tcp", ":10022", config)
-			require.NoError(t, err)
-			defer conn.Close()
-
-			dmesg := runSSHCommand(t, conn, "dmesg")
-			require.Contains(t, dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"", "expecting vfio_pci module loading")
-			require.Contains(t, dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:67df device")
-			require.Contains(t, dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:aaf0 device")
-
-			re := regexp.MustCompile(`booster: udev event {Header:add@/bus/pci/drivers/vfio-pci Action:add Devpath:/bus/pci/drivers/vfio-pci Subsystem:drivers Seqnum:\d+ Vars:map\[ACTION:add DEVPATH:/bus/pci/drivers/vfio-pci SEQNUM:\d+ SUBSYSTEM:drivers]}`)
-			require.Regexp(t, re, dmesg, "expecting vfio_pci module loading udev event")
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	config := &ssh.ClientConfig{
+		User:            "root",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	conn, err := ssh.Dial("tcp", ":10022", config)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	dmesg := runSSHCommand(t, conn, "dmesg")
+	require.Contains(t, dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"", "expecting vfio_pci module loading")
+	require.Contains(t, dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:67df device")
+	require.Contains(t, dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:aaf0 device")
+
+	re := regexp.MustCompile(`booster: udev event {Header:add@/bus/pci/drivers/vfio-pci Action:add Devpath:/bus/pci/drivers/vfio-pci Subsystem:drivers Seqnum:\d+ Vars:map\[ACTION:add DEVPATH:/bus/pci/drivers/vfio-pci SEQNUM:\d+ SUBSYSTEM:drivers]}`)
+	require.Regexp(t, re, dmesg, "expecting vfio_pci module loading udev event")
 }
 
 func TestNonFormattedDrive(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "none",
 		disks: []vmtest.QemuDisk{
 			{ /* represents non-formatted drive */ Path: "integration_test.go", Format: "raw"},
@@ -638,109 +624,166 @@ func TestNonFormattedDrive(t *testing.T) {
 		},
 		kernelArgs: []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestXZImageCompression(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "xz",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGzipImageCompression(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLz4ImageCompression(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "lz4",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestMountTimeout(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		kernelArgs:   []string{"root=/dev/nonexistent"},
 		compression:  "xz",
 		mountTimeout: 1,
-		forceKill:    true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 }
 
 func TestFsck(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
 		extraFiles:  "fsck,fsck.ext4",
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestVirtualConsole(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		compression:          "none",
 		disk:                 "assets/ext4.img",
 		kernelArgs:           []string{"root=LABEL=atestlabel12"},
 		enableVirtualConsole: true,
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestStripBinaries(t *testing.T) {
-	boosterTest(t, Opts{
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := boosterTest(t, Opts{
 		disk:          "assets/luks2.clevis.tpm2.img",
-		enableTpm2:    true,
+		params:        params,
 		stripBinaries: true,
 		kernelArgs:    []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS1WithName(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks1.img",
-		prompt:     "Enter passphrase for cryptroot:",
 		kernelArgs: []string{"rd.luks.name=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415=cryptroot", "root=/dev/mapper/cryptroot", "rd.luks.options=discard"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS1WithUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks1.img",
-		prompt:     "Enter passphrase for luks-f0c89fd5-7e1e-4ecc-b310-8cd650bd5415:",
 		kernelArgs: []string{"rd.luks.uuid=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "root=UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-f0c89fd5-7e1e-4ecc-b310-8cd650bd5415:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2WithName(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks2.img",
-		prompt:     "Enter passphrase for cryptroot:",
 		kernelArgs: []string{"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot", "root=/dev/mapper/cryptroot"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2WithUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks2.img",
-		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
 		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2WithQuotesOverUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks2.img",
-		prompt:     "Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:",
 		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2ClevisYubikey(t *testing.T) {
@@ -755,262 +798,394 @@ func TestLUKS2ClevisYubikey(t *testing.T) {
 		params = append(params, y.toQemuParams()...)
 	}
 
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks2.clevis.yubikey.img",
 		kernelArgs: []string{"rd.luks.uuid=f2473f71-9a61-4b16-ae54-8f942b2daf52", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 		extraFiles: "ykchalresp",
 		params:     params,
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
 
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS1ClevisTang(t *testing.T) {
-	boosterTest(t, Opts{
-		disk:        "assets/luks1.clevis.tang.img",
-		enableTangd: true,
-		kernelArgs:  []string{"rd.luks.uuid=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "root=UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa"},
+	tangd, params, err := startTangd()
+	require.NoError(t, err)
+	defer tangd.Stop()
+
+	vm, err := boosterTest(t, Opts{
+		disk:          "assets/luks1.clevis.tang.img",
+		enableNetwork: true,
+		params:        params,
+		kernelArgs:    []string{"rd.luks.uuid=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "root=UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2ClevisTang(t *testing.T) {
-	boosterTest(t, Opts{
-		disk:        "assets/luks2.clevis.tang.img",
-		enableTangd: true,
-		kernelArgs:  []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+	tangd, params, err := startTangd()
+	require.NoError(t, err)
+	defer tangd.Stop()
+
+	vm, err := boosterTest(t, Opts{
+		disk:          "assets/luks2.clevis.tang.img",
+		enableNetwork: true,
+		params:        params,
+		kernelArgs:    []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2ClevisTangDHCP(t *testing.T) {
-	boosterTest(t, Opts{
+	tangd, params, err := startTangd()
+	require.NoError(t, err)
+	defer tangd.Stop()
+
+	vm, err := boosterTest(t, Opts{
 		disk:            "assets/luks2.clevis.tang.img",
-		enableTangd:     true,
+		params:          params,
+		enableNetwork:   true,
 		useDhcp:         true,
 		activeNetIfaces: "52-54-00-12-34-53,52:54:00:12:34:56,52:54:00:12:34:57", // 52:54:00:12:34:56 is QEMU's NIC address
 		kernelArgs:      []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestInactiveNetwork(t *testing.T) {
-	boosterTest(t, Opts{
+	tangd, params, err := startTangd()
+	require.NoError(t, err)
+	defer tangd.Stop()
+
+	vm, err := boosterTest(t, Opts{
 		disk:            "assets/luks2.clevis.tang.img",
-		enableTangd:     true,
+		params:          params,
+		enableNetwork:   true,
 		useDhcp:         true,
 		activeNetIfaces: "52:54:00:12:34:57", // 52:54:00:12:34:56 is QEMU's NIC address
 		kernelArgs:      []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
-
-		mountTimeout: 10,
-		forceKill:    true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
-		},
+		mountTimeout:    10,
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 }
 
 func TestLUKS1ClevisTpm2(t *testing.T) {
-	boosterTest(t, Opts{
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks1.clevis.tpm2.img",
-		enableTpm2: true,
+		params:     params,
 		kernelArgs: []string{"rd.luks.uuid=28c2e412-ab72-4416-b224-8abd116d6f2f", "root=UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLUKS2ClevisTpm2(t *testing.T) {
-	boosterTest(t, Opts{
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/luks2.clevis.tpm2.img",
-		enableTpm2: true,
+		params:     params,
 		kernelArgs: []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLVMPath(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
 		kernelArgs: []string{"root=/dev/booster_test_vg/booster_test_lv"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestLVMUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
 		kernelArgs: []string{"root=UUID=74c9e30c-506f-4106-9f61-a608466ef29c"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestMdRaid1Path(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
 		disk:         "assets/mdraid_raid1.img",
 		kernelArgs:   []string{"root=/dev/md/BoosterTestArray1"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestMdRaid1UUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
 		disk:         "assets/mdraid_raid1.img",
 		kernelArgs:   []string{"root=UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestMdRaid5Path(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",
 		disk:         "assets/mdraid_raid5.img",
 		kernelArgs:   []string{"root=/dev/md/BoosterTestArray5"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestMdRaid5UUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",
 		disk:         "assets/mdraid_raid5.img",
 		kernelArgs:   []string{"root=UUID=e62c7dc0-5728-4571-b475-7745de2eef1e"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptPath(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/sda3"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptLABEL(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=LABEL=newpart"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptPARTUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptPARTLABEL(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTLABEL=раздел3"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptPARTNROFF(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=78073a8b-bdf6-48cc-918e-edb926b25f64/PARTNROFF=2"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptByUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-uuid/e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptByLABEL(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-label/newpart"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptByPARTUUID(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partuuid/1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptByPARTLABEL(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptRootAutodiscoveryExt4(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		containsESP: true,
 		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x0, options="))
-			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x0, options="))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptRootAutodiscoveryLUKS(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"ENABLE_LUKS=1"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
-		prompt:        "Enter passphrase for root:",
-		password:      "66789",
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for root:"))
+	require.NoError(t, vm.ConsoleWrite("66789\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGptRootAutodiscoveryNoAuto(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=63"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
 		mountTimeout:  1,
-		forceKill:     true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("booster: autodiscovery: partition /dev/sda2 has 'do not mount' GPT attribute, skip it"))
-			require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("booster: autodiscovery: partition /dev/sda2 has 'do not mount' GPT attribute, skip it"))
+	require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 }
 
 func TestGptRootAutodiscoveryReadOnly(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=60"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x1, options="))
-			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sda2->/booster.root, fs=ext4, flags=0x1, options="))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestNvme(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
 		kernelArgs: []string{"root=/dev/nvme0n1p3"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestUsb(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
 		params:     []string{"-device", "usb-ehci,id=ehci"},
 		kernelArgs: []string{"root=/dev/sda3"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestGpt4kSector(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt_4ksector.img", Format: "raw", DeviceParams: []string{"physical_block_size=4096", "logical_block_size=4096"}}},
 		kernelArgs: []string{"root=PARTUUID=d4699213-6e73-41d5-ad81-3daf5dfcecfb"},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestSystemdFido2(t *testing.T) {
@@ -1024,52 +1199,62 @@ func TestSystemdFido2(t *testing.T) {
 	for _, y := range yubikeys {
 		params = append(params, y.toQemuParams()...)
 	}
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/systemd-fido2.img",
 		kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
 		params:     params,
 		extraFiles: "fido2-assert",
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			pin := "1111"
-			// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
-			re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
-			require.NoError(t, err)
-			for {
-				matches, err := vm.ConsoleExpectRE(re)
-				require.NoError(t, err)
-
-				if matches[0] == "Hello, booster!" {
-					break
-				} else {
-					require.NoError(t, vm.ConsoleWrite(pin+"\n"))
-				}
-			}
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	pin := "1111"
+	// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
+	re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
+	require.NoError(t, err)
+	for {
+		matches, err := vm.ConsoleExpectRE(re)
+		require.NoError(t, err)
+
+		if matches[0] == "Hello, booster!" {
+			break
+		} else {
+			require.NoError(t, vm.ConsoleWrite(pin+"\n"))
+		}
+	}
 }
 
 func TestSystemdTPM2(t *testing.T) {
-	boosterTest(t, Opts{
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
-		enableTpm2: true,
+		params:     params,
 		extraFiles: "fido2-assert",
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
 func TestSystemdRecovery(t *testing.T) {
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		disk:       "assets/systemd-recovery.img",
 		kernelArgs: []string{"rd.luks.uuid=62020168-58b9-4095-a3d0-176403353d20", "root=UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24"},
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			// enter password manually as recovery file might not be ready at the time test initialized
-			require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-62020168-58b9-4095-a3d0-176403353d20:"))
-
-			password, err := os.ReadFile("assets/systemd.recovery.key")
-			require.NoError(t, err)
-			require.NoError(t, vm.ConsoleWrite(string(password)+"\n"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// enter password manually as recovery file might not be ready at the time test initialized
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-62020168-58b9-4095-a3d0-176403353d20:"))
+
+	password, err := os.ReadFile("assets/systemd.recovery.key")
+	require.NoError(t, err)
+	require.NoError(t, vm.ConsoleWrite(string(password)+"\n"))
 }
 
 func TestVoidLinux(t *testing.T) {
@@ -1077,17 +1262,17 @@ func TestVoidLinux(t *testing.T) {
 
 	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
 	require.NoError(t, err)
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		modulesDirectory: "assets/voidlinux/modules",
 		kernelPath:       "assets/voidlinux/vmlinuz",
 		kernelVersion:    string(voidlinuxKernelVersion),
 		disk:             "assets/voidlinux.img",
 		kernelArgs:       []string{"root=/dev/sda"},
-		forceKill:        true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("runsvchdir: default: current."))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("runsvchdir: default: current."))
 }
 
 func TestAlpineLinux(t *testing.T) {
@@ -1095,17 +1280,17 @@ func TestAlpineLinux(t *testing.T) {
 
 	alpinelinuxKernelVersion, err := os.ReadFile("assets/alpinelinux/vmlinuz-version")
 	require.NoError(t, err)
-	boosterTest(t, Opts{
+	vm, err := boosterTest(t, Opts{
 		modulesDirectory: "assets/alpinelinux/modules",
 		kernelPath:       "assets/alpinelinux/vmlinuz",
 		kernelVersion:    string(alpinelinuxKernelVersion),
 		disk:             "assets/alpinelinux.img",
 		kernelArgs:       []string{"root=/dev/sda"},
-		forceKill:        true,
-		checkVMState: func(vm *vmtest.Qemu, t *testing.T) {
-			require.NoError(t, vm.ConsoleExpect("Welcome to Alpine Linux"))
-		},
 	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("Welcome to Alpine Linux"))
 }
 
 func TestArchLinuxExt4(t *testing.T) {
@@ -1118,40 +1303,6 @@ func TestArchLinuxExt4(t *testing.T) {
 			compression = "gzip"
 		}
 
-		checkVMState := func(vm *vmtest.Qemu, t *testing.T) {
-			config := &ssh.ClientConfig{
-				User:            "root",
-				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			}
-
-			conn, err := ssh.Dial("tcp", ":10022", config)
-			require.NoError(t, err)
-			defer conn.Close()
-
-			sess, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sess.Close()
-
-			out, err := sess.CombinedOutput("systemd-analyze")
-			require.NoError(t, err)
-
-			require.Contains(t, string(out), "(initrd)", "expect initrd time stats in systemd-analyze")
-
-			// check writing to kmesg works
-			sess3, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sess3.Close()
-			out, err = sess3.CombinedOutput("dmesg | grep -i booster")
-			require.NoError(t, err)
-			require.Contains(t, string(out), "Switching to the new userspace now", "expected to see debug output from booster")
-
-			sessShutdown, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sessShutdown.Close()
-			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-			_, _ = sessShutdown.CombinedOutput("shutdown now")
-		}
-
 		controller := ""
 		ext4RootDevice := "/dev/sda"
 		if pkg == "linux-xanmod" {
@@ -1160,16 +1311,15 @@ func TestArchLinuxExt4(t *testing.T) {
 			controller = "nvme,serial=boostfoo"
 			ext4RootDevice = "/dev/nvme0n1"
 		}
-		boosterTest(t, Opts{
+		testArchLinux(t, Opts{
 			kernelVersion: ver,
 			modules:       "e1000",
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
 			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
-			kernelArgs:   []string{"root=" + ext4RootDevice, "rw"},
-			checkVMState: checkVMState,
-		})
+			kernelArgs: []string{"root=" + ext4RootDevice, "rw"},
+		}, "", "")
 	}
 }
 
@@ -1184,50 +1334,57 @@ func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 			compression = "gzip"
 		}
 
-		checkVMState := func(vm *vmtest.Qemu, t *testing.T) {
-			config := &ssh.ClientConfig{
-				User:            "root",
-				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			}
-
-			conn, err := ssh.Dial("tcp", ":10022", config)
-			require.NoError(t, err)
-			defer conn.Close()
-
-			sess, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sess.Close()
-
-			out, err := sess.CombinedOutput("systemd-analyze")
-			require.NoError(t, err)
-
-			require.Contains(t, string(out), "(initrd)", "expect initrd time stats in systemd-analyze")
-
-			// check writing to kmesg works
-			sess3, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sess3.Close()
-			out, err = sess3.CombinedOutput("dmesg | grep -i booster")
-			require.NoError(t, err)
-			require.Contains(t, string(out), "Switching to the new userspace now", "expected to see debug output from booster")
-
-			sessShutdown, err := conn.NewSession()
-			require.NoError(t, err)
-			defer sessShutdown.Close()
-			// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-			_, _ = sessShutdown.CombinedOutput("shutdown now")
-		}
-
-		boosterTest(t, Opts{
+		testArchLinux(t, Opts{
 			kernelVersion: ver,
 			modules:       "e1000",
 			compression:   compression,
 			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.btrfs.raw", Format: "raw"}},
 			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
-			prompt:        "Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:",
-			password:      "hello",
-			checkVMState:  checkVMState,
-		})
+		},
+			"Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:", "hello")
 	}
+}
+
+func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
+	vm, err := boosterTest(t, opts)
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	if prompt != "" {
+		require.NoError(t, vm.ConsoleExpect(prompt))
+		require.NoError(t, vm.ConsoleWrite(password+"\n"))
+	}
+
+	config := &ssh.ClientConfig{
+		User:            "root",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	conn, err := ssh.Dial("tcp", ":10022", config)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	sess, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess.Close()
+
+	out, err := sess.CombinedOutput("systemd-analyze")
+	require.NoError(t, err)
+
+	require.Contains(t, string(out), "(initrd)", "expect initrd time stats in systemd-analyze")
+
+	// check writing to kmesg works
+	sess3, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess3.Close()
+	out, err = sess3.CombinedOutput("dmesg | grep -i booster")
+	require.NoError(t, err)
+	require.Contains(t, string(out), "Switching to the new userspace now", "expected to see debug output from booster")
+
+	sessShutdown, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sessShutdown.Close()
+	// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
+	_, _ = sessShutdown.CombinedOutput("shutdown now")
 }
