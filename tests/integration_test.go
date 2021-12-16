@@ -15,6 +15,7 @@ import (
 	"tests/israce"
 	"time"
 
+	"github.com/anatol/tang.go"
 	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -265,14 +266,14 @@ func boosterTest(opts Opts) func(*testing.T) {
 		}
 
 		if opts.enableTangd {
-			tangd, err := NewTangServer("assets/tang")
+			tangd, err := tang.NewNativeServer("assets/tang", 0)
 			require.NoError(t, err)
 			defer tangd.Stop()
 			// using command directly like one below does not work as extra info is printed to stderr and QEMU incorrectly
 			// assumes it is a part of HTTP reply
 			// guestfwd=tcp:10.0.2.100:5697-cmd:/usr/lib/tangd ./assets/tang 2>/dev/null
 
-			params = append(params, "-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.port))
+			params = append(params, "-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port))
 		}
 
 		if opts.enableTpm2 {
