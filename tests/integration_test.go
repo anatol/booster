@@ -602,6 +602,11 @@ func TestBooster(t *testing.T) {
 			require.NoError(t, vm.ConsoleExpect("booster: init binary /foo/bar does not exist in the user's chroot"))
 		},
 	}))
+	t.Run("LoadModuleFirmware", boosterTest(Opts{
+		disk:             "assets/ext4.img",
+		kernelArgs:       []string{"root=/dev/sda"},
+		modulesForceLoad: "test_module",
+	}))
 
 	// verifies module force loading + modprobe command-line parameters
 	t.Run("Vfio", boosterTest(Opts{
