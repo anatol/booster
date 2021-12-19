@@ -2,10 +2,12 @@ package tests
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -25,7 +27,8 @@ import (
 const kernelsDir = "/usr/lib/modules"
 
 var (
-	binariesDir string
+	binariesDir    string // working dir with cross-test files like booster init/generator
+	kernelVersions map[string]string
 )
 
 func detectKernelVersion() (map[string]string, error) {
@@ -51,21 +54,13 @@ func detectKernelVersion() (map[string]string, error) {
 	return kernels, nil
 }
 
-func generateInitRamfs(opts Opts) (string, error) {
-	file, err := os.CreateTemp("", "booster.img")
-	if err != nil {
-		return "", err
-	}
-	output := file.Name()
-	if err := file.Close(); err != nil {
-		return "", err
-	}
+func generateInitRamfs(workDir string, opts Opts) (string, error) {
+	output := path.Join(workDir, "booster.img")
+	config := path.Join(workDir, "config.yaml")
 
-	config, err := generateBoosterConfig(opts)
-	if err != nil {
+	if err := generateBoosterConfig(config, opts); err != nil {
 		return "", err
 	}
-	defer os.Remove(config)
 
 	generatorArgs := []string{"build", "--force", "--init-binary", binariesDir + "/init", "--kernel-version", opts.kernelVersion, "--config", config}
 	if opts.modulesDirectory != "" {
@@ -134,12 +129,7 @@ type GeneratorConfig struct {
 	MdraidConfigPath     string         `yaml:"mdraid_config_path"`
 }
 
-func generateBoosterConfig(opts Opts) (string, error) {
-	file, err := os.CreateTemp("", "booster.yaml")
-	if err != nil {
-		return "", err
-	}
-
+func generateBoosterConfig(output string, opts Opts) error {
 	var conf GeneratorConfig
 
 	if opts.enableNetwork {
@@ -168,15 +158,12 @@ func generateBoosterConfig(opts Opts) (string, error) {
 
 	data, err := yaml.Marshal(&conf)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if _, err = file.Write(data); err != nil {
-		return "", err
+	if err := os.WriteFile(output, data, 0644); err != nil {
+		return err
 	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	return file.Name(), nil
+	return nil
 }
 
 type Opts struct {
@@ -256,12 +243,6 @@ func startTangd() (*tang.NativeServer, []string, error) {
 }
 
 func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
-	kernelVersions, err := detectKernelVersion()
-	require.NoError(t, err, "unable to detect current Linux version")
-
-	binariesDir = t.TempDir()
-	require.NoError(t, compileBinaries(binariesDir))
-
 	if opts.disk != "" {
 		require.NoError(t, checkAsset(opts.disk))
 	} else {
@@ -278,9 +259,9 @@ func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 		}
 	}
 
-	initRamfs, err := generateInitRamfs(opts)
+	workDir := t.TempDir()
+	initRamfs, err := generateInitRamfs(workDir, opts)
 	require.NoError(t, err)
-	//defer os.Remove(initRamfs) TODO cleanup test files
 
 	params := []string{"-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
 	if os.Getenv("TEST_DISABLE_KVM") != "1" {
@@ -320,7 +301,7 @@ func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 
 		// ESP partition contains initramfs and cannot be statically built
 		// we built the image at runtime
-		output := t.TempDir() + "/disk.raw"
+		output := workDir + "/espdisk.raw"
 
 		env := []string{
 			"OUTPUT=" + output,
@@ -538,6 +519,28 @@ func detectYubikeys() ([]usbdev, error) {
 	}
 
 	return yubikeys, nil
+}
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+
+	var err error
+	kernelVersions, err = detectKernelVersion()
+	if err != nil {
+		panic(err)
+	}
+
+	binariesDir, err = os.MkdirTemp("", "")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(binariesDir)
+
+	if err := compileBinaries(binariesDir); err != nil {
+		panic(err)
+	}
+
+	os.Exit(m.Run())
 }
 
 func TestExt4UUID(t *testing.T) {
@@ -1297,8 +1300,6 @@ func TestAlpineLinux(t *testing.T) {
 
 func TestArchLinuxExt4(t *testing.T) {
 	// boot Arch userspace (with systemd) against all installed linux packages
-	kernelVersions, err := detectKernelVersion()
-	require.NoError(t, err)
 	for pkg, ver := range kernelVersions {
 		compression := "zstd"
 		if pkg == "linux-lts" {
@@ -1328,8 +1329,6 @@ func TestArchLinuxExt4(t *testing.T) {
 // more complex setup with LUKS and btrfs subvolumes
 func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 	// boot Arch userspace (with systemd) against all installed linux packages
-	kernelVersions, err := detectKernelVersion()
-	require.NoError(t, err)
 	for pkg, ver := range kernelVersions {
 		compression := "zstd"
 		if pkg == "linux-lts" {
