@@ -243,12 +243,14 @@ func startTangd() (*tang.NativeServer, []string, error) {
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
+	require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
+
+	disks := opts.disks
 	if opts.disk != "" {
-		require.NoError(t, checkAsset(opts.disk))
-	} else {
-		for _, disk := range opts.disks {
-			require.NoError(t, checkAsset(disk.Path))
-		}
+		disks = append(disks, vmtest.QemuDisk{Path: opts.disk, Format: "raw"})
+	}
+	for _, d := range disks {
+		require.NoError(t, checkAsset(d.Path))
 	}
 
 	if opts.kernelVersion == "" {
@@ -270,18 +272,6 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 
 	kernelArgs := []string{"booster.log=debug", "printk.devkmsg=on"}
 	kernelArgs = append(kernelArgs, opts.kernelArgs...)
-
-	require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
-
-	var disks []vmtest.QemuDisk
-	if opts.disk != "" {
-		disks = []vmtest.QemuDisk{{Path: opts.disk, Format: "raw"}}
-	} else {
-		disks = opts.disks
-	}
-	for _, d := range disks {
-		require.NoError(t, checkAsset(d.Path))
-	}
 
 	// to enable network dump
 	// params = append(params, "-object", "filter-dump,id=f1,netdev=n1,file=network.dat")
