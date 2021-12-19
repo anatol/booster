@@ -205,8 +205,16 @@ type Opts struct {
 }
 
 func startSwtpm() (*os.Process, []string, error) {
+	_ = os.Mkdir("assets", 0755)
+
+	if exists := fileExists("assets/tpm2/tpm2-00.permall.pristine"); !exists {
+		if err := shell("generate_asset_swtpm.sh"); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	_ = os.Remove("assets/tpm2/.lock")
-	_ = os.Remove("assets/swtpm-sock") // sometimes process crash and leaves this file
+	_ = os.Remove("assets/swtpm-sock") // sometimes process crashes and leaves this file
 	if _, err := copy("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
 		return nil, nil, err
 	}
@@ -229,6 +237,14 @@ func startSwtpm() (*os.Process, []string, error) {
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {
+	_ = os.Mkdir("assets", 0755)
+
+	if exists := fileExists("assets/tang/adv.json"); !exists {
+		if err := shell("generate_asset_tang.sh"); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	tangd, err := tang.NewNativeServer("assets/tang", 0)
 	if err != nil {
 		return nil, nil, err
@@ -243,7 +259,6 @@ func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 
 	binariesDir = t.TempDir()
 	require.NoError(t, compileBinaries(binariesDir))
-	require.NoError(t, initAssetsGenerators())
 
 	if opts.disk != "" {
 		require.NoError(t, checkAsset(opts.disk))
@@ -359,6 +374,14 @@ func compileBinaries(dir string) error {
 		return err
 	}
 
+	_ = os.Mkdir("assets", 0755)
+
+	if exists := fileExists("assets/init"); !exists {
+		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {
+			return err
+		}
+	}
+
 	// Build init binary
 	if err := os.Chdir("../init"); err != nil {
 		return err
@@ -414,51 +437,27 @@ type assetGenerator struct {
 	env    []string
 }
 
-var assetGenerators = make(map[string]assetGenerator)
-
-func initAssetsGenerators() error {
-	_ = os.Mkdir("assets", 0755)
-
-	if exists := fileExists("assets/init"); !exists {
-		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {
-			return err
-		}
-	}
-
-	if exists := fileExists("assets/tang/adv.json"); !exists {
-		if err := shell("generate_asset_tang.sh"); err != nil {
-			return err
-		}
-	}
-
-	if exists := fileExists("assets/tpm2/tpm2-00.permall.pristine"); !exists {
-		if err := shell("generate_asset_swtpm.sh"); err != nil {
-			return err
-		}
-	}
-
-	assetGenerators["assets/ext4.img"] = assetGenerator{"generate_asset_ext4.sh", []string{"OUTPUT=assets/ext4.img", "FS_UUID=5c92fc66-7315-408b-b652-176dc554d370", "FS_LABEL=atestlabel12"}}
-	assetGenerators["assets/luks1.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "FS_UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"}}
-	assetGenerators["assets/luks2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=639b8fdd-36ba-443e-be3e-e5b335935502", "FS_UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"}}
-	assetGenerators["assets/luks1.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tpm2.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=28c2e412-ab72-4416-b224-8abd116d6f2f", "FS_UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
-	assetGenerators["assets/luks1.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks1.clevis.tang.img", "LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "FS_UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.json"}`}}
-	assetGenerators["assets/luks2.clevis.tpm2.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tpm2.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}}
-	assetGenerators["assets/luks2.clevis.tang.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.tang.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.json"}`}}
-	assetGenerators["assets/luks2.clevis.yubikey.img"] = assetGenerator{"generate_asset_luks.sh", []string{"OUTPUT=assets/luks2.clevis.yubikey.img", "LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}}
-	assetGenerators["assets/gpt.img"] = assetGenerator{"generate_asset_gpt.sh", []string{"OUTPUT=assets/gpt.img", "FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}}
-	assetGenerators["assets/gpt_4ksector.img"] = assetGenerator{"generate_asset_gpt_4ksector.sh", []string{"OUTPUT=assets/gpt_4ksector.img"}}
-	assetGenerators["assets/lvm.img"] = assetGenerator{"generate_asset_lvm.sh", []string{"OUTPUT=assets/lvm.img", "FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}}
-	assetGenerators["assets/mdraid_raid1.img"] = assetGenerator{"generate_asset_mdraid_raid1.sh", []string{"OUTPUT=assets/mdraid_raid1.img", "FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}}
-	assetGenerators["assets/mdraid_raid5.img"] = assetGenerator{"generate_asset_mdraid_raid5.sh", []string{"OUTPUT=assets/mdraid_raid5.img", "FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}}
-	assetGenerators["assets/archlinux.ext4.raw"] = assetGenerator{"generate_asset_archlinux_ext4.sh", []string{"OUTPUT=assets/archlinux.ext4.raw"}}
-	assetGenerators["assets/archlinux.btrfs.raw"] = assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"OUTPUT=assets/archlinux.btrfs.raw", "LUKS_PASSWORD=hello"}}
-	assetGenerators["assets/voidlinux.img"] = assetGenerator{"generate_asset_voidlinux.sh", []string{"OUTPUT=assets/voidlinux.img"}}
-	assetGenerators["assets/alpinelinux.img"] = assetGenerator{"generate_asset_alpinelinux.sh", []string{"OUTPUT=assets/alpinelinux.img"}}
-	assetGenerators["assets/systemd-fido2.img"] = assetGenerator{"generate_asset_systemd_fido2.sh", []string{"OUTPUT=assets/systemd-fido2.img", "LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}} // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
-	assetGenerators["assets/systemd-tpm2.img"] = assetGenerator{"generate_asset_systemd_tpm2.sh", []string{"OUTPUT=assets/systemd-tpm2.img", "LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}}
-	assetGenerators["assets/systemd-recovery.img"] = assetGenerator{"generate_asset_systemd_recovery.sh", []string{"OUTPUT=assets/systemd-recovery.img", "LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}}
-
-	return nil
+var assetGenerators = map[string]assetGenerator{
+	"assets/ext4.img":                 assetGenerator{"generate_asset_ext4.sh", []string{"FS_UUID=5c92fc66-7315-408b-b652-176dc554d370", "FS_LABEL=atestlabel12"}},
+	"assets/luks1.img":                assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "FS_UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"}},
+	"assets/luks2.img":                assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=639b8fdd-36ba-443e-be3e-e5b335935502", "FS_UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"}},
+	"assets/luks1.clevis.tpm2.img":    assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=28c2e412-ab72-4416-b224-8abd116d6f2f", "FS_UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}},
+	"assets/luks1.clevis.tang.img":    assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=1", "LUKS_PASSWORD=1234", "LUKS_UUID=4cdaa447-ef43-42a6-bfef-89ebb0c61b05", "FS_UUID=c23aacf4-9e7e-4206-ba6c-af017934e6fa", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.json"}`}},
+	"assets/luks2.clevis.tpm2.img":    assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "FS_UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7", "CLEVIS_PIN=tpm2", "CLEVIS_CONFIG={}"}},
+	"assets/luks2.clevis.tang.img":    assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a68-4b16-ae54-8f942b2daf50", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=tang", `CLEVIS_CONFIG={"url":"http://10.0.2.100:5697", "adv":"assets/tang/adv.json"}`}},
+	"assets/luks2.clevis.yubikey.img": assetGenerator{"generate_asset_luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}},
+	"assets/gpt.img":                  assetGenerator{"generate_asset_gpt.sh", []string{"FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}},
+	"assets/gpt_4ksector.img":         assetGenerator{"generate_asset_gpt_4ksector.sh", nil},
+	"assets/lvm.img":                  assetGenerator{"generate_asset_lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
+	"assets/mdraid_raid1.img":         assetGenerator{"generate_asset_mdraid_raid1.sh", []string{"FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}},
+	"assets/mdraid_raid5.img":         assetGenerator{"generate_asset_mdraid_raid5.sh", []string{"FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}},
+	"assets/archlinux.ext4.raw":       assetGenerator{"generate_asset_archlinux_ext4.sh", nil},
+	"assets/archlinux.btrfs.raw":      assetGenerator{"generate_asset_archlinux_btrfs.sh", []string{"LUKS_PASSWORD=hello"}},
+	"assets/voidlinux.img":            assetGenerator{"generate_asset_voidlinux.sh", nil},
+	"assets/alpinelinux.img":          assetGenerator{"generate_asset_alpinelinux.sh", nil},
+	"assets/systemd-fido2.img":        assetGenerator{"generate_asset_systemd_fido2.sh", []string{"LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=1111"}}, // use yubikey-manager-qt (or fido2-token -C) to setup FIDO2 pin value to 1111
+	"assets/systemd-tpm2.img":         assetGenerator{"generate_asset_systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
+	"assets/systemd-recovery.img":     assetGenerator{"generate_asset_systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
 }
 
 func checkAsset(file string) error {
@@ -477,7 +476,8 @@ func checkAsset(file string) error {
 	if testing.Verbose() {
 		fmt.Printf("Generating asset %s\n", file)
 	}
-	err := shell(gen.script, gen.env...)
+	env := append(gen.env, "OUTPUT="+file)
+	err := shell(gen.script, env...)
 	if err != nil {
 		_ = os.Remove(file)
 	}
