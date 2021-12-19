@@ -1291,28 +1291,31 @@ func TestAlpineLinux(t *testing.T) {
 func TestArchLinuxExt4(t *testing.T) {
 	// boot Arch userspace (with systemd) against all installed linux packages
 	for pkg, ver := range kernelVersions {
-		compression := "zstd"
-		if pkg == "linux-lts" {
-			compression = "gzip"
-		}
+		t.Run(pkg, func(t *testing.T) {
 
-		controller := ""
-		ext4RootDevice := "/dev/sda"
-		if pkg == "linux-xanmod" {
-			// xanmod compiles nvme as a standalone module
-			// use it as an opportunity to verify 'nvme as a root device' functionality
-			controller = "nvme,serial=boostfoo"
-			ext4RootDevice = "/dev/nvme0n1"
-		}
-		testArchLinux(t, Opts{
-			kernelVersion: ver,
-			modules:       "e1000",
-			compression:   compression,
-			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
-			// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
-			kernelArgs: []string{"root=" + ext4RootDevice, "rw"},
-		}, "", "")
+			compression := "zstd"
+			if pkg == "linux-lts" {
+				compression = "gzip"
+			}
+
+			controller := ""
+			ext4RootDevice := "/dev/sda"
+			if pkg == "linux-xanmod" {
+				// xanmod compiles nvme as a standalone module
+				// use it as an opportunity to verify 'nvme as a root device' functionality
+				controller = "nvme,serial=boostfoo"
+				ext4RootDevice = "/dev/nvme0n1"
+			}
+			testArchLinux(t, Opts{
+				kernelVersion: ver,
+				modules:       "e1000",
+				compression:   compression,
+				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
+				// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
+				kernelArgs: []string{"root=" + ext4RootDevice, "rw"},
+			}, "", "")
+		})
 	}
 }
 
@@ -1320,20 +1323,22 @@ func TestArchLinuxExt4(t *testing.T) {
 func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 	// boot Arch userspace (with systemd) against all installed linux packages
 	for pkg, ver := range kernelVersions {
-		compression := "zstd"
-		if pkg == "linux-lts" {
-			compression = "gzip"
-		}
+		t.Run(pkg, func(t *testing.T) {
+			compression := "zstd"
+			if pkg == "linux-lts" {
+				compression = "gzip"
+			}
 
-		testArchLinux(t, Opts{
-			kernelVersion: ver,
-			modules:       "e1000",
-			compression:   compression,
-			params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
-			disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.btrfs.raw", Format: "raw"}},
-			kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
-		},
-			"Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:", "hello")
+			testArchLinux(t, Opts{
+				kernelVersion: ver,
+				modules:       "e1000",
+				compression:   compression,
+				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.btrfs.raw", Format: "raw"}},
+				kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
+			},
+				"Enter passphrase for luks-724151bb-84be-493c-8e32-53e123c8351b:", "hello")
+		})
 	}
 }
 
