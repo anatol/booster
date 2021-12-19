@@ -204,6 +204,8 @@ type Opts struct {
 	mdraidConf           string
 }
 
+// Note: if you see tpm2 tests fail with "integrity check failed" error make sure you pull clevis changes from
+// https://github.com/latchset/clevis/issues/244
 func startSwtpm() (*os.Process, []string, error) {
 	_ = os.Mkdir("assets", 0755)
 
