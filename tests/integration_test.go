@@ -242,7 +242,7 @@ func startTangd() (*tang.NativeServer, []string, error) {
 	return tangd, []string{"-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port)}, nil
 }
 
-func boosterTest(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
+func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	if opts.disk != "" {
 		require.NoError(t, checkAsset(opts.disk))
 	} else {
@@ -544,7 +544,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestExt4UUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "zstd",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,nobarrier"},
@@ -556,7 +556,7 @@ func TestExt4UUID(t *testing.T) {
 }
 
 func TestExt4MountFlags(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370", "rootflags=user_xattr,noatime,nobarrier,nodev,dirsync,lazytime,nolazytime,dev,rw,ro", "rw"},
@@ -568,7 +568,7 @@ func TestExt4MountFlags(t *testing.T) {
 }
 
 func TestExt4Label(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
@@ -580,7 +580,7 @@ func TestExt4Label(t *testing.T) {
 }
 
 func TestInvalidInitBinary(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=/dev/sda", "init=/foo/bar", "rw"},
 	})
@@ -592,7 +592,7 @@ func TestInvalidInitBinary(t *testing.T) {
 
 // verifies module force loading + modprobe command-line parameters
 func TestVfio(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
@@ -621,7 +621,7 @@ func TestVfio(t *testing.T) {
 }
 
 func TestNonFormattedDrive(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disks: []vmtest.QemuDisk{
 			{ /* represents non-formatted drive */ Path: "integration_test.go", Format: "raw"},
@@ -636,7 +636,7 @@ func TestNonFormattedDrive(t *testing.T) {
 }
 
 func TestXZImageCompression(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "xz",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
@@ -648,7 +648,7 @@ func TestXZImageCompression(t *testing.T) {
 }
 
 func TestGzipImageCompression(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
@@ -660,7 +660,7 @@ func TestGzipImageCompression(t *testing.T) {
 }
 
 func TestLz4ImageCompression(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "lz4",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=UUID=5c92fc66-7315-408b-b652-176dc554d370"},
@@ -672,7 +672,7 @@ func TestLz4ImageCompression(t *testing.T) {
 }
 
 func TestMountTimeout(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		kernelArgs:   []string{"root=/dev/nonexistent"},
 		compression:  "xz",
 		mountTimeout: 1,
@@ -684,7 +684,7 @@ func TestMountTimeout(t *testing.T) {
 }
 
 func TestFsck(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
 		kernelArgs:  []string{"root=LABEL=atestlabel12"},
@@ -697,7 +697,7 @@ func TestFsck(t *testing.T) {
 }
 
 func TestVirtualConsole(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		compression:          "none",
 		disk:                 "assets/ext4.img",
 		kernelArgs:           []string{"root=LABEL=atestlabel12"},
@@ -714,7 +714,7 @@ func TestStripBinaries(t *testing.T) {
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:          "assets/luks2.clevis.tpm2.img",
 		params:        params,
 		stripBinaries: true,
@@ -727,7 +727,7 @@ func TestStripBinaries(t *testing.T) {
 }
 
 func TestLUKS1WithName(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks1.img",
 		kernelArgs: []string{"rd.luks.name=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415=cryptroot", "root=/dev/mapper/cryptroot", "rd.luks.options=discard"},
 	})
@@ -740,7 +740,7 @@ func TestLUKS1WithName(t *testing.T) {
 }
 
 func TestLUKS1WithUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks1.img",
 		kernelArgs: []string{"rd.luks.uuid=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "root=UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"},
 	})
@@ -753,7 +753,7 @@ func TestLUKS1WithUUID(t *testing.T) {
 }
 
 func TestLUKS2WithName(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot", "root=/dev/mapper/cryptroot"},
 	})
@@ -766,7 +766,7 @@ func TestLUKS2WithName(t *testing.T) {
 }
 
 func TestLUKS2WithUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
 	})
@@ -779,7 +779,7 @@ func TestLUKS2WithUUID(t *testing.T) {
 }
 
 func TestLUKS2WithQuotesOverUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
 	})
@@ -803,7 +803,7 @@ func TestLUKS2ClevisYubikey(t *testing.T) {
 		params = append(params, y.toQemuParams()...)
 	}
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.clevis.yubikey.img",
 		kernelArgs: []string{"rd.luks.uuid=f2473f71-9a61-4b16-ae54-8f942b2daf52", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
 		extraFiles: "ykchalresp",
@@ -820,7 +820,7 @@ func TestLUKS1ClevisTang(t *testing.T) {
 	require.NoError(t, err)
 	defer tangd.Stop()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:          "assets/luks1.clevis.tang.img",
 		enableNetwork: true,
 		params:        params,
@@ -837,7 +837,7 @@ func TestLUKS2ClevisTang(t *testing.T) {
 	require.NoError(t, err)
 	defer tangd.Stop()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:          "assets/luks2.clevis.tang.img",
 		enableNetwork: true,
 		params:        params,
@@ -854,7 +854,7 @@ func TestLUKS2ClevisTangDHCP(t *testing.T) {
 	require.NoError(t, err)
 	defer tangd.Stop()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:            "assets/luks2.clevis.tang.img",
 		params:          params,
 		enableNetwork:   true,
@@ -873,7 +873,7 @@ func TestInactiveNetwork(t *testing.T) {
 	require.NoError(t, err)
 	defer tangd.Stop()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:            "assets/luks2.clevis.tang.img",
 		params:          params,
 		enableNetwork:   true,
@@ -893,7 +893,7 @@ func TestLUKS1ClevisTpm2(t *testing.T) {
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks1.clevis.tpm2.img",
 		params:     params,
 		kernelArgs: []string{"rd.luks.uuid=28c2e412-ab72-4416-b224-8abd116d6f2f", "root=UUID=2996cec0-16fd-4f1d-8bf3-6606afa77043"},
@@ -909,7 +909,7 @@ func TestLUKS2ClevisTpm2(t *testing.T) {
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.clevis.tpm2.img",
 		params:     params,
 		kernelArgs: []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
@@ -921,7 +921,7 @@ func TestLUKS2ClevisTpm2(t *testing.T) {
 }
 
 func TestLVMPath(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
 		kernelArgs: []string{"root=/dev/booster_test_vg/booster_test_lv"},
@@ -933,7 +933,7 @@ func TestLVMPath(t *testing.T) {
 }
 
 func TestLVMUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
 		kernelArgs: []string{"root=UUID=74c9e30c-506f-4106-9f61-a608466ef29c"},
@@ -945,7 +945,7 @@ func TestLVMUUID(t *testing.T) {
 }
 
 func TestMdRaid1Path(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
 		disk:         "assets/mdraid_raid1.img",
@@ -958,7 +958,7 @@ func TestMdRaid1Path(t *testing.T) {
 }
 
 func TestMdRaid1UUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
 		disk:         "assets/mdraid_raid1.img",
@@ -971,7 +971,7 @@ func TestMdRaid1UUID(t *testing.T) {
 }
 
 func TestMdRaid5Path(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",
 		disk:         "assets/mdraid_raid5.img",
@@ -984,7 +984,7 @@ func TestMdRaid5Path(t *testing.T) {
 }
 
 func TestMdRaid5UUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",
 		disk:         "assets/mdraid_raid5.img",
@@ -997,7 +997,7 @@ func TestMdRaid5UUID(t *testing.T) {
 }
 
 func TestGptPath(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/sda3"},
 	})
@@ -1008,7 +1008,7 @@ func TestGptPath(t *testing.T) {
 }
 
 func TestGptUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
 	})
@@ -1019,7 +1019,7 @@ func TestGptUUID(t *testing.T) {
 }
 
 func TestGptLABEL(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=LABEL=newpart"},
 	})
@@ -1030,7 +1030,7 @@ func TestGptLABEL(t *testing.T) {
 }
 
 func TestGptPARTUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
 	})
@@ -1041,7 +1041,7 @@ func TestGptPARTUUID(t *testing.T) {
 }
 
 func TestGptPARTLABEL(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTLABEL=раздел3"},
 	})
@@ -1052,7 +1052,7 @@ func TestGptPARTLABEL(t *testing.T) {
 }
 
 func TestGptPARTNROFF(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=78073a8b-bdf6-48cc-918e-edb926b25f64/PARTNROFF=2"},
 	})
@@ -1063,7 +1063,7 @@ func TestGptPARTNROFF(t *testing.T) {
 }
 
 func TestGptByUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-uuid/e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
 	})
@@ -1074,7 +1074,7 @@ func TestGptByUUID(t *testing.T) {
 }
 
 func TestGptByLABEL(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-label/newpart"},
 	})
@@ -1085,7 +1085,7 @@ func TestGptByLABEL(t *testing.T) {
 }
 
 func TestGptByPARTUUID(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partuuid/1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
 	})
@@ -1096,7 +1096,7 @@ func TestGptByPARTUUID(t *testing.T) {
 }
 
 func TestGptByPARTLABEL(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
 	})
@@ -1107,7 +1107,7 @@ func TestGptByPARTLABEL(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryExt4(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		containsESP: true,
 		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
 	})
@@ -1119,7 +1119,7 @@ func TestGptRootAutodiscoveryExt4(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryLUKS(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"ENABLE_LUKS=1"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
@@ -1133,7 +1133,7 @@ func TestGptRootAutodiscoveryLUKS(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryNoAuto(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=63"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
@@ -1147,7 +1147,7 @@ func TestGptRootAutodiscoveryNoAuto(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryReadOnly(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=60"},
 		kernelArgs:    []string{"console=ttyS0,115200", "ignore_loglevel"},
@@ -1160,7 +1160,7 @@ func TestGptRootAutodiscoveryReadOnly(t *testing.T) {
 }
 
 func TestNvme(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
 		kernelArgs: []string{"root=/dev/nvme0n1p3"},
 	})
@@ -1171,7 +1171,7 @@ func TestNvme(t *testing.T) {
 }
 
 func TestUsb(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
 		params:     []string{"-device", "usb-ehci,id=ehci"},
 		kernelArgs: []string{"root=/dev/sda3"},
@@ -1183,7 +1183,7 @@ func TestUsb(t *testing.T) {
 }
 
 func TestGpt4kSector(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt_4ksector.img", Format: "raw", DeviceParams: []string{"physical_block_size=4096", "logical_block_size=4096"}}},
 		kernelArgs: []string{"root=PARTUUID=d4699213-6e73-41d5-ad81-3daf5dfcecfb"},
 	})
@@ -1204,7 +1204,7 @@ func TestSystemdFido2(t *testing.T) {
 	for _, y := range yubikeys {
 		params = append(params, y.toQemuParams()...)
 	}
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-fido2.img",
 		kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
 		params:     params,
@@ -1234,7 +1234,7 @@ func TestSystemdTPM2(t *testing.T) {
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
 		params:     params,
@@ -1247,7 +1247,7 @@ func TestSystemdTPM2(t *testing.T) {
 }
 
 func TestSystemdRecovery(t *testing.T) {
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-recovery.img",
 		kernelArgs: []string{"rd.luks.uuid=62020168-58b9-4095-a3d0-176403353d20", "root=UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24"},
 	})
@@ -1267,7 +1267,7 @@ func TestVoidLinux(t *testing.T) {
 
 	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
 	require.NoError(t, err)
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		modulesDirectory: "assets/voidlinux/modules",
 		kernelPath:       "assets/voidlinux/vmlinuz",
 		kernelVersion:    string(voidlinuxKernelVersion),
@@ -1285,7 +1285,7 @@ func TestAlpineLinux(t *testing.T) {
 
 	alpinelinuxKernelVersion, err := os.ReadFile("assets/alpinelinux/vmlinuz-version")
 	require.NoError(t, err)
-	vm, err := boosterTest(t, Opts{
+	vm, err := buildVmInstance(t, Opts{
 		modulesDirectory: "assets/alpinelinux/modules",
 		kernelPath:       "assets/alpinelinux/vmlinuz",
 		kernelVersion:    string(alpinelinuxKernelVersion),
@@ -1348,7 +1348,7 @@ func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 }
 
 func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
-	vm, err := boosterTest(t, opts)
+	vm, err := buildVmInstance(t, opts)
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
