@@ -14,9 +14,10 @@ import (
 const imageModulesDir = "/usr/lib/modules"
 
 var (
-	loadedModules  = make(map[string]bool)
-	loadingModules = make(map[string][]*sync.WaitGroup)
-	modulesMutex   sync.Mutex
+	loadedModules    = make(map[string]bool)
+	loadingModules   = make(map[string][]*sync.WaitGroup)
+	loadingModulesWg sync.WaitGroup // total number of modules being loaded
+	modulesMutex     sync.Mutex
 )
 
 type alias struct{ pattern, module string } // module alias info
@@ -61,6 +62,8 @@ func readAliases() error {
 
 func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) error {
 	loadModule := func(mod string, depsWg *sync.WaitGroup) error {
+		defer loadingModulesWg.Done()
+
 		depsWg.Wait()
 		if err := finitModule(mod); err != nil {
 			return fmt.Errorf("finit(%v): %v", mod, err)
@@ -112,6 +115,7 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) error {
 			}
 		}
 
+		loadingModulesWg.Add(1)
 		go func() { check(loadModule(module, &depsWg)) }()
 	}
 

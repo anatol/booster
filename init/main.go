@@ -868,8 +868,7 @@ func boost() error {
 
 	go func() { check(udevListener()) }()
 
-	loadModulesWg, err := loadModules(config.ModulesForceLoad...)
-	if err != nil {
+	if _, err := loadModules(config.ModulesForceLoad...); err != nil {
 		return err
 	}
 
@@ -891,9 +890,8 @@ func boost() error {
 		rootMounted.Wait()
 	}
 
-	loadModulesWg.Wait()
-
 	cleanup()
+	loadingModulesWg.Wait() // wait till all modules done loading to kernel
 	return switchRoot()
 }
 
