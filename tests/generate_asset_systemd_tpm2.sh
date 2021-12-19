@@ -3,6 +3,7 @@ trap 'quit' EXIT ERR
 quit() {
   set +o errexit
   swtpm_ioctl --tcp :2322 -s
+  rm -rf assets/tpm2.generate
   rm assets/cryptenroll.passphrase
   sudo umount $dir
   rm -r $dir
@@ -12,7 +13,9 @@ quit() {
 
 LUKS_DEV_NAME=luks-booster-systemd
 
-swtpm socket --tpmstate dir=assets/tpm2 --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear &
+mkdir assets/tpm2.generate
+cp assets/tpm2/tpm2-00.permall.pristine assets/tpm2.generate/tpm2-00.permall
+swtpm socket --tpmstate dir=assets/tpm2.generate --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear &
 
 truncate --size 40M $OUTPUT
 lodev=$(sudo losetup -f --show $OUTPUT)
