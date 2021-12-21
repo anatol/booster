@@ -1,5 +1,5 @@
 trap 'quit' EXIT
-trap 'quit' ERR
+trap 'err' ERR
 
 quit() {
   set +o errexit
@@ -12,6 +12,7 @@ quit() {
 
 err() {
   set +o errexit
+  quit
   rm assets/systemd.recovery.key
 }
 

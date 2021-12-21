@@ -1,10 +1,17 @@
-trap 'quit' EXIT ERR
+trap 'quit' EXIT
+trap 'err' ERR
 
 quit() {
   set +o errexit
   sudo umount $mount
   rm -rf $mount
   sudo losetup -d $lodev
+}
+
+err() {
+  set +o errexit
+  quit
+  rm -rf assets/alpinelinux
 }
 
 truncate --size 200M $OUTPUT
