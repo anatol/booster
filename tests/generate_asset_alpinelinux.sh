@@ -16,7 +16,7 @@ sudo mount $lodev $mount
 sudo mkdir -p $mount/etc/apk/
 echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" | sudo tee -a $mount/etc/apk/repositories
 echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" | sudo tee -a $mount/etc/apk/repositories
-sudo apk --root $mount --initdb --update-cache --allow-untrusted add alpine-base util-linux-misc linux-virt
+sudo apk --root $mount --initdb --update-cache --allow-untrusted add alpine-base linux-virt agetty
 
 sudo chroot $mount /bin/sh -eu <<EOT
 cd /etc/init.d
