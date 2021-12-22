@@ -77,6 +77,7 @@ func probeGpt(f *os.File) *blkInfo {
 
 	lbaSize, err := unix.IoctlGetInt(int(f.Fd()), unix.BLKSSZGET)
 	if err != nil {
+		debug("unable to get sector size for %s: %v", f.Name(), err)
 		lbaSize = defaultSectorSize
 	}
 	tableHeaderOffset := tableHeaderOffsetSector * int64(lbaSize)
