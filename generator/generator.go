@@ -79,7 +79,7 @@ var defaultModulesList = []string{
 	"kernel/drivers/hid/",
 	"hid_generic", "sd_mod", "ahci",
 	"sdhci", "sdhci_acpi", "sdhci_pci", "mmc_block", // mmc
-	"nvme", "usb_storage",
+	"nvme", "usb_storage", "uas",
 	"virtio_pci", "virtio_blk", "virtio_scsi", "virtio_crypto",
 }
 

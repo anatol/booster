@@ -589,37 +589,59 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 		}
 	}
 
-	if !k.universal {
-		devAliases, err := conf.readDeviceAliases() // list of current host aliases as reported by /sys/devices
+	if k.universal {
+		return filteredAliases, nil
+	}
+
+	// for a non-universal mode filter out only aliases known to kernel
+	uniqAliases := make(map[alias]bool)
+
+	devAliases, err := conf.readDeviceAliases() // list of current host aliases as reported by /sys/devices
+	if err != nil {
+		return nil, err
+	}
+	for a := range devAliases {
+		matched, err := matchAlias(a, filteredAliases)
 		if err != nil {
 			return nil, err
 		}
-
-		// filter out only aliases known to kernel
-		var newFilteredAliases []alias // aliases for the given devices
-		uniqAliases := make(map[alias]bool)
-		for a := range devAliases {
-			matched, err := matchAlias(a, filteredAliases)
-			if err != nil {
-				return nil, err
-			}
-			if len(matched) == 0 {
-				debug("no matches found for a device alias '%s'", a)
-				continue
-			}
-
-			for _, m := range matched {
-				if _, exists := uniqAliases[m]; exists {
-					continue
-				}
-				uniqAliases[m] = true
-				newFilteredAliases = append(newFilteredAliases, m)
-			}
+		if len(matched) == 0 {
+			debug("no matches found for a device alias '%s'", a)
+			continue
 		}
-		filteredAliases = newFilteredAliases
+
+		for _, m := range matched {
+			uniqAliases[m] = true
+		}
 	}
 
-	return filteredAliases, nil
+	// quirk: some modules do not report modaliases they use at /sysfs so we just add all aliases for specified modules.
+	addAllAliasesForModules := []string{
+		// mmc bus sends an udev event modalias 'mmc:block' (see Linux drivers/mmc/core/bus.c)
+		// but it seems that this modalias is not reported anywhere under /sys/devices, see https://github.com/anatol/booster/issues/90
+		"mmc_block",
+		// uas does not report alias for its USB_PR_BULK interface https://github.com/anatol/booster/issues/121
+		"uas",
+	}
+	for _, m := range addAllAliasesForModules {
+		if !k.requiredModules[m] {
+			continue
+		}
+
+		for _, a := range filteredAliases {
+			if a.module != m {
+				continue
+			}
+			uniqAliases[a] = true
+		}
+	}
+
+	newFilteredAliases := make([]alias, 0, len(uniqAliases)) // aliases for the given devices
+	for a := range uniqAliases {
+		newFilteredAliases = append(newFilteredAliases, a)
+	}
+
+	return newFilteredAliases, nil
 }
 
 func readDeviceAliases() (set, error) {
@@ -649,12 +671,6 @@ func readDeviceAliases() (set, error) {
 
 		return nil
 	})
-
-	// Buses might have associated modaliases e.g. mmc bus sends an udev event modalias 'mmc:block' (see Linux drivers/mmc/core/bus.c)
-	// But it seems that this modalias is not reported anywhere under /sys/devices, see https://github.com/anatol/booster/issues/90
-
-	// insert implicit modaliases. TODO: find a more straightforward way to detect all buses modaliases
-	aliases["mmc:block"] = true
 
 	return aliases, err
 }
