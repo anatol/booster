@@ -36,7 +36,7 @@ func checkFs(t *testing.T, name, fstype, uuidStr, label string, size int64, scri
 	require.NoError(t, err)
 	require.Equal(t, fstype, info.format)
 	var uuid UUID
-	if fstype == "mbr" || fstype == "mdraid" {
+	if fstype == "mbr" || fstype == "fat" || fstype == "mdraid" {
 		uuid, err = hex.DecodeString(uuidStr)
 	} else if fstype == "lvm" {
 		uuid = []byte(strings.ReplaceAll(uuidStr, "-", ""))
@@ -66,6 +66,7 @@ func fileExists(file string) bool {
 }
 
 func TestBlkInfo(t *testing.T) {
+	checkFs(t, "fat", "fat", "2a341c62", "FATLBL", 10, "mkfs.vfat -F32 -n $LABEL -i $UUID $OUTPUT", nil)
 	checkFs(t, "ext4", "ext4", "717be5ba-d42d-4aaa-b846-8a23cc7471b0", "extlabel", 10, "mkfs.ext4 -L $LABEL -U $UUID $OUTPUT", nil)
 	checkFs(t, "btrfs", "btrfs", "1884e1eb-186f-4b1b-af11-45ea80da8e3c", "btrfs111", 200, "mkfs.btrfs -L $LABEL -U $UUID $OUTPUT", nil)
 	checkFs(t, "xfs", "xfs", "ee7cad9a-0202-4c00-a320-418a9276d70d", "xfs44", 100, "mkfs.xfs -L $LABEL -m uuid=$UUID $OUTPUT", nil)

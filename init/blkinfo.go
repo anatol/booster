@@ -30,7 +30,8 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	defer r.Close()
 
 	type probeFn func(f *os.File) *blkInfo
-	probes := []probeFn{probeGpt, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
+	// FAT signature is similar to MBR + some restrictions. Check fat before mbr.
+	probes := []probeFn{probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
 	for _, fn := range probes {
 		blk := fn(r)
 		if blk != nil {
@@ -138,7 +139,7 @@ func convertGptUUID(d []byte) []byte {
 
 func probeMbr(f *os.File) *blkInfo {
 	const (
-		// https://wiki.osdev.org/GPT
+		// https://wiki.osdev.org/MBR
 		bootSignatureOffset = 0x1fe
 		bootSignature       = "\x55\xaa"
 		diskSignatureOffset = 0x01bc
@@ -165,6 +166,81 @@ func probeMbr(f *os.File) *blkInfo {
 	}
 	id := []byte{b[3], b[2], b[1], b[0]} // little endian
 	return &blkInfo{format: "mbr", uuid: id}
+}
+
+func probeFat(f *os.File) *blkInfo {
+	const (
+		// https://wiki.osdev.org/FAT
+		bpsSignatureOffset   = 0x0
+		bpsSignature         = "\xeb\x3c\x90" // the 2nd byte might be different
+		bootSignatureOffset  = 0x1fe
+		bootSignature        = "\x55\xaa"
+		fat16SignatureOffset = 0x026
+		fat16IdOffset        = 0x027
+		fat16LabelOffset     = 0x02b
+		fat32SignatureOffset = 0x042
+		fat32IdOffset        = 0x043
+		fat32LabelOffset     = 0x047
+		fatLabelLength       = 11
+	)
+	signature := make([]byte, 2)
+	if _, err := f.ReadAt(signature, bootSignatureOffset); err != nil {
+		return nil
+	}
+	if string(signature) != bootSignature {
+		return nil
+	}
+
+	signature = make([]byte, 3)
+	if _, err := f.ReadAt(signature, bpsSignatureOffset); err != nil {
+		return nil
+	}
+	if signature[0] != []byte(bpsSignature)[0] || signature[2] != []byte(bpsSignature)[2] {
+		return nil
+	}
+
+	signature = make([]byte, 1)
+	if _, err := f.ReadAt(signature, fat16SignatureOffset); err != nil {
+		return nil
+	}
+	if signature[0] == 0x28 || signature[0] == 0x29 {
+		// fat16
+		b := make([]byte, 4)
+		if _, err := f.ReadAt(b, fat16IdOffset); err != nil {
+			return nil
+		}
+		id := []byte{b[3], b[2], b[1], b[0]} // little endian
+
+		label := make([]byte, fatLabelLength)
+		if _, err := f.ReadAt(label, fat16LabelOffset); err != nil {
+			return nil
+		}
+		label = bytes.TrimRight(label, " ")
+
+		return &blkInfo{format: "fat", uuid: id, label: string(label)}
+	}
+
+	if _, err := f.ReadAt(signature, fat32SignatureOffset); err != nil {
+		return nil
+	}
+	if signature[0] == 0x28 || signature[0] == 0x29 {
+		// fat16
+		b := make([]byte, 4)
+		if _, err := f.ReadAt(b, fat32IdOffset); err != nil {
+			return nil
+		}
+		id := []byte{b[3], b[2], b[1], b[0]} // little endian
+
+		label := make([]byte, fatLabelLength)
+		if _, err := f.ReadAt(label, fat32LabelOffset); err != nil {
+			return nil
+		}
+		label = bytes.TrimRight(label, " ")
+
+		return &blkInfo{format: "fat", uuid: id, label: string(label)}
+	}
+
+	return nil
 }
 
 func probeLuks(f *os.File) *blkInfo {
