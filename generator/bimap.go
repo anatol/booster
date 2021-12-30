@@ -14,19 +14,19 @@ func NewBimap() *Bimap {
 }
 
 func (b *Bimap) Add(key, value string, aliases ...string) error {
-	if v, ok := b.forward[key]; ok {
-		return fmt.Errorf("provided key already used in mapping %s->%s", key, v)
+	if v, ok := b.forward[key]; ok && v != value {
+		return fmt.Errorf("key %s maps to multiple values (%s,%s)", key, v, value)
 	}
 	b.forward[key] = value
 
-	if k, ok := b.reverse[value]; ok {
-		return fmt.Errorf("provided value already used in mapping %s->%s", k, value)
+	if k, ok := b.reverse[value]; ok && k != key {
+		return fmt.Errorf("multiple keys (%s,%s) map to the same value %s", k, key, value)
 	}
 	b.reverse[value] = key
 
 	for _, a := range aliases {
-		if k, ok := b.reverse[a]; ok {
-			return fmt.Errorf("provided alias already used in mapping %s->%s", k, a)
+		if k, ok := b.reverse[a]; ok && k != key {
+			return fmt.Errorf("multiple keys (%s,%s) map to the same alias %s", k, key, a)
 		}
 		b.reverse[a] = key
 	}
