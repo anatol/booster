@@ -31,7 +31,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 
 	type probeFn func(f *os.File) *blkInfo
 	// FAT signature is similar to MBR + some restrictions. Check fat before mbr.
-	probes := []probeFn{probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid}
+	probes := []probeFn{probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap}
 	for _, fn := range probes {
 		blk := fn(r)
 		if blk != nil {
@@ -496,4 +496,35 @@ func probeMdraid(f *os.File) *blkInfo {
 	data := mdraidData{level: level}
 
 	return &blkInfo{format: "mdraid", isFs: true, uuid: uuid, data: data}
+}
+
+func probeSwap(f *os.File) *blkInfo {
+	// https://elixir.bootlin.com/linux/latest/source/include/linux/swap.h
+	const (
+		swapMagicOffset = 4086
+		swapMagicLength = 10
+		swapUUIDOffset  = 1036
+		swapLabeOffset  = 1052
+	)
+
+	magic := make([]byte, 10)
+	if _, err := f.ReadAt(magic, swapMagicOffset); err != nil {
+		return nil
+	}
+	if string(magic) != "SWAP-SPACE" && string(magic) != "SWAPSPACE2" && string(magic) != "S1SUSPEND\x00" {
+		return nil
+	}
+
+	uuid := make([]byte, 16)
+	if _, err := f.ReadAt(uuid, swapUUIDOffset); err != nil {
+		return nil
+	}
+
+	label := make([]byte, 16)
+	if _, err := f.ReadAt(label, swapLabeOffset); err != nil {
+		return nil
+	}
+	label = bytes.TrimRight(label, "\x00")
+
+	return &blkInfo{format: "swap", isFs: true, uuid: uuid, label: string(label)}
 }

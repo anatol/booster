@@ -73,6 +73,7 @@ func TestBlkInfo(t *testing.T) {
 	checkFs(t, "f2fs", "f2fs", "6af49bb0-0bd8-4b82-a1d1-286dfe37d729", "test1привет", 100, "mkfs.f2fs -l $LABEL -U $UUID $OUTPUT", nil)
 	checkFs(t, "luks1", "luks", "6faf1e59-9999-4da4-97f9-c815e7353777", "", 100, "cryptsetup luksFormat -q --type=luks1 --iter-time=1 --uuid=$UUID $OUTPUT <<< 'tetspassphrase'", nil)
 	checkFs(t, "luks2", "luks", "51df71ed-8e4a-4a7a-956d-b782706a52d1", "bazz", 10, "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=$UUID --label=$LABEL $OUTPUT <<< 'tetspassphrase'", nil)
+	checkFs(t, "swap", "swap", "5f3d4e16-3fa4-42fe-a64d-2dc6685bcc7e", "eightly", 10, "mkswap --uuid $UUID --label $LABEL $OUTPUT", nil)
 
 	typeGUID := []byte{203, 52, 81, 177, 53, 176, 64, 249, 160, 234, 133, 102, 237, 5, 222, 109}
 	sector1UUID := []byte{83, 69, 58, 7, 155, 238, 67, 151, 166, 20, 158, 143, 163, 135, 10, 114}
