@@ -103,3 +103,81 @@ func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
 	// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
 	_, _ = sessShutdown.CombinedOutput("shutdown now")
 }
+
+func TestArchLinuxHibernate(t *testing.T) {
+	// boot Arch userspace (with systemd) against all installed linux packages
+	for pkg, ver := range kernelVersions {
+		t.Run(pkg, func(t *testing.T) {
+			compression := "zstd"
+			if pkg == "linux-lts" {
+				compression = "gzip"
+			}
+
+			controller := ""
+			ext4RootDevice := "/dev/sda"
+			if pkg == "linux-xanmod" {
+				// xanmod compiles nvme as a standalone module
+				// use it as an opportunity to verify 'nvme as a root device' functionality
+				controller = "nvme,serial=boostfoo"
+				ext4RootDevice = "/dev/nvme0n1"
+			}
+			opts := Opts{
+				kernelVersion: ver,
+				modules:       "e1000",
+				compression:   compression,
+				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				disks: []vmtest.QemuDisk{
+					{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller},
+					{Path: "assets/swap.raw", Format: "raw"},
+				},
+				kernelArgs: []string{"root=" + ext4RootDevice, "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f", "rw"},
+			}
+
+			vm, err := buildVmInstance(t, opts)
+			require.NoError(t, err)
+			// defer vm.Shutdown()
+
+			config := &ssh.ClientConfig{
+				User:            "root",
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			}
+
+			conn, err := ssh.Dial("tcp", ":10022", config)
+			require.NoError(t, err)
+			defer conn.Close()
+
+			sess, err := conn.NewSession()
+			require.NoError(t, err)
+			defer sess.Close()
+			out, err := sess.CombinedOutput("swapon -U 5ec330f5-ac5e-48d2-98b6-87fd3e9b272f -v")
+			require.NoError(t, err, string(out))
+
+			require.NoError(t, vm.ConsoleExpect("swap on /dev/sd"))
+
+			sess2, err := conn.NewSession()
+			require.NoError(t, err)
+			defer sess2.Close()
+			require.NoError(t, sess2.Run("systemctl hibernate"))
+
+			require.NoError(t, vm.ConsoleExpect("PM: Image saving done"))
+
+			// wakeing it up
+			vm2, err := buildVmInstance(t, opts)
+			require.NoError(t, err)
+			defer vm2.Shutdown()
+
+			require.NoError(t, vm2.ConsoleExpect("PM: Image loading done"))
+
+			conn, err = ssh.Dial("tcp", ":10022", config)
+			require.NoError(t, err)
+			defer conn.Close()
+
+			sess, err = conn.NewSession()
+			require.NoError(t, err)
+			defer sess.Close()
+			out, err = sess.CombinedOutput("uname -a")
+			require.NoError(t, err, string(out))
+			require.Contains(t, string(out), "Linux archlinux "+ver)
+		})
+	}
+}
