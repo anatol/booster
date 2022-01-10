@@ -826,7 +826,7 @@ func parseModprobe(content string, options map[string][]string) error {
 
 		sep := strings.IndexByte(line, ' ')
 		if sep == -1 {
-			return fmt.Errorf("option line format needs to have 'options modname params'")
+			return fmt.Errorf("invalid line: '%s'. It needs to be 'options modname params'", line)
 		}
 
 		modname := normalizeModuleName(line[:sep]) // currently it does not handle aliases, do we need it?
@@ -855,12 +855,13 @@ func readModprobeOptions() (map[string]string, error) {
 		}
 
 		for _, e := range dir {
-			content, err := os.ReadFile(path.Join(d, e.Name()))
+			filename := path.Join(d, e.Name())
+			content, err := os.ReadFile(filename)
 			if err != nil {
 				return nil, err
 			}
 			if err := parseModprobe(string(content), options); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s: %s", filename, err)
 			}
 		}
 	}
