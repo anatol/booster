@@ -101,7 +101,7 @@ func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
 	require.NoError(t, err)
 	defer sessShutdown.Close()
 	// Arch Linux 5.4 does not shutdown with QEMU's 'shutdown' event for some reason. Force shutdown from ssh session.
-	_, _ = sessShutdown.CombinedOutput("shutdown now")
+	_ = sessShutdown.Run("shutdown now")
 }
 
 func TestArchLinuxHibernate(t *testing.T) {
