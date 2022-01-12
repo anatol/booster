@@ -111,10 +111,7 @@ func parseParams(params string) error {
 		}
 	}
 
-	if param, ok := cmdline["init"]; ok {
-		initBinary = param
-	}
-
+	initBinary = cmdline["init"]
 	rootFsType = cmdline["rootfstype"]
 	rootFlags = cmdline["rootflags"]
 	_, rootRo = cmdline["ro"]
