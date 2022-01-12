@@ -50,114 +50,114 @@ func parseCmdline() error {
 }
 
 func parseParams(params string) error {
-	parts := strings.Split(params, " ")
-	cmdline := make(map[string]string)
-	for _, part := range parts {
+	var luksOptions []string
+
+	for _, part := range strings.Split(params, " ") {
+		var key, value string
 		// separate key/value based on the first = character;
 		// there may be multiple (e.g. in rd.luks.name)
 		if idx := strings.IndexByte(part, '='); idx > -1 {
-			key, val := part[:idx], part[idx+1:]
-			cmdline[key] = val
+			key, value = part[:idx], part[idx+1:]
+		} else {
+			key = part
+		}
 
-			if dot := strings.IndexByte(key, '.'); dot != -1 {
+		switch key {
+		case "booster.log":
+			for _, p := range strings.Split(value, ",") {
+				switch p {
+				case "debug":
+					verbosityLevel = levelDebug
+				case "info":
+					verbosityLevel = levelInfo
+				case "warning":
+					verbosityLevel = levelWarning
+				case "error":
+					verbosityLevel = levelError
+				case "console":
+					printToConsole = true
+				default:
+					warning("unknown booster.log key: %s", p)
+				}
+			}
+		case "booster.debug":
+			// booster.debug is an obsolete parameter
+			verbosityLevel = levelDebug
+			printToConsole = true
+		case "quiet":
+			verbosityLevel = levelError
+		case "root":
+			var err error
+			cmdRoot, err = parseDeviceRef(value)
+			if err != nil {
+				return fmt.Errorf("root=%s: %v", value, err)
+			}
+
+		case "resume":
+			var err error
+			cmdResume, err = parseDeviceRef(value)
+			if err != nil {
+				return fmt.Errorf("resume=%s: %v", value, err)
+			}
+		case "init":
+			initBinary = value
+		case "rootfstype":
+			rootFsType = value
+		case "rootflags":
+			rootFlags = value
+		case "ro":
+			rootRo = true
+		case "rw":
+			rootRw = true
+		case "rd.luks.options":
+			for _, o := range strings.Split(value, ",") {
+				flag, ok := rdLuksOptions[o]
+				if !ok {
+					return fmt.Errorf("unknown value in rd.luks.options: %v", o)
+				}
+				luksOptions = append(luksOptions, flag)
+			}
+		case "rd.luks.name":
+			parts := strings.Split(value, "=")
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", value)
+			}
+			uuid, err := parseUUID(stripQuotes(parts[0]))
+			if err != nil {
+				return fmt.Errorf("invalid UUID %s %v", parts[0], err)
+			}
+
+			dev := luksMapping{
+				ref:  &deviceRef{refFsUUID, uuid},
+				name: parts[1],
+			}
+			luksMappings = append(luksMappings, dev)
+		case "rd.luks.uuid":
+			stripped := stripQuotes(value)
+			u, err := parseUUID(stripped)
+			if err != nil {
+				return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", value, err)
+			}
+
+			dev := luksMapping{
+				ref:  &deviceRef{refFsUUID, u},
+				name: "luks-" + stripped,
+			}
+			luksMappings = append(luksMappings, dev)
+		default:
+			if dot := strings.IndexByte(key, '.'); value != "" && dot != -1 {
 				// this param looks like a module options
 				mod, param := key[:dot], key[dot+1:]
 				mod = normalizeModuleName(mod)
-				moduleParams[mod] = append(moduleParams[mod], param+"="+val)
-			}
-		} else {
-			cmdline[part] = ""
-		}
-	}
-
-	if param, ok := cmdline["booster.log"]; ok {
-		for _, p := range strings.Split(param, ",") {
-			switch p {
-			case "debug":
-				verbosityLevel = levelDebug
-			case "info":
-				verbosityLevel = levelInfo
-			case "warning":
-				verbosityLevel = levelWarning
-			case "error":
-				verbosityLevel = levelError
-			case "console":
-				printToConsole = true
-			default:
-				warning("unknown booster.log key: %s", p)
+				moduleParams[mod] = append(moduleParams[mod], param+"="+value)
 			}
 		}
-	} else if _, ok := cmdline["booster.debug"]; ok {
-		// booster.debug is an obsolete parameter
-		verbosityLevel = levelDebug
-		printToConsole = true
-	} else if _, ok := cmdline["quiet"]; ok {
-		verbosityLevel = levelError
 	}
 
-	if param, ok := cmdline["root"]; ok {
-		var err error
-		cmdRoot, err = parseDeviceRef(param)
-		if err != nil {
-			return fmt.Errorf("root=%s: %v", param, err)
+	if luksOptions != nil {
+		for i := range luksMappings {
+			luksMappings[i].options = luksOptions
 		}
-	}
-
-	if param, ok := cmdline["resume"]; ok {
-		var err error
-		cmdResume, err = parseDeviceRef(param)
-		if err != nil {
-			return fmt.Errorf("resume=%s: %v", param, err)
-		}
-	}
-
-	initBinary = cmdline["init"]
-	rootFsType = cmdline["rootfstype"]
-	rootFlags = cmdline["rootflags"]
-	_, rootRo = cmdline["ro"]
-	_, rootRw = cmdline["rw"]
-
-	// parse LUKS-specific kernel parameters
-	var luksOptions []string
-	if param, ok := cmdline["rd.luks.options"]; ok {
-		for _, o := range strings.Split(param, ",") {
-			flag, ok := rdLuksOptions[o]
-			if !ok {
-				return fmt.Errorf("unknown value in rd.luks.options: %v", o)
-			}
-			luksOptions = append(luksOptions, flag)
-		}
-	}
-
-	if param, ok := cmdline["rd.luks.name"]; ok {
-		parts := strings.Split(param, "=")
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", cmdline["rd.luks.name"])
-		}
-		uuid, err := parseUUID(stripQuotes(parts[0]))
-		if err != nil {
-			return fmt.Errorf("invalid UUID %s %v", parts[0], err)
-		}
-
-		dev := luksMapping{
-			ref:     &deviceRef{refFsUUID, uuid},
-			name:    parts[1],
-			options: luksOptions,
-		}
-		luksMappings = append(luksMappings, dev)
-	} else if uuid, ok := cmdline["rd.luks.uuid"]; ok {
-		stripped := stripQuotes(uuid)
-		u, err := parseUUID(stripped)
-		if err != nil {
-			return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", uuid, err)
-		}
-
-		dev := luksMapping{
-			ref:     &deviceRef{refFsUUID, u},
-			name:    "luks-" + stripped,
-			options: luksOptions,
-		}
-		luksMappings = append(luksMappings, dev)
 	}
 
 	return nil
