@@ -26,7 +26,6 @@ const (
 )
 
 var (
-	cmdline = make(map[string]string)
 	// all boot params (from cmdline) that look like module.name=value considered as potential module parameters for 'module'
 	// it preserved to moduleParams for later use. cmdline is not modified.
 	moduleParams = make(map[string][]string)
@@ -43,6 +42,10 @@ var (
 	rootAutodiscoveryMode       bool
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags
 	activeEfiEspGUID            UUID    // partition that was used as Efi system partition last time
+
+	rootFsType     string
+	rootFlags      string
+	rootRo, rootRw bool
 )
 
 type set map[string]bool
@@ -53,6 +56,7 @@ func parseCmdline() error {
 		return err
 	}
 	parts := strings.Split(strings.TrimSpace(string(b)), " ")
+	cmdline := make(map[string]string)
 	for _, part := range parts {
 		// separate key/value based on the first = character;
 		// there may be multiple (e.g. in rd.luks.name)
@@ -141,6 +145,11 @@ func parseCmdline() error {
 	if param, ok := cmdline["init"]; ok {
 		initBinary = param
 	}
+
+	rootFsType = cmdline["rootfstype"]
+	rootFlags = cmdline["rootflags"]
+	_, rootRo = cmdline["ro"]
+	_, rootRw = cmdline["rw"]
 
 	// parse LUKS-specific kernel parameters
 	var luksOptions []string
@@ -317,8 +326,8 @@ func addBlockDevice(devpath string, symlinks []string) error {
 		waitForTableToProcess(devpath)
 	}
 	if cmdRoot.matchesBlkInfo(blk) {
-		if blk.format == "" && cmdline["rootfstype"] != "" {
-			blk.format = cmdline["rootfstype"]
+		if blk.format == "" && rootFsType != "" {
+			blk.format = rootFsType
 			blk.isFs = true
 		}
 		if blk.format == "" {
@@ -473,11 +482,11 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := sunderMountFlags(cmdline["rootflags"], rootAutodiscoveryMountFlags)
-	if _, ro := cmdline["ro"]; ro {
+	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
+	if rootRo {
 		rootMountFlags |= unix.MS_RDONLY
 	}
-	if _, rw := cmdline["rw"]; rw {
+	if rootRw {
 		rootMountFlags &^= unix.MS_RDONLY
 	}
 	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
