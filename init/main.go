@@ -308,7 +308,7 @@ func fsck(dev string) error {
 				code &^= 0x1 // bit 1 means errors were corrected successfully which is good
 
 				if code != 0 {
-					return fmt.Errorf("fsck for %s failed with code 0x%x", dev, err.ExitCode())
+					return fmt.Errorf("fsck for %s failed with code 0x%x\n%s", dev, err.ExitCode(), string(err.Stderr))
 				}
 			}
 
