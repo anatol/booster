@@ -253,14 +253,39 @@ func (img *Image) appendExtraFiles(binaries []string) error {
 	return nil
 }
 
+func findFwFile(fw string) (string, error) {
+	supportedFwExt := []string{
+		"",
+		".xz", // https://archlinux.org/news/linux-firmware-202201190c6a7b3-2-requires-kernel-53-and-package-splitting/
+	}
+
+	fwBasePath := firmwareDir + fw
+	for _, ext := range supportedFwExt {
+		fwPath := fwBasePath + ext
+		if _, err := os.Stat(fwPath); err == nil {
+			return fwPath, nil
+		} else if os.IsNotExist(err) {
+			continue // try the next extension
+		} else {
+			return "", err
+		}
+	}
+
+	return "", os.ErrNotExist
+}
+
 func (img *Image) appendFirmwareFiles(modName string, fws []string) error {
 	for _, fw := range fws {
-		fwPath := firmwareDir + fw
-		if _, err := os.Stat(fwPath); os.IsNotExist(err) {
+		path, err := findFwFile(fw)
+
+		if os.IsNotExist(err) {
 			debug("module %s depends on firmware %s but the firmware file does not exist", modName, fw)
 			continue
+		} else if err != nil {
+			return err
 		}
-		if err := img.AppendFile(fwPath); err != nil {
+
+		if err := img.AppendFile(path); err != nil {
 			return err
 		}
 	}
