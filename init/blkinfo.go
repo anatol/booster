@@ -16,6 +16,8 @@ type blkInfo struct {
 	isFs     bool     // specifies if the format a mountable filesystem
 	uuid     UUID
 	label    string
+	hwPath   string      // TODO: compute it lazy
+	wwid     []string    // TODO: compute it lazy
 	data     interface{} // type specific data
 }
 
@@ -34,11 +36,13 @@ func readBlkInfo(path string) (*blkInfo, error) {
 	probes := []probeFn{probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap}
 	for _, fn := range probes {
 		blk := fn(r)
-		if blk != nil {
-			info("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, blk.format, blk.uuid.toString(), blk.label)
-			blk.path = path
-			return blk, nil
+		if blk == nil {
+			continue
 		}
+
+		info("blkinfo for %s: type=%s UUID=%s LABEL=%s", path, blk.format, blk.uuid.toString(), blk.label)
+		blk.path = path
+		return blk, nil
 	}
 
 	return nil, errUnknownBlockType

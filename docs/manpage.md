@@ -131,13 +131,15 @@ Some parts of booster boot functionality can be modified with kernel boot parame
 Device reference is a way to specify a device or partition in kernel parameters. It is labeled as `$deviceref` above.
 Device reference has one of the following values:
 
-* `/dev/XXX` path to specific device file, it can be either a path to real device/partition like `/dev/sda1`, `/dev/nvme0n1` or path to dm-mapper virtual device like
+ * `/dev/XXX` path to specific device file, it can be either a path to real device/partition like `/dev/sda1`, `/dev/nvme0n1` or path to dm-mapper virtual device like
    `/dev/mapper/root` or `/dev/vg_mesos/lv_mesos_containers`.
  * `UUID=$UUID` or `/dev/disk/by-uuid/$UUID` references device by its filesystem/LUKS UUID. See notes about UUID formatting rules below.
  * `LABEL=$LABEL` or `/dev/disk/by-label/$LABEL` references device by its filesystem/LUKS label.
  * `PARTUUID=$UUID` or `/dev/disk/by-partuuid/$UUID` references device by GPT partition UUID.
  * `PARTUUID=$UUID/PARTNROFF=$OFFSET` references device by $OFFSET from a GPT partition specified by $UUID e.g. `PARTUUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665/PARTNROFF=2`.
  * `PARTLABEL=$LABEL` or `/dev/disk/by-partlabel/$LABEL` references device by GPT partition label.
+ * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by determenistic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
+ * `WWID=$ID` or `/dev/disk/by-id/$ID` references device by its wwid e.g. `nvme-KXG6AZNV256G_TOSHIBA_40SA13GZF6B1-part3`
 
 ### UUID parameters
 Boot parameters such as `root=UUID=$UUID` and `rd.luks.uuid=$UUID` allow you to specify the block device by its UUID.

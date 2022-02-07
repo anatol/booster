@@ -6,6 +6,7 @@ require (
 	github.com/anatol/clevis.go v0.0.0-20220316010037-f2752399a49b
 	github.com/anatol/devmapper.go v0.0.0-20211210164347-f67e20c4e7f7
 	github.com/anatol/luks.go v0.0.0-20211210165108-5d9a15b4f614
+	github.com/anatol/smart.go v0.0.0-20220218195151-5ee9e8fa73f0
 	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/goccy/go-json v0.9.5 // indirect

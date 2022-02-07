@@ -9,10 +9,12 @@ github.com/anatol/devmapper.go v0.0.0-20211210164347-f67e20c4e7f7 h1:/7MxcPFdUY7
 github.com/anatol/devmapper.go v0.0.0-20211210164347-f67e20c4e7f7/go.mod h1:zrna3BRNXKHSyOiw0ynGV2ASklN+IQBl4A4J+mXghCY=
 github.com/anatol/luks.go v0.0.0-20211210165108-5d9a15b4f614 h1:6nOeQoay/QVdEippGzfI9TxBTqPXV2EEfsY4jOBHJLc=
 github.com/anatol/luks.go v0.0.0-20211210165108-5d9a15b4f614/go.mod h1:88QkZxTPcAlsKkZvVVTs8YMn2Avp5H5itbmFNjGusaY=
+github.com/anatol/smart.go v0.0.0-20220218195151-5ee9e8fa73f0 h1:rnURfQKi7StDt+WxNWW0LSHZp4sexCTwV+QOFEEZJjg=
+github.com/anatol/smart.go v0.0.0-20220218195151-5ee9e8fa73f0/go.mod h1:mPog5NmM5znyLbUO9WQPJ4xQdVtuHPptPavY0055POc=
 github.com/anatol/tang.go v0.0.0-20220228200145-7d0d81ac3cf3 h1:jRvXzo0yYSy3LAWaRivg6Frpwsar3zxkqIqCFi9wAI0=
 github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549 h1:CPuCjtWK5UI9KQPDhylGHfZe7Pp8j58WK7i3wpLemA0=
 github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549/go.mod h1:yO7hm0VhhOujsh+j0nn8ExPhAqIJh50MZOcKetKhAPA=
-github.com/anatol/vmtest v0.0.0-20211004221854-3a36b6b86cc0 h1:1my48uvB1J9Gpe9Jl03rdyHY2U4j0uRGQ6zmeGAMFao=
+github.com/anatol/vmtest v0.0.0-20211215032353-afd7b1dd38ef h1:YQzm9r8/ArTsQ6C3/h+w4Dz5dfkYkQbK/3ETLWW2i7Q=
 github.com/armon/consul-api v0.0.0-20180202201655-eb2c6b5be1b6/go.mod h1:grANhF5doyWs3UAsr3K4I6qtAmlQcZDesFNEHPZAzj8=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
 github.com/beorn7/perks v1.0.0/go.mod h1:KWe93zE9D1o94FZ5RNwFwVgaQK1VOXiVxmqh+CedLV8=

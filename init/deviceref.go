@@ -19,6 +19,8 @@ const (
 	refGptLabel
 	refFsUUID
 	refFsLabel
+	refHwPath
+	refWwID
 )
 
 // The are many ways a user can specify root partition (using name, fs uuid, fs label, gpt attribute, ...).
@@ -52,6 +54,15 @@ func (d *deviceRef) matchesBlkInfo(blk *blkInfo) bool {
 		return bytes.Equal(d.data.(UUID), blk.uuid)
 	case refFsLabel:
 		return d.data.(string) == blk.label
+	case refHwPath:
+		return blk.hwPath != "" && d.data.(string) == blk.hwPath
+	case refWwID:
+		for _, id := range blk.wwid {
+			if d.data.(string) == id {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
@@ -68,16 +79,18 @@ func calculateDevPath(parent string, partition int) string {
 }
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
-func (d *deviceRef) resolveGptRef(gptPath string, gpt gptData) {
+func (d *deviceRef) resolveGptRef(blk *blkInfo) {
 	if !d.dependsOnGpt() {
 		return
 	}
+
+	gpt := blk.data.(gptData)
 
 	for _, p := range gpt.partitions {
 		switch d.format {
 		case refGptType:
 			if bytes.Equal(d.data.(UUID), p.typeGUID) {
-				partitionPath := calculateDevPath(gptPath, p.num)
+				partitionPath := calculateDevPath(blk.path, p.num)
 				if rootAutodiscoveryMode {
 					info("autodiscovery: partition %s matches root", partitionPath)
 					if p.attributes&gptPartitionAttributeDoNotAutomount != 0 {
@@ -93,16 +106,44 @@ func (d *deviceRef) resolveGptRef(gptPath string, gpt gptData) {
 			}
 		case refGptUUID:
 			if bytes.Equal(d.data.(UUID), p.uuid) {
-				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num)}
+				*d = deviceRef{refPath, calculateDevPath(blk.path, p.num)}
 			}
 		case refGptUUIDPartoff:
 			data := d.data.(gptPartoffData)
 			if bytes.Equal(data.uuid, p.uuid) {
-				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num+data.offset)}
+				*d = deviceRef{refPath, calculateDevPath(blk.path, p.num+data.offset)}
 			}
 		case refGptLabel:
 			if d.data.(string) == p.name {
-				*d = deviceRef{refPath, calculateDevPath(gptPath, p.num)}
+				*d = deviceRef{refPath, calculateDevPath(blk.path, p.num)}
+			}
+		}
+	}
+
+	if d.format == refWwID {
+		for _, id := range blk.wwid {
+			partPrefix := id + "-part"
+			ref := d.data.(string)
+			if strings.HasPrefix(ref, partPrefix) {
+				num, err := strconv.Atoi(ref[len(partPrefix):])
+				if err != nil {
+					info("unable to parse partition number for %s", ref)
+					return
+				}
+				*d = deviceRef{refPath, calculateDevPath(blk.path, num-1)}
+			}
+		}
+	} else if d.format == refHwPath {
+		if blk.hwPath != "" {
+			partPrefix := blk.hwPath + "-part"
+			ref := d.data.(string)
+			if strings.HasPrefix(ref, partPrefix) {
+				num, err := strconv.Atoi(ref[len(partPrefix):])
+				if err != nil {
+					info("unable to parse partition number for %s", ref)
+					return
+				}
+				*d = deviceRef{refPath, calculateDevPath(blk.path, num-1)}
 			}
 		}
 	}
@@ -112,7 +153,10 @@ func (d *deviceRef) dependsOnGpt() bool {
 	return d.format == refGptType ||
 		d.format == refGptUUID ||
 		d.format == refGptUUIDPartoff ||
-		d.format == refGptLabel
+		d.format == refGptLabel ||
+		// both hwpath and wwid might include the parent device reference + "-partNN" suffix
+		d.format == refHwPath ||
+		d.format == refWwID
 }
 
 // checks whether given partition table contains active EFI service partition
@@ -199,9 +243,25 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 		label := strings.TrimPrefix(param, "/dev/disk/by-partlabel/")
 		return &deviceRef{refGptLabel, label}, nil
 	}
+	if strings.HasPrefix(param, "HWPATH=") {
+		path := strings.TrimPrefix(param, "HWPATH=")
+		return &deviceRef{refHwPath, path}, nil
+	}
+	if strings.HasPrefix(param, "/dev/disk/by-path/") {
+		path := strings.TrimPrefix(param, "/dev/disk/by-path/")
+		return &deviceRef{refHwPath, path}, nil
+	}
+	if strings.HasPrefix(param, "WWID=") {
+		id := strings.TrimPrefix(param, "WWID=")
+		return &deviceRef{refWwID, id}, nil
+	}
+	if strings.HasPrefix(param, "/dev/disk/by-id/") {
+		id := strings.TrimPrefix(param, "/dev/disk/by-id/")
+		return &deviceRef{refWwID, id}, nil
+	}
 	if strings.HasPrefix(param, "/dev/") {
 		return &deviceRef{refPath, param}, nil
 	}
 
-	return nil, fmt.Errorf("unable to parse parameter")
+	return nil, fmt.Errorf("unable to parse the device reference")
 }

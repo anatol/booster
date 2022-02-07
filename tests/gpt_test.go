@@ -117,6 +117,28 @@ func TestGptByPARTLABEL(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+func TestGptWwid(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=WWID=scsi-QEMU_QEMU_HARDDISK_-0:0-part3"},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestGptHwpath(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/gpt.img",
+		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-0:0:0:0-part3"},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 func TestGptRootAutodiscoveryExt4(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		containsESP: true,

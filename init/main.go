@@ -107,7 +107,7 @@ func markDeviceProcessed(dev string) {
 // addBlockDevice is called upon discovering a new block device e.g. via udev events or scanning sysfs.
 // devpath is a full path to the block device and should include /dev/... prefix
 // symlinks is an array of symlinks to the given block device
-func addBlockDevice(devpath string, symlinks []string) error {
+func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	// Some devices might receive multiple udev add events
 	// Avoid processing these nodes twice by tracking what has been added already
 	devicesMutex.Lock()
@@ -141,6 +141,18 @@ func addBlockDevice(devpath string, symlinks []string) error {
 	}
 
 	blk.symlinks = symlinks
+
+	if isDevice {
+		blk.wwid, err = wwid(devpath)
+		if err != nil {
+			return fmt.Errorf("%s: %v", devpath, err)
+		}
+
+		blk.hwPath, err = hwPath(devpath)
+		if err != nil {
+			return fmt.Errorf("%s: %v", devpath, err)
+		}
+	}
 
 	// check non-mountable types that require extra processing
 	switch blk.format {
@@ -188,18 +200,18 @@ func handleGptBlockDevice(blk *blkInfo) error {
 		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
 		if gpt.containsEsp() {
 			info("%s table contains active ESP, use it to discover root", blk.path)
-			cmdRoot.resolveGptRef(blk.path, gpt)
+			cmdRoot.resolveGptRef(blk)
 		}
 	} else {
-		cmdRoot.resolveGptRef(blk.path, gpt)
+		cmdRoot.resolveGptRef(blk)
 	}
 
 	if cmdResume != nil {
-		cmdResume.resolveGptRef(blk.path, gpt)
+		cmdResume.resolveGptRef(blk)
 	}
 
 	for _, m := range luksMappings {
-		m.ref.resolveGptRef(blk.path, gpt)
+		m.ref.resolveGptRef(blk)
 	}
 
 	return nil
@@ -249,7 +261,7 @@ func handleMdraidBlockDevice(blk *blkInfo) error {
 		return nil
 	}
 
-	return addBlockDevice("/dev/md/"+arrayName, nil)
+	return addBlockDevice("/dev/md/"+arrayName, false, nil)
 }
 
 func handleLvmBlockDevice(blk *blkInfo) error {
@@ -592,7 +604,7 @@ func scanSysBlock() error {
 		// some unimportant block devices (e.g. /dev/sr0) might return errors like 'no medium found'
 		// just ignore failing devices and keep enumerating
 		path := "/dev/" + d.Name()
-		go func() { check(addBlockDevice(path, nil)) }()
+		go func() { check(addBlockDevice(path, true, nil)) }()
 
 		// Probe all partitions of this block device, too:
 		target := filepath.Join("/sys/block/", d.Name())
@@ -608,7 +620,7 @@ func scanSysBlock() error {
 			partitionPath := "/dev/" + p.Name()
 			go func() {
 				waitForDeviceToProcess(path) // wait till its partition table is processed
-				check(addBlockDevice(partitionPath, nil))
+				check(addBlockDevice(partitionPath, false, nil))
 			}()
 		}
 	}

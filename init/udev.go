@@ -144,7 +144,6 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 			return nil
 		}
 		return handleMapperDeviceUevent(ev)
-
 	}
 
 	if ev.Action != "add" {
@@ -153,14 +152,15 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 
 	devPath := "/dev/" + devName
 
-	if ev.Vars["DEVTYPE"] == "partition" {
+	isPartition := ev.Vars["DEVTYPE"] == "partition"
+	if isPartition {
 		// if this device represents a partition inside a table (like GPT) then wait till the table is processed
 		parts := strings.Split(ev.Devpath, "/")
 		tablePath := "/dev/" + parts[len(parts)-2]
 		waitForDeviceToProcess(tablePath)
 	}
 
-	return addBlockDevice(devPath, nil)
+	return addBlockDevice(devPath, !isPartition, nil)
 }
 
 // handleMapperDeviceUevent handles device mapper related uevent
@@ -210,7 +210,7 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 		symlinks = append(symlinks, lvmLinkPath)
 	}
 
-	return addBlockDevice(devPath, symlinks)
+	return addBlockDevice(devPath, false, symlinks)
 }
 
 // devMapperUpdateUdevDb writes Udev state to the database.
