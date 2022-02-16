@@ -338,9 +338,18 @@ func (img *Image) AppendElfDependencies(ef *elf.File) error {
 		libs = append(libs, interp)
 	}
 
-	for _, p := range libs {
-		if !filepath.IsAbs(p) {
-			p = filepath.Join("/usr/lib", p)
+	for _, lib := range libs {
+		var p string
+		if filepath.IsAbs(lib) {
+			p = lib
+		} else {
+			p = filepath.Join("/usr/lib", lib)
+
+			// XXX: Workaround to support libraries located in /lib.
+			_, err := os.Open(p)
+			if os.IsNotExist(err) {
+				p = filepath.Join("/lib", lib)
+			}
 		}
 		err := img.AppendFile(p)
 		if err != nil {
