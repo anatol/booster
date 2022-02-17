@@ -223,6 +223,12 @@ func appendCompatibilitySymlinks(img *Image) error {
 	}
 
 	for _, l := range symlinks {
+		// Ensure that target always exist which may not be the
+		// case if we only install files from /lib or /bin.
+		if err := img.AppendDirEntry(l.target); err != nil {
+			return err
+		}
+
 		mode := cpio.FileMode(0777) | cpio.ModeSymlink
 		if err := img.AppendEntry(l.src, mode, []byte(l.target)); err != nil {
 			return err
