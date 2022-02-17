@@ -184,7 +184,16 @@ func (k *Kmod) resolveDependencies() error {
 			deps = append(deps, d...)
 		}
 		if d, exist := softPreDeps[name]; exist {
-			deps = append(deps, d...)
+			if k.universal {
+				deps = append(deps, d...)
+			} else {
+				// filter out soft dependencies
+				for _, d1 := range d {
+					if k.hostModules[d1] {
+						deps = append(deps, d1)
+					}
+				}
+			}
 		}
 		if d, exist := k.extraDep[name]; exist {
 			deps = append(deps, d...)
@@ -198,8 +207,11 @@ func (k *Kmod) resolveDependencies() error {
 		}
 
 		if deps, exist := softPostDeps[name]; exist {
-			k.postDependencies[name] = deps
 			for _, d := range deps {
+				if !k.universal && !k.hostModules[d] {
+					continue
+				}
+				k.postDependencies[name] = append(k.postDependencies[name], d)
 				depsToVisit.PushBack(d)
 			}
 		}
@@ -509,18 +521,30 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, map[string][
 				continue
 			}
 
-			if n := k.resolveModname(d); n != "" {
-				if preDeps {
-					pre[modname] = append(pre[modname], n)
-				} else if postDeps {
-					post[modname] = append(post[modname], n)
-				} else {
-					return nil, nil, fmt.Errorf("unable parse dependencies for a softdep: %s", line)
+			var deps []string
+			aliases, err := matchAlias(d, k.aliases)
+			if err != nil {
+				return nil, nil, err
+			}
+			if aliases != nil {
+				for _, a := range aliases {
+					deps = append(deps, a.module)
 				}
 			} else {
-				// this is not the error as some existing softdeps are weird, e.g. there is a dependency 'aead2'
-				// but there is no such module
-				debug("softdep: unable to resolve module name %s", d)
+				d = k.resolveModname(d)
+				if d == "" {
+					// kernel includes softdeps to non-existent modules for some reason
+					continue
+				}
+				deps = []string{d}
+			}
+
+			if preDeps {
+				pre[modname] = append(pre[modname], deps...)
+			} else if postDeps {
+				post[modname] = append(post[modname], deps...)
+			} else {
+				return nil, nil, fmt.Errorf("unable parse dependencies for a softdep: %s", line)
 			}
 		}
 	}
@@ -548,17 +572,6 @@ func matchAlias(needle string, aliases []alias) ([]alias, error) {
 	return result, nil
 }
 
-// matches needed using simple string comparison instead of using path matching
-// returns the match module name
-func firstExactAliasMatch(needle string, aliases []alias) string {
-	for _, a := range aliases {
-		if a.pattern == needle {
-			return a.module
-		}
-	}
-	return ""
-}
-
 // resolveModname tries to resolve and normalize to its canonical name
 // return empty stream if cannot normalize it
 func (k *Kmod) resolveModname(name string) string {
@@ -571,7 +584,8 @@ func (k *Kmod) resolveModname(name string) string {
 		return normalizedMod
 	}
 
-	return firstExactAliasMatch(name, k.aliases)
+	debug("unable to resolve module name %s", name)
+	return ""
 }
 
 func normalizeModuleName(mod string) string {

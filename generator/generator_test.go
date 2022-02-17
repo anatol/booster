@@ -327,6 +327,7 @@ func testSoftDependencies(t *testing.T) {
 		hostModules:      []string{"foo"},
 		softDeps:         []string{"foo abuiltinfoo pre: a b post: c d"},
 		builtin:          []string{"kernel/arch/x86/kernel/abuiltinfoo.ko"},
+		universal:        true,
 		unpackImage:      true,
 	}
 	createTestInitRamfs(t, &opts)
