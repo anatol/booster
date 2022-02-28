@@ -31,7 +31,7 @@ type generatorConfig struct {
 	modulesDir              string
 	debug                   bool
 	readDeviceAliases       func() (set, error)
-	readHostModules         func() (set, error)
+	readHostModules         func(kernelVer string) (set, error)
 	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
 	enableLVM               bool

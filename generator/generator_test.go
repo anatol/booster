@@ -139,12 +139,16 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(opts.softDeps), 0644))
 	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(opts.hostModules), 0644))
 
-	listAsFunc := func(in []string) func() (set, error) {
+	listAsSet := func(in []string) set {
 		out := make(set)
 		for _, a := range in {
 			out[a] = true
 		}
-		return func() (set, error) { return out, nil }
+		return out
+	}
+
+	listAsFunc := func(in []string) func() (set, error) {
+		return func() (set, error) { return listAsSet(in), nil }
 	}
 
 	compression := opts.compression
@@ -160,7 +164,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		modulesDir:           modulesDir,
 		output:               wd + "/booster.img",
 		readDeviceAliases:    listAsFunc(opts.hostAliases),
-		readHostModules:      listAsFunc(opts.hostModules),
+		readHostModules:      func(ver string) (set, error) { return listAsSet(opts.hostModules), nil },
 		readModprobeOptions:  func() (map[string]string, error) { return opts.modprobeOptions, nil },
 		extraFiles:           opts.extraFiles,
 		modules:              opts.extraModules,

@@ -67,7 +67,7 @@ func NewKmod(conf *generatorConfig) (*Kmod, error) {
 
 	var err error
 	// find all modules currently used at the host
-	kmod.hostModules, err = conf.readHostModules()
+	kmod.hostModules, err = conf.readHostModules(conf.kernelVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -689,19 +689,24 @@ func readDeviceAliases() (set, error) {
 	return aliases, err
 }
 
-var errNoConfigFile = fmt.Errorf("unable to find a config file in /proc")
+var errNoConfigFile = fmt.Errorf("unable to find a config for the kernel")
 
 // readCompiledInComponents reads/parses /proc/config file and finds all compiled-in config options (i.e. those having 'Y')
 // the function tries to open /proc/config and /proc/config.gz, if having problems with it then the function returns errNoConfigFile
-func readCompiledInComponents() (set, error) {
+func readCompiledInComponents(kernelVersion string) (set, error) {
 	var r io.Reader
 
-	if f, err := os.Open("/proc/config"); err == nil {
-		debug("reading /proc/config")
+	if f, err := os.Open("/boot/config-" + kernelVersion); err == nil {
+		// Fedora does not have /proc/config. Instead it stores config at /boot.
+		debug("reading %s", f.Name())
+		defer f.Close()
+		r = f
+	} else if f, err := os.Open("/proc/config"); err == nil {
+		debug("reading %s", f.Name())
 		defer f.Close()
 		r = f
 	} else if gz, err := os.Open("/proc/config.gz"); err == nil {
-		debug("reading /proc/config.gz")
+		debug("reading %s", gz.Name())
 		defer gz.Close()
 
 		r, err = gzip.NewReader(gz)
@@ -732,7 +737,7 @@ func readCompiledInComponents() (set, error) {
 	return result, nil
 }
 
-func readHostModules() (set, error) {
+func readHostModules(kernelVersion string) (set, error) {
 	// Unlike /proc/modules (or `lsmod`) /sys/module provides information about builtin modules as well.
 	// And we need to check the built-in modules and try to add it to the image. This is needed because
 	// with the next kernel this built-in module might be compiled as loadable *.ko module.
@@ -757,7 +762,7 @@ func readHostModules() (set, error) {
 	// some built-in modules are not reported at /proc/modules, e.g. ext4
 	// so in addition to reading /proc/modules we read /proc/config and see if some modules are compiled-in so we force adding them to
 	// 'active' modules
-	compiledIn, err := readCompiledInComponents()
+	compiledIn, err := readCompiledInComponents(kernelVersion)
 	if err == errNoConfigFile {
 		debug("%v", err)
 	} else if err != nil {
