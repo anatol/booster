@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -173,4 +174,14 @@ func check(err error) {
 	if err != nil {
 		severe("%v", err)
 	}
+}
+
+func unwrapExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Errorf("%v: %v", err, string(exitErr.Stderr))
+	}
+	return err
 }

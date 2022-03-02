@@ -100,7 +100,9 @@ func loadKeymap(keymap, keymapToggle string, isUtf bool) ([]byte, error) {
 		args = append(args, keymapToggle)
 	}
 
-	return exec.Command("loadkeys", args...).Output()
+	blob, err := exec.Command("loadkeys", args...).Output()
+	err = unwrapExitError(err)
+	return blob, err
 }
 
 func readFontFile(font string) (blob []byte, err error) {

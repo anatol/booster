@@ -248,9 +248,9 @@ func handleMdraidBlockDevice(blk *blkInfo) error {
 		return fmt.Errorf("unknown raid level for device %s", blk.path)
 	}
 
-	out, err := exec.Command("mdadm", "--export", "--incremental", blk.path).CombinedOutput()
+	out, err := exec.Command("mdadm", "--export", "--incremental", blk.path).Output()
 	if err != nil {
-		return err
+		return unwrapExitError(err)
 	}
 
 	props := parseProperties(string(out))
@@ -276,10 +276,9 @@ func handleLvmBlockDevice(blk *blkInfo) error {
 	info("scanning lvm physical volume %s", blk.path)
 	cmd := exec.Command("lvm", "pvscan", "--cache", "-aay", blk.path)
 	if verbosityLevel >= levelDebug {
-		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 	}
-	return cmd.Run()
+	return unwrapExitError(cmd.Run())
 }
 
 func resume(devpath string) error {
@@ -299,17 +298,15 @@ func fsck(dev string) error {
 	if _, err := os.Stat("/usr/bin/fsck"); !os.IsNotExist(err) {
 		cmd := exec.Command("/usr/bin/fsck", "-y", dev)
 		if verbosityLevel >= levelDebug {
-			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
 		}
 		if err := cmd.Run(); err != nil {
 			if err, ok := err.(*exec.ExitError); ok {
-				code := err.ExitCode()
-				code &^= 0x1 // bit 1 means errors were corrected successfully which is good
-
-				if code != 0 {
-					return fmt.Errorf("fsck for %s failed with code 0x%x\n%s", dev, err.ExitCode(), string(err.Stderr))
+				if err.ExitCode()&^0x1 != 0 {
+					// bit 1 means errors were corrected successfully which is good
+					return unwrapExitError(err)
 				}
+				return nil
 			}
 
 			return fmt.Errorf("fsck for %s: unknown error %v", dev, err)

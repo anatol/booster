@@ -127,7 +127,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 	return err
 }
 
-func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
+func stripElf(in []byte, stripAll bool) ([]byte, error) {
 	t, err := os.CreateTemp("", "booster.strip")
 	if err != nil {
 		return nil, err
@@ -147,8 +147,8 @@ func stripElf(name string, in []byte, stripAll bool) ([]byte, error) {
 		args = append(args, "--strip-unneeded")
 	}
 	args = append(args, t.Name())
-	if out, err := exec.Command("strip", args...).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("%s: %v\n%s", name, err, string(out))
+	if err := exec.Command("strip", args...).Run(); err != nil {
+		return nil, unwrapExitError(err)
 	}
 
 	return os.ReadFile(t.Name())
@@ -189,7 +189,7 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 			if doStrip {
 				// do not use --strip-all for modules/shared libs as it fails to load
 				isBinary := ef.Type == elf.ET_EXEC
-				content, err = stripElf(dest, content, isBinary)
+				content, err = stripElf(content, isBinary)
 				if err != nil {
 					return err
 				}

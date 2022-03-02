@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os/exec"
 	"regexp"
 
 	"golang.org/x/sys/unix"
@@ -48,4 +50,14 @@ func increaseOpenFileLimit() {
 	if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &limit); err != nil {
 		warning("unable to increase open file limit: %v", err)
 	}
+}
+
+func unwrapExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Errorf("%v: %v", err, string(exitErr.Stderr))
+	}
+	return err
 }
