@@ -19,7 +19,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 	if err != nil {
 		return nil, err
 	}
-	vprop := parseProperties(string(vconf))
+	vprop := parseProperties(string(vconf), true)
 
 	// adding keymap
 	if keymap, ok := vprop["KEYMAP"]; ok {
@@ -27,7 +27,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 		if err != nil {
 			return nil, err
 		}
-		lprop := parseProperties(string(lconf))
+		lprop := parseProperties(string(lconf), true)
 
 		lang := lprop["LANG"]
 		debug("detected language - '%s'", lang)

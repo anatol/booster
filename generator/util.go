@@ -4,17 +4,24 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// parseProperties parses input in form of "PROP1=VAL1\nPROP2=VAL2\n..." into a map
-func parseProperties(data string) map[string]string {
-	re := regexp.MustCompile(`(\w+)=(\S+)`)
+// parseProperties parses input in form of "PROP1=VAL1\nPROP2=VAL2\n..." into a map.
+// whitespace are stripped from values.
+// parameter strip specifies whether values should strip leading+trailing quotes
+func parseProperties(data string, strip bool) map[string]string {
+	re := regexp.MustCompile(`(\w+)=\s*(\S+)\s*`)
 	matches := re.FindAllStringSubmatch(data, -1)
 	result := make(map[string]string)
 	for _, m := range matches {
-		result[m[1]] = m[2]
+		value := m[2]
+		if strip {
+			value = stripQuotes(strings.TrimSpace(value))
+		}
+		result[m[1]] = value
 	}
 
 	return result
@@ -60,4 +67,14 @@ func unwrapExitError(err error) error {
 		return fmt.Errorf("%v: %v", err, string(exitErr.Stderr))
 	}
 	return err
+}
+
+// stripQuotes removes leading and trailing quote symbols if they wrap the given sentence
+func stripQuotes(in string) string {
+	l := len(in)
+	if in[0] == '"' && in[l-1] == '"' {
+		return in[1 : l-1]
+	}
+
+	return in
 }
