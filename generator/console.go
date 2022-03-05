@@ -7,8 +7,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 )
+
+// path to console fonts, adjust it to your distro (e.g. Fedora uses /usr/lib/kbd/consolefonts path for it)
+const consolefontsDir = "/usr/share/kbd/consolefonts/"
 
 func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*VirtualConsole, error) {
 	debug("enabling virtual console")
@@ -106,14 +110,14 @@ func loadKeymap(keymap, keymapToggle string, isUtf bool) ([]byte, error) {
 }
 
 func readFontFile(font string) (blob []byte, err error) {
-	entries, err := os.ReadDir("/usr/share/kbd/consolefonts/")
+	entries, err := os.ReadDir(consolefontsDir)
 	if err != nil {
 		return nil, err
 	}
 	for _, d := range entries {
 		name := d.Name()
 		if strings.HasPrefix(name, font+".") {
-			fileName := "/usr/share/kbd/consolefonts/" + name
+			fileName := path.Join(consolefontsDir, name)
 			debug("font %s matched to file %s", font, fileName)
 			blob, err := os.ReadFile(fileName)
 			if err != nil {
