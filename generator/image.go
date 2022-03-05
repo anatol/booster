@@ -320,10 +320,28 @@ func elfSectionContent(s *elf.Section) (string, error) {
 	return string(b[:bytes.IndexByte(b, '\x00')]), nil
 }
 
-func (img *Image) AppendElfDependencies(ef *elf.File) error {
+var elfLibDir = []string{"/usr/lib", "/lib", "/usr/lib64"}
+
+// for a given library (e.g. libc.so.6) finds absolute path to the library file
+func elfPath(lib string) string {
+	if filepath.IsAbs(lib) {
+		return lib
+	}
+
 	// TODO: use ef.DynString(elf.DT_RPATH) to calculate path to the loaded library
 	// or maybe we can parse /etc/ld.so.cache to get location for all libs?
+	for _, elfDir := range elfLibDir {
+		elfPath := filepath.Join(elfDir, lib)
+		if _, err := os.Stat(elfPath); err != nil {
+			continue
+		}
+		return elfPath
+	}
 
+	return ""
+}
+
+func (img *Image) AppendElfDependencies(ef *elf.File) error {
 	libs, err := ef.ImportedLibraries()
 	if err != nil {
 		return err
@@ -339,20 +357,12 @@ func (img *Image) AppendElfDependencies(ef *elf.File) error {
 	}
 
 	for _, lib := range libs {
-		var p string
-		if filepath.IsAbs(lib) {
-			p = lib
-		} else {
-			p = filepath.Join("/usr/lib", lib)
-
-			// XXX: Workaround to support libraries located in /lib.
-			_, err := os.Open(p)
-			if os.IsNotExist(err) {
-				p = filepath.Join("/lib", lib)
-			}
+		p := elfPath(lib)
+		if p == "" {
+			return fmt.Errorf("unable to find path to library %v", lib)
 		}
-		err := img.AppendFile(p)
-		if err != nil {
+
+		if err := img.AppendFile(p); err != nil {
 			return err
 		}
 	}
