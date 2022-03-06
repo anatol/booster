@@ -157,7 +157,7 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 		// if this device represents a partition inside a table (like GPT) then wait till the table is processed
 		parts := strings.Split(ev.Devpath, "/")
 		tablePath := "/dev/" + parts[len(parts)-2]
-		addTableNameForDevice(devPath, tablePath)
+		waitForDeviceToProcess(tablePath)
 	}
 
 	return addBlockDevice(devPath, nil)

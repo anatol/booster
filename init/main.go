@@ -78,28 +78,18 @@ var (
 
 	seenDevices       = make(set) // devices that are already seen by the system, the devices might be fully processed or processing right now
 	processingDevices = make(map[string]*sync.WaitGroup)
-	partitionTables   = make(map[string]string) // devicePath -> tablePath map e.g. "/dev/sda1"->"/dev/sda"
 )
 
-func addTableNameForDevice(devPath string, tablePath string) {
-	devicesMutex.Lock()
-	partitionTables[devPath] = tablePath
-	devicesMutex.Unlock()
-}
-
-func waitForTableToProcess(dev string) {
+// waitForDeviceToProcess waits till the given device gets handled.
+func waitForDeviceToProcess(dev string) {
 	devicesMutex.Lock()
 
-	table, ok := partitionTables[dev]
+	wg, ok := processingDevices[dev]
 	if !ok {
-		devicesMutex.Unlock()
-		return
-	}
-
-	wg, ok := processingDevices[table]
-	if !ok {
-		devicesMutex.Unlock()
-		return
+		// if given device does not have any waitgroups, create one and wait till it is completed
+		wg = &sync.WaitGroup{}
+		wg.Add(1)
+		processingDevices[dev] = wg
 	}
 	devicesMutex.Unlock()
 
@@ -112,7 +102,6 @@ func markDeviceProcessed(dev string) {
 
 	wg := processingDevices[dev]
 	wg.Done()
-	delete(processingDevices, dev)
 }
 
 // addBlockDevice is called upon discovering a new block device e.g. via udev events or scanning sysfs.
@@ -127,9 +116,12 @@ func addBlockDevice(devpath string, symlinks []string) error {
 		devicesMutex.Unlock()
 		return nil
 	}
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	processingDevices[devpath] = wg
+	_, ok := processingDevices[devpath]
+	if !ok {
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		processingDevices[devpath] = wg
+	}
 	devicesMutex.Unlock()
 	defer markDeviceProcessed(devpath)
 
@@ -163,10 +155,6 @@ func addBlockDevice(devpath string, symlinks []string) error {
 	}
 
 	if cmdResume != nil {
-		if cmdResume.dependsOnGpt() {
-			waitForTableToProcess(devpath)
-		}
-
 		if cmdResume.matchesBlkInfo(blk) {
 			if err := resume(devpath); err != nil {
 				return err
@@ -174,9 +162,6 @@ func addBlockDevice(devpath string, symlinks []string) error {
 		}
 	}
 
-	if cmdRoot.dependsOnGpt() {
-		waitForTableToProcess(devpath)
-	}
 	if cmdRoot.matchesBlkInfo(blk) {
 		if blk.format == "" && rootFsType != "" {
 			blk.format = rootFsType
@@ -621,8 +606,10 @@ func scanSysBlock() error {
 				continue
 			}
 			partitionPath := "/dev/" + p.Name()
-			addTableNameForDevice(partitionPath, path)
-			go func() { check(addBlockDevice(partitionPath, nil)) }()
+			go func() {
+				waitForDeviceToProcess(path) // wait till its partition table is processed
+				check(addBlockDevice(partitionPath, nil))
+			}()
 		}
 	}
 	return nil

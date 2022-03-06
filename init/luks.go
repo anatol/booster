@@ -380,7 +380,6 @@ func luksOpen(dev string, mapping *luksMapping) error {
 }
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
-	waitForTableToProcess(blk.path)
 	for _, m := range luksMappings {
 		if m.ref.matchesBlkInfo(blk) {
 			return &m
