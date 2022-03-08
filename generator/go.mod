@@ -7,7 +7,6 @@ require (
 	github.com/google/renameio v1.0.1
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/klauspost/compress v1.14.3
-	github.com/pierrec/lz4/v4 v4.1.15-0.20220212190856-bc1239ba9073
 	github.com/stretchr/testify v1.7.0
 	github.com/ulikunitz/xz v0.5.10
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8

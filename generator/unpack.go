@@ -9,7 +9,6 @@ import (
 
 	"github.com/cavaliercoder/go-cpio"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4/v4"
 	"github.com/ulikunitz/xz"
 )
 
@@ -58,10 +57,11 @@ func processImage(file string, fn processCpioEntryFn) error {
 		}
 		img = cpio.NewReader(x)
 	case "lz4":
-		lz := lz4.NewReader(input)
-		if err := lz.Apply(lz4.LegacyOption(true)); err != nil {
+		lz, err := newLz4Reader(input)
+		if err != nil {
 			return err
 		}
+		defer lz.Close()
 		img = cpio.NewReader(lz)
 	}
 

@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4/v4"
 	"github.com/xi2/xz" // github.com/xi2/xz is faster so we use it here https://github.com/ulikunitz/xz/issues/23
 )
 
@@ -300,7 +299,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 		case ".zst":
 			r, err = zstd.NewReader(f)
 		case ".lz4":
-			r = lz4.NewReader(f)
+			r, err = newLz4Reader(f)
 		case ".gz":
 			r, err = gzip.NewReader(f)
 		default:
