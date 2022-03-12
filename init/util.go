@@ -33,7 +33,7 @@ func fixedArrayToString(buff []byte) string {
 
 func macListContains(value net.HardwareAddr, list []net.HardwareAddr) bool {
 	for _, v := range list {
-		if bytes.Compare(v, value) == 0 {
+		if bytes.Equal(v, value) {
 			return true
 		}
 	}
