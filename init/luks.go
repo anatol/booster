@@ -381,14 +381,14 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
-		if m.ref.matchesBlkInfo(blk) {
+		if blk.matchesRef(m.ref) {
 			return &m
 		}
 	}
 
 	// a special case coming from autodiscoverable partitions https://systemd.io/DISCOVERABLE_PARTITIONS/
 	// is to check whether this partition was specified as a 'root' and if yes - mount it and re-point root to the new location under /dev/mapper/xxx)
-	if cmdRoot.matchesBlkInfo(blk) {
+	if blk.matchesRef(cmdRoot) {
 		info("LUKS device %s matches root=, unlock this device", blk.path)
 		m := &luksMapping{
 			ref:  cmdRoot,

@@ -167,14 +167,14 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	}
 
 	if cmdResume != nil {
-		if cmdResume.matchesBlkInfo(blk) {
+		if blk.matchesRef(cmdResume) {
 			if err := resume(devpath); err != nil {
 				return err
 			}
 		}
 	}
 
-	if cmdRoot.matchesBlkInfo(blk) {
+	if blk.matchesRef(cmdRoot) {
 		if blk.format == "" && rootFsType != "" {
 			blk.format = rootFsType
 			blk.isFs = true
@@ -200,18 +200,18 @@ func handleGptBlockDevice(blk *blkInfo) error {
 		// per DiscoverablePartitionsSpec: "the first partition with this GUID on the disk containing the active EFI ESP is automatically mounted to the root directory /."
 		if gpt.containsEsp() {
 			info("%s table contains active ESP, use it to discover root", blk.path)
-			cmdRoot.resolveGptRef(blk)
+			blk.resolveGptRef(cmdRoot)
 		}
 	} else {
-		cmdRoot.resolveGptRef(blk)
+		blk.resolveGptRef(cmdRoot)
 	}
 
 	if cmdResume != nil {
-		cmdResume.resolveGptRef(blk)
+		blk.resolveGptRef(cmdResume)
 	}
 
 	for _, m := range luksMappings {
-		m.ref.resolveGptRef(blk)
+		blk.resolveGptRef(m.ref)
 	}
 
 	return nil

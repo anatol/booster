@@ -35,7 +35,7 @@ type gptPartoffData struct {
 	offset int
 }
 
-func (d *deviceRef) matchesBlkInfo(blk *blkInfo) bool {
+func (blk *blkInfo) matchesRef(d *deviceRef) bool {
 	switch d.format {
 	case refPath:
 		path := d.data.(string)
@@ -79,7 +79,7 @@ func calculateDevPath(parent string, partition int) string {
 }
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
-func (d *deviceRef) resolveGptRef(blk *blkInfo) {
+func (blk *blkInfo) resolveGptRef(d *deviceRef) {
 	if !d.dependsOnGpt() {
 		return
 	}
