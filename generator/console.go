@@ -136,7 +136,6 @@ func readFontFile(font string) (blob []byte, err error) {
 				if err != nil {
 					return nil, err
 				}
-				name = name[:len(name)-3] // remove .gz suffix from the name
 			}
 
 			return blob, nil
