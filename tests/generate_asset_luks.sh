@@ -22,6 +22,12 @@ if [ "$CLEVIS_PIN" == "tpm2" ]; then
   swtpm socket --tpmstate dir=assets/tpm2.generate --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear &
 fi
 
+if [ "$CLEVIS_PIN" == "remote" ]; then
+  mkdir -p assets/remote
+  tang-keys create assets/remote sig exc
+  tang-keys adv --output assets/remote/adv.json assets/remote/*.jwk
+fi
+
 truncate --size 40M $OUTPUT
 lodev=$(sudo losetup -f --show $OUTPUT)
 sudo cryptsetup luksFormat --uuid $LUKS_UUID --type $LUKS_TYPE $lodev <<<"$LUKS_PASSWORD"
