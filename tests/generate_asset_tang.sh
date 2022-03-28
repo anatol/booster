@@ -1,3 +1,3 @@
 mkdir assets/tang
-/usr/lib/tangd-keygen assets/tang sig exc
-/usr/lib/tangd assets/tang <<<$'GET /adv HTTP/1.1\n\n' | grep payload >assets/tang/adv.json
+tang-keys create assets/tang sig exc
+tang-keys adv --output assets/tang/adv.json assets/tang/*.jwk
