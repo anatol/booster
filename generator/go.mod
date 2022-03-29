@@ -3,7 +3,7 @@ module booster
 go 1.17
 
 require (
-	github.com/cavaliercoder/go-cpio v0.0.0-20180626203310-925f9528c45e
+	github.com/cavaliergopher/cpio v1.0.1
 	github.com/google/renameio v1.0.1
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/klauspost/compress v1.15.1

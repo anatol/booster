@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cavaliercoder/go-cpio"
+	"github.com/cavaliergopher/cpio"
 	"github.com/google/renameio"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
@@ -113,7 +113,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 
 	hdr := &cpio.Header{
 		Name: strings.TrimPrefix(dir, "/"),
-		Mode: cpio.FileMode(0755) | cpio.ModeDir,
+		Mode: cpio.FileMode(0755) | cpio.TypeDir,
 	}
 	img.m.Lock()
 	err := img.out.WriteHeader(hdr)
@@ -196,7 +196,7 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 		}
 	}
 
-	mode := cpio.FileMode(osMode) | cpio.ModeRegular
+	mode := cpio.FileMode(osMode) | cpio.TypeReg
 	return img.AppendEntry(dest, mode, content)
 }
 
@@ -236,7 +236,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 
-		mode := cpio.FileMode(fi.Mode().Perm()) | cpio.ModeSymlink
+		mode := cpio.FileMode(fi.Mode().Perm()) | cpio.TypeSymlink
 		if err := img.AppendEntry(fn, mode, []byte(linkTarget)); err != nil {
 			return err
 		}

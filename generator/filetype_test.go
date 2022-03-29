@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cavaliercoder/go-cpio"
+	"github.com/cavaliergopher/cpio"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +15,7 @@ func TestFileType(t *testing.T) {
 		img, err := NewImage(fileName, compression, false)
 		require.NoError(t, err)
 
-		require.NoError(t, img.AppendEntry("foo.txt", cpio.ModeRegular, []byte("hello, world!")))
+		require.NoError(t, img.AppendEntry("foo.txt", cpio.TypeReg, []byte("hello, world!")))
 		require.NoError(t, img.Close())
 
 		f, err := os.Open(fileName)

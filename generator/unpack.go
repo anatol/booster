@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cavaliercoder/go-cpio"
+	"github.com/cavaliergopher/cpio"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
@@ -95,15 +95,15 @@ func runUnpack() error {
 		}
 		m := hdr.Mode &^ cpio.ModePerm
 		switch m {
-		case cpio.ModeDir:
+		case cpio.TypeDir:
 			if err := os.Mkdir(out, 0755); err != nil {
 				return err
 			}
-		case cpio.ModeSymlink:
+		case cpio.TypeSymlink:
 			if err := os.Symlink(hdr.Linkname, out); err != nil {
 				return err
 			}
-		case cpio.ModeRegular:
+		case cpio.TypeReg:
 			fout, err := os.Create(out)
 			if err != nil {
 				return err
@@ -136,11 +136,11 @@ func runLs() error {
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
 		m := hdr.Mode &^ cpio.ModePerm
 		switch m {
-		case cpio.ModeDir:
+		case cpio.TypeDir:
 			fmt.Printf("%s/\n", hdr.Name)
-		case cpio.ModeSymlink:
+		case cpio.TypeSymlink:
 			fmt.Printf("%s -> %s\n", hdr.Name, hdr.Linkname)
-		case cpio.ModeRegular:
+		case cpio.TypeReg:
 			fmt.Println(hdr.Name)
 		default:
 			warning("Unknown mode for file %s: %x", hdr.Name, m)

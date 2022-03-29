@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cavaliercoder/go-cpio"
+	"github.com/cavaliergopher/cpio"
 	"gopkg.in/yaml.v3"
 )
 
@@ -229,7 +229,7 @@ func appendCompatibilitySymlinks(img *Image) error {
 			return err
 		}
 
-		mode := cpio.FileMode(0777) | cpio.ModeSymlink
+		mode := cpio.FileMode(0777) | cpio.TypeSymlink
 		if err := img.AppendEntry(l.src, mode, []byte(l.target)); err != nil {
 			return err
 		}
