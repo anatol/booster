@@ -52,8 +52,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			return nil, err
 		}
 		// config sanity check
-		if net := u.Network; net != nil {
-			if net.Dhcp && (net.IP != "" || net.Gateway != "") {
+		if n := u.Network; n != nil {
+			if n.Dhcp && (n.IP != "" || n.Gateway != "") {
 				return nil, fmt.Errorf("config: option network.(ip|gateway) cannot be used together with network.dhcp")
 			}
 		}
