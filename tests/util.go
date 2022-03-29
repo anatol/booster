@@ -30,7 +30,7 @@ var (
 	kernelVersions map[string]string
 )
 
-func copy(src, dst string) (int64, error) {
+func copyFile(src, dst string) (int64, error) {
 	sourceFileStat, err := os.Stat(src)
 	if err != nil {
 		return 0, err
@@ -65,7 +65,7 @@ func startSwtpm() (*os.Process, []string, error) {
 
 	_ = os.Remove("assets/tpm2/.lock")
 	_ = os.Remove("assets/swtpm-sock") // sometimes process crashes and leaves this file
-	if _, err := copy("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
+	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
 		return nil, nil, err
 	}
 
