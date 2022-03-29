@@ -3,8 +3,9 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"init/quirk"
 	"os"
+
+	"github.com/anatol/booster/init/quirk"
 )
 
 const (

@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"tests/israce"
 	"time"
 
+	"github.com/anatol/booster/tests/israce"
 	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"

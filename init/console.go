@@ -3,13 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"init/quirk"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
 	"unsafe"
 
+	"github.com/anatol/booster/init/quirk"
 	"golang.org/x/sys/unix"
 )
 
