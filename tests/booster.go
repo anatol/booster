@@ -218,7 +218,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 			"INITRAMFS_IMAGE=" + initRamfs,
 		}
 		env = append(env, opts.scriptEnvvars...)
-		require.NoError(t, shell("generate_asset_esp.sh", env...))
+		require.NoError(t, shell("generators/esp.sh", env...))
 
 		disks = append(disks, vmtest.QemuDisk{Path: output, Format: "raw"})
 	}

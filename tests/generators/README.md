@@ -1,0 +1,1 @@
+Scripts to generate assets and images for integration tests

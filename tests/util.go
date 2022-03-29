@@ -48,10 +48,8 @@ func copy(src, dst string) (int64, error) {
 func startSwtpm() (*os.Process, []string, error) {
 	_ = os.Mkdir("assets", 0755)
 
-	if exists := fileExists("assets/tpm2/tpm2-00.permall.pristine"); !exists {
-		if err := shell("generate_asset_swtpm.sh"); err != nil {
-			return nil, nil, err
-		}
+	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
+		return nil, nil, err
 	}
 
 	_ = os.Remove("assets/tpm2/.lock")
@@ -80,10 +78,8 @@ func startSwtpm() (*os.Process, []string, error) {
 func startTangd() (*tang.NativeServer, []string, error) {
 	_ = os.Mkdir("assets", 0755)
 
-	if exists := fileExists("assets/tang/adv.json"); !exists {
-		if err := shell("generate_asset_tang.sh"); err != nil {
-			return nil, nil, err
-		}
+	if err := checkAsset("assets/tang/adv.json"); err != nil {
+		return nil, nil, err
 	}
 
 	tangd, err := tang.NewNativeServer("assets/tang", 0)
