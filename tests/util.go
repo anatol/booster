@@ -89,7 +89,7 @@ func startSwtpm() (*os.Process, []string, error) {
 func startTangd() (*tang.NativeServer, []string, error) {
 	_ = os.Mkdir("assets", 0755)
 
-	if err := checkAsset("assets/tang/adv.json"); err != nil {
+	if err := checkAsset("assets/tang/key.pub"); err != nil {
 		return nil, nil, err
 	}
 

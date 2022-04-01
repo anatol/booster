@@ -152,7 +152,7 @@ func TestRemoteUnlock(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// unlock remotely
-	cmd := exec.Command("unlock-remote", "localhost:34551", "assets/remote/exc.jwk", "assets/remote/sig.jwk")
+	cmd := exec.Command("tangctl", "unlock", "localhost:34551", "assets/remote/key.priv")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

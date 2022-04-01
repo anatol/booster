@@ -24,8 +24,9 @@ fi
 
 if [ "$CLEVIS_PIN" == "remote" ]; then
   mkdir -p assets/remote
-  tang-keys create assets/remote sig exc
-  tang-keys adv --output assets/remote/adv.json assets/remote/*.jwk
+  tangctl create > assets/remote/key.priv
+  tangctl public assets/remote/key.priv > assets/remote/key.pub
+
 fi
 
 truncate --size 40M $OUTPUT

@@ -7,7 +7,7 @@ require (
 	github.com/anatol/devmapper.go v0.0.0-20211210164347-f67e20c4e7f7
 	github.com/anatol/luks.go v0.0.0-20211210165108-5d9a15b4f614
 	github.com/anatol/smart.go v0.0.0-20220218195151-5ee9e8fa73f0
-	github.com/anatol/tang.go v0.0.0-20220328030819-a890bfcf8130
+	github.com/anatol/tang.go v0.0.0-20220401181244-14a5a12378ca
 	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/anatol/vmtest v0.0.0-20211215032353-afd7b1dd38ef
 	github.com/cavaliergopher/cpio v1.0.1
@@ -21,7 +21,7 @@ require (
 	github.com/vishvananda/netlink v1.1.0
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.0.0-20220321153916-2c7772ba3064
+	golang.org/x/crypto v0.0.0-20220331220935-ae2d96664a29
 	golang.org/x/sys v0.0.0-20220330033206-e17cdc41300f
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
