@@ -9,7 +9,7 @@ quit() {
 }
 
 truncate --size 100M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 # create 4 partitions of size 10, 15, 11, 63 megabytes
 sudo fdisk $lodev <<<"g
 n
@@ -29,9 +29,7 @@ n
 
 
 w
-" || true # adding 'true' here to workaround 'Re-reading the partition table failed.: Invalid argument' error
-
-sudo partprobe $lodev
+"
 
 sudo pvcreate ${lodev}p1 ${lodev}p2 ${lodev}p4
 sudo vgcreate booster_test_vg ${lodev}p2 ${lodev}p4 ${lodev}p1

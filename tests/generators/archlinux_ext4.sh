@@ -9,7 +9,7 @@ quit() {
 
 truncate --size 1G $OUTPUT
 mkfs.ext4 $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 mount=$(mktemp -d)
 sudo mount $lodev $mount
 

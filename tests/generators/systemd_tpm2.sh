@@ -18,7 +18,7 @@ cp assets/tpm2/tpm2-00.permall.pristine assets/tpm2.generate/tpm2-00.permall
 swtpm socket --tpmstate dir=assets/tpm2.generate --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear &
 
 truncate --size 40M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 sudo cryptsetup luksFormat --uuid $LUKS_UUID --type luks2 $lodev <<<"$LUKS_PASSWORD"
 
 echo -n "$LUKS_PASSWORD" >assets/cryptenroll.passphrase

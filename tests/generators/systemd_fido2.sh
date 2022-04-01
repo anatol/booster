@@ -12,7 +12,7 @@ quit() {
 LUKS_DEV_NAME=luks-booster-systemd
 
 truncate --size 40M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 sudo cryptsetup luksFormat --uuid $LUKS_UUID --type luks2 $lodev <<<"$LUKS_PASSWORD"
 
 echo -n "$LUKS_PASSWORD" >assets/cryptenroll.passphrase

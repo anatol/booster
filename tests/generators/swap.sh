@@ -6,7 +6,7 @@ quit() {
 }
 
 truncate --size 10G $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 sudo fdisk $lodev <<<"g
 n
 
@@ -17,8 +17,6 @@ u
 c0824b8c-c4a4-4e99-bb3e-b9418db5c180
 r
 w
-" || true # Re-reading the partition table failed.: Invalid argument
-
-sudo partprobe $lodev
+"
 
 sudo mkswap --uuid 5ec330f5-ac5e-48d2-98b6-87fd3e9b272f ${lodev}p1

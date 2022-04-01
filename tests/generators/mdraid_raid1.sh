@@ -9,7 +9,7 @@ quit() {
 }
 
 truncate --size 60M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 # create 5 partitions each 10 megabytes
 sudo fdisk $lodev <<<"g
 n
@@ -48,9 +48,7 @@ t
 
 29
 w
-" || true # adding 'true' here to workaround 'Re-reading the partition table failed.: Invalid argument' error
-
-sudo partprobe $lodev
+"
 
 echo "DEVICE partitions\n" >> $OUTPUT.array
 

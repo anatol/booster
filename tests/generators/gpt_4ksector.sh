@@ -8,7 +8,7 @@ quit() {
 }
 
 truncate --size 100M $OUTPUT
-lodev=$(sudo losetup --sector-size 4096 -f --show $OUTPUT)
+lodev=$(sudo losetup --sector-size 4096 -f -P --show $OUTPUT)
 sudo fdisk $lodev <<<"g
 n
 
@@ -19,9 +19,7 @@ u
 d4699213-6e73-41d5-ad81-3daf5dfcecfb
 r
 w
-" || true # Re-reading the partition table failed.: Invalid argument
-
-sudo partprobe $lodev
+"
 
 sudo mkfs.ext4 ${lodev}p1
 dir=$(mktemp -d)

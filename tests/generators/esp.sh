@@ -13,7 +13,7 @@ quit() {
 }
 
 truncate --size 500M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 sudo gdisk $lodev <<<"o
 y
 n
@@ -40,8 +40,6 @@ w
 y
 "
 fi
-
-sudo partprobe $lodev
 
 sudo mkfs.fat -F32 ${lodev}p1
 boot_mount=$(mktemp -d)

@@ -8,7 +8,7 @@ quit() {
 }
 
 truncate --size 100M $OUTPUT
-lodev=$(sudo losetup -f --show $OUTPUT)
+lodev=$(sudo losetup -f -P --show $OUTPUT)
 # create 4 partitions of size 10, 15, 11, 63 megabytes
 sudo gdisk $lodev <<<"o
 y
@@ -65,8 +65,6 @@ m
 w
 y
 "
-
-sudo partprobe $lodev
 
 sudo mkfs.ext4 -U $FS_UUID -L $FS_LABEL ${lodev}p3
 dir=$(mktemp -d)
