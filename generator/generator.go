@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -248,8 +249,13 @@ func (img *Image) appendInitBinary(initBinary string) error {
 func (img *Image) appendExtraFiles(binaries []string) error {
 	for _, f := range binaries {
 		if !filepath.IsAbs(f) {
-			// simple names like "strace" are resolved as binaries under /usr/bin
-			f = "/usr/bin/" + f
+			// If the given name is not an absolute path, assume that it refers
+			// to an executable and lookup the path to the executable using $PATH.
+			var err error
+			f, err = exec.LookPath(f)
+			if err != nil {
+				return err
+			}
 		}
 
 		if err := img.AppendFile(f); err != nil {
