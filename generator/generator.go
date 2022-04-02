@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/cavaliergopher/cpio"
@@ -247,7 +247,7 @@ func (img *Image) appendInitBinary(initBinary string) error {
 
 func (img *Image) appendExtraFiles(binaries []string) error {
 	for _, f := range binaries {
-		if !strings.HasPrefix(f, "/") {
+		if !filepath.IsAbs(f) {
 			// simple names like "strace" are resolved as binaries under /usr/bin
 			f = "/usr/bin/" + f
 		}
