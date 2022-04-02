@@ -256,6 +256,11 @@ func (img *Image) appendExtraFiles(binaries []string) error {
 			if err != nil {
 				return err
 			}
+
+			if err := img.AppendFileTo(f, "/usr/bin"); err != nil {
+				return err
+			}
+			continue
 		}
 
 		if err := img.AppendFile(f); err != nil {
