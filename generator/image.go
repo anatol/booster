@@ -200,10 +200,14 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 	return img.AppendEntry(dest, mode, content)
 }
 
-// AppendFile appends the file + its dependencies to the ramfs file
+// AppendFileTo appends the file + its dependencies to the ramfs file at the given destination.
 // If input is a directory then content is added to the image recursively.
-func (img *Image) AppendFile(fn string) error {
+func (img *Image) AppendFileTo(fn string, destDir string) error {
 	fn = path.Clean(fn)
+	destDir = path.Clean(destDir)
+
+	// Destination path in ramfs file (according to destDir).
+	destFilePath := path.Join(destDir, path.Base(fn))
 
 	img.m.Lock()
 	if img.contains[fn] {
@@ -212,7 +216,7 @@ func (img *Image) AppendFile(fn string) error {
 	}
 	img.m.Unlock()
 
-	if err := img.AppendDirEntry(path.Dir(fn)); err != nil {
+	if err := img.AppendDirEntry(destDir); err != nil {
 		return err
 	}
 
@@ -237,7 +241,7 @@ func (img *Image) AppendFile(fn string) error {
 		}
 
 		mode := cpio.FileMode(fi.Mode().Perm()) | cpio.TypeSymlink
-		if err := img.AppendEntry(fn, mode, []byte(linkTarget)); err != nil {
+		if err := img.AppendEntry(destFilePath, mode, []byte(linkTarget)); err != nil {
 			return err
 		}
 
@@ -249,7 +253,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 	} else if fi.IsDir() {
-		if err := img.AppendDirEntry(fn); err != nil {
+		if err := img.AppendDirEntry(destFilePath); err != nil {
 			return err
 		}
 
@@ -258,7 +262,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 		for _, f := range files {
-			if err := img.AppendFile(path.Join(fn, f.Name())); err != nil {
+			if err := img.AppendFile(path.Join(destFilePath, f.Name())); err != nil {
 				return err
 			}
 		}
@@ -269,12 +273,18 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 
-		if err := img.AppendContent(fn, fi.Mode().Perm(), content); err != nil {
+		if err := img.AppendContent(destFilePath, fi.Mode().Perm(), content); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// AppendFile appends file at the same destination directory to the ramfs file.
+func (img *Image) AppendFile(fn string) error {
+	dest := path.Dir(fn)
+	return img.AppendFileTo(fn, dest)
 }
 
 // AppendEntry appends an entry to the archive
