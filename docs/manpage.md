@@ -112,6 +112,13 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     Booster also supports root [partition autodiscovery](https://systemd.io/DISCOVERABLE_PARTITIONS/) - if no `root=` parameter is specified then booster checks for partitions with specific GPT type and uses it to mount as root.
  * `rootfstype=$TYPE` (e.g. rootfstype=ext4). By default booster tries to detect the root filesystem type. But if the autodetection does not work then this kernel parameter is useful. Also please file a ticket so we can improve the code that detects filetypes.
  * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. rootflags=user_xattr,nobarrier. In partition autodiscovery mode GPT attribute 60 ("read-only") is taken into account.
+ * `rd.crypt=$deviceref;param1;param2;...` specifies a crypt device that needs to be unlocked at the boot time. params could be one of the following:
+    * `name=$NAME` name that will be used for the mounted crypto device. It is required for a bare crypto device. For a LUKS device is it optional, and if it is not specified then `luks-$LUKSUUID` name will be used.
+    * `luks.header=$fileref` location of the LUKS header for the given crypt device.
+    * `luks.slot_id=id1,id2,..` list of LUKS slots to check for password. Any other slots will be ignored.
+    * `luks.token_id=id1,id2,..` list of LUKS tokens to check for password. Any other tokens will be ignored.
+    * `options=foo,bar,baz` dm-crypt options. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
+    * `key=$type,$fileref` unlock key stored as a file. This poarameter is required for bare crypt device. `$type` could be one of the `plain`/`clevis`.
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be unsed to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request.
@@ -147,6 +154,13 @@ Device reference has one of the following values:
  * `PARTLABEL=$LABEL` or `/dev/disk/by-partlabel/$LABEL` references device by GPT partition label.
  * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by deterministic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
  * `WWID=$ID` or `/dev/disk/by-id/$ID` references device by its wwid e.g. `nvme-KXG6AZNV256G_TOSHIBA_40SA13GZF6B1-part3`
+
+### File Reference
+Some configuration options require a file content. It is specified by a file reference that has one of the following formats:
+ * `$PATH` - path relative to the root of ESP device. The path should not start with a slash.
+ * `$deviceref:$PATH` - path relative to $deviceref. $deviceref should contain one of the filesystems recognisible by booster. The path should not start with a slash.
+ * `$deviceref` - content of the $deviceref partition is considered as a file.
+ * `$deviceref@$offset/$length` - content of the $deviceref device at the specific $offset and with given $length.
 
 ### UUID parameters
 Boot parameters such as `root=UUID=$UUID` and `rd.luks.uuid=$UUID` allow you to specify the block device by its UUID.
