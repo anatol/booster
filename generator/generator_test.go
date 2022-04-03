@@ -56,7 +56,6 @@ type options struct {
 	modprobeOptions              map[string]string
 	expectError                  string
 	stripBinaries                bool
-	enableVirtualConsole         bool
 	enableLVM                    bool
 	vConsoleConfig, localeConfig string
 	enableMdraid                 bool
@@ -157,27 +156,29 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	}
 
 	conf := generatorConfig{
-		initBinary:           "/usr/bin/false",
-		compression:          compression,
-		universal:            opts.universal,
-		kernelVersion:        "matestkernel",
-		modulesDir:           modulesDir,
-		output:               wd + "/booster.img",
-		readDeviceAliases:    listAsFunc(opts.hostAliases),
-		readHostModules:      func(ver string) (set, error) { return listAsSet(opts.hostModules), nil },
-		readModprobeOptions:  func() (map[string]string, error) { return opts.modprobeOptions, nil },
-		extraFiles:           opts.extraFiles,
-		modules:              opts.extraModules,
-		stripBinaries:        opts.stripBinaries,
-		enableVirtualConsole: opts.enableVirtualConsole,
-		enableLVM:            opts.enableLVM,
-		enableMdraid:         opts.enableMdraid,
-		mdraidConfigPath:     opts.mdraidConfigPath,
+		initBinary:          "/usr/bin/false",
+		compression:         compression,
+		universal:           opts.universal,
+		kernelVersion:       "matestkernel",
+		modulesDir:          modulesDir,
+		output:              wd + "/booster.img",
+		readDeviceAliases:   listAsFunc(opts.hostAliases),
+		readHostModules:     func(ver string) (set, error) { return listAsSet(opts.hostModules), nil },
+		readModprobeOptions: func() (map[string]string, error) { return opts.modprobeOptions, nil },
+		extraFiles:          opts.extraFiles,
+		modules:             opts.extraModules,
+		stripBinaries:       opts.stripBinaries,
+		enableLVM:           opts.enableLVM,
+		enableMdraid:        opts.enableMdraid,
+		mdraidConfigPath:    opts.mdraidConfigPath,
 	}
-	if opts.enableVirtualConsole {
+	if opts.vConsoleConfig != "" {
+		conf.enableVirtualConsole = true
 		conf.vconsolePath = wd + "/vconsole.conf"
 		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(opts.vConsoleConfig), 0644))
+	}
 
+	if opts.localeConfig != "" {
 		conf.localePath = wd + "/locale.conf"
 		require.NoError(t, os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644))
 	}
@@ -487,11 +488,10 @@ func testStripBinaries(t *testing.T) {
 
 func testEnableVirtualConsole(t *testing.T) {
 	opts := options{
-		universal:            true,
-		enableVirtualConsole: true,
-		vConsoleConfig:       "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
-		localeConfig:         "LANG=en_US.UTF-8\n",
-		unpackImage:          true,
+		universal:      true,
+		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
+		localeConfig:   "LANG=en_US.UTF-8\n",
+		unpackImage:    true,
 	}
 	createTestInitRamfs(t, &opts)
 
@@ -499,6 +499,27 @@ func testEnableVirtualConsole(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/keymap")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
+}
+
+func testEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
+	opts := options{
+		universal:      true,
+		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
+		unpackImage:    true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/setfont")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/keymap")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
+
+	c, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
+	require.NoError(t, err)
+
+	var cfg InitConfig
+	require.NoError(t, yaml.Unmarshal(c, &cfg))
+	require.Equal(t, true, cfg.VirtualConsole.Utf)
 }
 
 func testModprobeOptions(t *testing.T) {
@@ -555,5 +576,6 @@ func TestGenerator(t *testing.T) {
 	t.Run("ModuleNameAliases", testModuleNameAliases)
 	t.Run("StripBinaries", testStripBinaries)
 	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
+	t.Run("EnableVirtualConsoleWithoutLocaleConf", testEnableVirtualConsoleWithoutLocaleConf)
 	t.Run("ModprobeOptions", testModprobeOptions)
 }
