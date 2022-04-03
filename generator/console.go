@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -28,14 +30,19 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 	// adding keymap
 	if keymap, ok := vprop["KEYMAP"]; ok {
 		lconf, err := os.ReadFile(localePath)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// musl-based Linux distributions (e.g. Alpine Linux) don't use /etc/locale.conf since musl supports UTF-8 by default
+			// and doesn't require any external locale files.
+			conf.Utf = true
+		} else if err != nil {
 			return nil, err
+		} else {
+			lprop := parseProperties(string(lconf), true)
+			lang := lprop["LANG"]
+			debug("detected language - '%s'", lang)
+			conf.Utf = strings.HasSuffix(strings.ToLower(lang), "utf-8")
 		}
-		lprop := parseProperties(string(lconf), true)
 
-		lang := lprop["LANG"]
-		debug("detected language - '%s'", lang)
-		conf.Utf = strings.HasSuffix(strings.ToLower(lang), "utf-8")
 		conf.KeymapFile = "/console/keymap"
 
 		blob, err := loadKeymap(keymap, vprop["KEYMAP_TOGGLE"], conf.Utf)
