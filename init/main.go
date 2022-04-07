@@ -787,8 +787,28 @@ func readStartTime() {
 	}
 }
 
+func enableLocalEcho() error {
+	stdin := os.Stdin
+	fd := int(stdin.Fd())
+
+	termios, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	if err != nil {
+		return err
+	}
+
+	newState := *termios
+	newState.Lflag |= unix.ECHO
+
+	return unix.IoctlSetTermios(fd, unix.TCSETS, &newState)
+}
+
 func emergencyShell() {
 	if _, err := os.Stat("/usr/bin/busybox"); !os.IsNotExist(err) {
+		// Force local echo (might have been disabled by readPassword).
+		if err := enableLocalEcho(); err != nil {
+			warning("Failed to enable local echo: %v", err)
+		}
+
 		if err := unix.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
 			severe("Unable to start an emergency shell: %v", err)
 		}
