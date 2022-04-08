@@ -264,6 +264,15 @@ func checkFilesEqual(t *testing.T, files ...string) {
 	}
 }
 
+func readGeneratedInitConfig(t *testing.T, workDir string) InitConfig {
+	c, err := os.ReadFile(workDir + "/image.unpacked/etc/booster.init.yaml")
+	require.NoError(t, err)
+
+	var cfg InitConfig
+	require.NoError(t, yaml.Unmarshal(c, &cfg))
+	return cfg
+}
+
 func testSimple(t *testing.T) {
 	createTestInitRamfs(t, &options{})
 }
@@ -303,11 +312,8 @@ func testUniversalMode(t *testing.T) {
 	}
 	createTestInitRamfs(t, &opts)
 
-	conf, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
-	require.NoError(t, err)
-
-	expectedConf := "kernel: matestkernel\n"
-	require.Equal(t, expectedConf, string(conf))
+	cfg := readGeneratedInitConfig(t, opts.workDir)
+	require.Equal(t, "matestkernel", cfg.Kernel)
 
 	// all except kernel/testfoo.ko need to be in the image
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "cbc.ko", "virtio_scsi.ko", "booster.alias")
@@ -514,11 +520,7 @@ func testEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
 
-	c, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
-	require.NoError(t, err)
-
-	var cfg InitConfig
-	require.NoError(t, yaml.Unmarshal(c, &cfg))
+	cfg := readGeneratedInitConfig(t, opts.workDir)
 	require.Equal(t, true, cfg.VirtualConsole.Utf)
 }
 
@@ -537,17 +539,7 @@ func testModprobeOptions(t *testing.T) {
 	}
 	createTestInitRamfs(t, &opts)
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/etc/booster.init.yaml")
-
-	c, err := os.ReadFile(opts.workDir + "/image.unpacked/etc/booster.init.yaml")
-	require.NoError(t, err)
-
-	cfg := struct {
-		ModprobeOptions map[string]string `yaml:",omitempty"`
-	}{}
-
-	require.NoError(t, yaml.Unmarshal(c, &cfg))
-
+	cfg := readGeneratedInitConfig(t, opts.workDir)
 	expect := map[string]string{
 		"test1": "foo=1 bar=2",
 		"test2": "bazz=foo",
