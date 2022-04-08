@@ -10,13 +10,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
+var compileAssetsMutex sync.Mutex
+
 func prepareAssets(t *testing.T) {
+	compileAssetsMutex.Lock()
+	defer compileAssetsMutex.Unlock()
+
 	if _, err := os.Stat("assets/test_module.ko"); os.IsNotExist(err) {
 		cmd := exec.Command("make", "-C", "assets")
 		if testing.Verbose() {
@@ -104,16 +110,19 @@ func generateProcModulesFile(modules []string) []byte {
 	return buff.Bytes()
 }
 
-func createTestInitRamfs(t *testing.T, opts *options) {
+func createTestInitRamfs(t *testing.T, o *options) {
 	t.Parallel()
 
+	opts.Verbose = testing.Verbose()
+	prepareAssets(t)
+
 	wd := t.TempDir()
-	opts.workDir = wd
+	o.workDir = wd
 
 	modulesDir := path.Join(wd, "modules")
 	require.NoError(t, os.Mkdir(modulesDir, 0755))
 
-	for _, l := range opts.prepareModulesAt {
+	for _, l := range o.prepareModulesAt {
 		loc := modulesDir + "/" + l
 		dir := filepath.Dir(loc)
 		require.NoError(t, exec.Command("mkdir", "-p", dir).Run())
@@ -131,12 +140,12 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		require.NoError(t, exec.Command("cp", source, loc).Run())
 	}
 
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(opts.builtin), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(o.builtin), 0644))
 	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(opts.kernelAliases), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(o.kernelAliases), 0644))
 	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(opts.softDeps), 0644))
-	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(opts.hostModules), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(o.softDeps), 0644))
+	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(o.hostModules), 0644))
 
 	listAsSet := func(in []string) set {
 		out := make(set)
@@ -150,7 +159,7 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 		return func() (set, error) { return listAsSet(in), nil }
 	}
 
-	compression := opts.compression
+	compression := o.compression
 	if compression == "" {
 		compression = "none"
 	}
@@ -158,42 +167,42 @@ func createTestInitRamfs(t *testing.T, opts *options) {
 	conf := generatorConfig{
 		initBinary:          "/usr/bin/false",
 		compression:         compression,
-		universal:           opts.universal,
+		universal:           o.universal,
 		kernelVersion:       "matestkernel",
 		modulesDir:          modulesDir,
 		output:              wd + "/booster.img",
-		readDeviceAliases:   listAsFunc(opts.hostAliases),
-		readHostModules:     func(ver string) (set, error) { return listAsSet(opts.hostModules), nil },
-		readModprobeOptions: func() (map[string]string, error) { return opts.modprobeOptions, nil },
-		extraFiles:          opts.extraFiles,
-		modules:             opts.extraModules,
-		stripBinaries:       opts.stripBinaries,
-		enableLVM:           opts.enableLVM,
-		enableMdraid:        opts.enableMdraid,
-		mdraidConfigPath:    opts.mdraidConfigPath,
+		readDeviceAliases:   listAsFunc(o.hostAliases),
+		readHostModules:     func(ver string) (set, error) { return listAsSet(o.hostModules), nil },
+		readModprobeOptions: func() (map[string]string, error) { return o.modprobeOptions, nil },
+		extraFiles:          o.extraFiles,
+		modules:             o.extraModules,
+		stripBinaries:       o.stripBinaries,
+		enableLVM:           o.enableLVM,
+		enableMdraid:        o.enableMdraid,
+		mdraidConfigPath:    o.mdraidConfigPath,
 	}
-	if opts.vConsoleConfig != "" {
+	if o.vConsoleConfig != "" {
 		conf.enableVirtualConsole = true
 		conf.vconsolePath = wd + "/vconsole.conf"
-		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(opts.vConsoleConfig), 0644))
+		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(o.vConsoleConfig), 0644))
 	}
 
-	if opts.localeConfig != "" {
+	if o.localeConfig != "" {
 		conf.localePath = wd + "/locale.conf"
-		require.NoError(t, os.WriteFile(conf.localePath, []byte(opts.localeConfig), 0644))
+		require.NoError(t, os.WriteFile(conf.localePath, []byte(o.localeConfig), 0644))
 	}
 
 	err := generateInitRamfs(&conf)
-	if opts.expectError == "" {
+	if o.expectError == "" {
 		require.NoError(t, err)
 	} else {
-		require.Equal(t, opts.expectError, err.Error())
+		require.Equal(t, o.expectError, err.Error())
 		return
 	}
 
 	require.NoError(t, verifyCompressedFile(compression, wd+"/booster.img"))
 
-	if opts.unpackImage {
+	if o.unpackImage {
 		require.NoError(t, os.Mkdir(wd+"/image.unpacked", 0755))
 
 		unpCmd := exec.Command("unp", wd+"/booster.img")
@@ -273,31 +282,31 @@ func readGeneratedInitConfig(t *testing.T, workDir string) InitConfig {
 	return cfg
 }
 
-func testSimple(t *testing.T) {
+func TestSimple(t *testing.T) {
 	createTestInitRamfs(t, &options{})
 }
 
-func testNoneImageCompression(t *testing.T) {
+func TestNoneImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "none"})
 }
 
-func testZstdImageCompression(t *testing.T) {
+func TestZstdImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "zstd"})
 }
 
-func testGzipImageCompression(t *testing.T) {
+func TestGzipImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "gzip"})
 }
 
-func testXzImageCompression(t *testing.T) {
+func TestXzImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "xz"})
 }
 
-func testLz4ImageCompression(t *testing.T) {
+func TestLz4ImageCompression(t *testing.T) {
 	createTestInitRamfs(t, &options{compression: "lz4"})
 }
 
-func testUniversalMode(t *testing.T) {
+func TestUniversalMode(t *testing.T) {
 	opts := options{
 		universal:        true,
 		prepareModulesAt: []string{"kernel/fs/foo.ko", "kernel/testfoo.ko", "kernel/crypto/cbc.ko", "kernel/subdir/virtio_scsi.ko"},
@@ -332,7 +341,7 @@ cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
 }
 
-func testSoftDependencies(t *testing.T) {
+func TestSoftDependencies(t *testing.T) {
 	opts := options{
 		prepareModulesAt: []string{"kernel/fs/foo.ko", "a.ko", "b.ko", "c.ko", "d.ko"},
 		hostModules:      []string{"foo"},
@@ -347,7 +356,7 @@ func testSoftDependencies(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "a.ko", "b.ko", "c.ko", "d.ko", "booster.alias")
 }
 
-func testComplexPatterns(t *testing.T) {
+func TestComplexPatterns(t *testing.T) {
 	opts := options{
 		prepareModulesAt: []string{"kernel/fs/k1.ko", "k2.ko", "zzz/ee/k3.ko", "zzz/k4.ko", "zzz/k5.ko", "k6.ko", "k7-1.ko"},
 		hostModules:      []string{"foo", "k1"},
@@ -362,7 +371,7 @@ func testComplexPatterns(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "booster.alias", "k4.ko", "k5.ko", "k7_1.ko")
 }
 
-func testHostMode(t *testing.T) {
+func TestHostMode(t *testing.T) {
 	opts := options{
 		universal:        false,
 		prepareModulesAt: []string{"kernel/fs/foo.ko", "kernel/testfoo.ko", "kernel/crypto/cbc.ko", "kernel/subdir/virtio_scsi.ko", "zzz.ko"},
@@ -407,7 +416,7 @@ pci:v*d*sv*sd*bc0Csc03i30* cbc`
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
 }
 
-func testExtraFiles(t *testing.T) {
+func TestExtraFiles(t *testing.T) {
 	files := []string{"e", "q", "z"}
 	d := t.TempDir()
 	for _, f := range files {
@@ -431,14 +440,14 @@ func testExtraFiles(t *testing.T) {
 	checkDirListing(t, opts.workDir+"/image.unpacked/"+d, files...)
 }
 
-func testInvalidExtraFiles(t *testing.T) {
+func TestInvalidExtraFiles(t *testing.T) {
 	createTestInitRamfs(t, &options{
 		extraFiles:  []string{"true", "/usr/bin/false", "/foo/nonexistent"},
 		expectError: "lstat /foo/nonexistent: no such file or directory",
 	})
 }
 
-func testCompressedModules(t *testing.T) {
+func TestCompressedModules(t *testing.T) {
 	opts := options{
 		universal:        true,
 		prepareModulesAt: []string{"kernel/fs/plain.ko", "kernel/fs/zst.ko.zst", "kernel/fs/xz.ko.xz", "kernel/fs/lz4.ko.lz4", "kernel/fs/gz.ko.gz"},
@@ -461,7 +470,7 @@ func testCompressedModules(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
 }
 
-func testModuleNameAliases(t *testing.T) {
+func TestModuleNameAliases(t *testing.T) {
 	opts := options{
 		prepareModulesAt: []string{"kernel/fs/plain.ko", "kernel/fs/zst.ko.zst", "kernel/fs/xz.ko.xz", "kernel/fs/lz4.ko.lz4", "kernel/fs/gz.ko.gz"},
 		extraModules:     []string{"zst", "kernel/fs/xz.ko.xz", "kernel/fs/gz.ko"},
@@ -478,7 +487,7 @@ func testModuleNameAliases(t *testing.T) {
 	)
 }
 
-func testStripBinaries(t *testing.T) {
+func TestStripBinaries(t *testing.T) {
 	opts := options{
 		universal:        true,
 		stripBinaries:    true,
@@ -492,7 +501,7 @@ func testStripBinaries(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
 }
 
-func testEnableVirtualConsole(t *testing.T) {
+func TestEnableVirtualConsole(t *testing.T) {
 	opts := options{
 		universal:      true,
 		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
@@ -507,7 +516,7 @@ func testEnableVirtualConsole(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
 }
 
-func testEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
+func TestEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
 	opts := options{
 		universal:      true,
 		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
@@ -524,7 +533,7 @@ func testEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
 	require.Equal(t, true, cfg.VirtualConsole.Utf)
 }
 
-func testModprobeOptions(t *testing.T) {
+func TestModprobeOptions(t *testing.T) {
 	opts := options{
 		prepareModulesAt: []string{"kernel/fs/test1.ko", "test2.ko", "test3.ko", "test4.ko"},
 		modprobeOptions: map[string]string{
@@ -545,29 +554,4 @@ func testModprobeOptions(t *testing.T) {
 		"test2": "bazz=foo",
 	}
 	require.Equal(t, expect, cfg.ModprobeOptions)
-}
-
-func TestGenerator(t *testing.T) {
-	opts.Verbose = testing.Verbose()
-
-	prepareAssets(t)
-
-	t.Run("Simple", testSimple)
-	t.Run("NoneImageCompression", testNoneImageCompression)
-	t.Run("ZstdImageCompression", testZstdImageCompression)
-	t.Run("GzipImageCompression", testGzipImageCompression)
-	t.Run("XzImageCompression", testXzImageCompression)
-	t.Run("Lz4ImageCompression", testLz4ImageCompression)
-	t.Run("UniversalMode", testUniversalMode)
-	t.Run("HostMode", testHostMode)
-	t.Run("ComplexPatterns", testComplexPatterns)
-	t.Run("SoftDepenencies", testSoftDependencies)
-	t.Run("ExtraFiles", testExtraFiles)
-	t.Run("InvalidExtraFiles", testInvalidExtraFiles)
-	t.Run("CompressedModules", testCompressedModules)
-	t.Run("ModuleNameAliases", testModuleNameAliases)
-	t.Run("StripBinaries", testStripBinaries)
-	t.Run("EnableVirtualConsole", testEnableVirtualConsole)
-	t.Run("EnableVirtualConsoleWithoutLocaleConf", testEnableVirtualConsoleWithoutLocaleConf)
-	t.Run("ModprobeOptions", testModprobeOptions)
 }
