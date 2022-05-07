@@ -663,6 +663,10 @@ func walkSysModaliases(path string, fi os.FileInfo, err error) error {
 func boost() error {
 	info("Starting booster initramfs")
 
+	if err := readConfig(); err != nil {
+		return err
+	}
+
 	var err error
 	if err := mount("dev", "/dev", "devtmpfs", unix.MS_NOSUID, "mode=0755"); err != nil {
 		return err
@@ -684,16 +688,17 @@ func boost() error {
 
 	// Mount efivarfs if running in EFI mode
 	if _, err := os.Stat("/sys/firmware/efi"); !errors.Is(err, os.ErrNotExist) {
+		wg, err := loadModules("efivarfs")
+		if err != nil {
+			return err
+		}
+		wg.Wait()
 		if err := mount("efivarfs", "/sys/firmware/efi/efivars", "efivarfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
 			return err
 		}
 	}
 
 	if err := os.Setenv("PATH", "/usr/bin"); err != nil {
-		return err
-	}
-
-	if err := readConfig(); err != nil {
 		return err
 	}
 

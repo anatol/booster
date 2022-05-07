@@ -81,6 +81,7 @@ var defaultModulesList = []string{
 	"hid_generic", "sd_mod", "ahci",
 	"sdhci", "sdhci_acpi", "sdhci_pci", "mmc_block", // mmc
 	"nvme", "usb_storage", "uas",
+	"efivarfs",
 	"virtio_pci", "virtio_blk", "virtio_scsi", "virtio_crypto",
 }
 
