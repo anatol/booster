@@ -38,6 +38,9 @@ type generatorConfig struct {
 	enableLVM               bool
 	enableMdraid            bool
 	mdraidConfigPath        string
+	enableZfs               bool
+	zfsImportParams         string
+	zfsCachePath            string
 
 	// virtual console configs
 	enableVirtualConsole     bool
@@ -168,6 +171,33 @@ func generateInitRamfs(conf *generatorConfig) error {
 			return err
 		}
 		if err := img.AppendContent("/etc/mdadm.conf", 0o644, content); err != nil {
+			return err
+		}
+	}
+
+	if conf.enableZfs {
+		if err := kmod.activateModules(false, true, "zfs"); err != nil {
+			return err
+		}
+		conf.modulesForceLoad = append(conf.modulesForceLoad, "zfs")
+
+		if err := img.appendExtraFiles("zpool", "zfs"); err != nil {
+			return err
+		}
+
+		zfsCachePath := conf.zfsCachePath
+		if zfsCachePath == "" {
+			zfsCachePath = "/etc/zfs/zpool.cache"
+		}
+		content, err := os.ReadFile(zfsCachePath)
+		if err != nil {
+			return err
+		}
+		if err := img.AppendContent("/etc/zfs/zpool.cache", 0o644, content); err != nil {
+			return err
+		}
+
+		if err := img.AppendFile("/etc/default/zfs"); err != nil {
 			return err
 		}
 	}
@@ -319,6 +349,8 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.VirtualConsole = vconsole
 	initConfig.EnableLVM = conf.enableLVM
 	initConfig.EnableMdraid = conf.enableMdraid
+	initConfig.EnableZfs = conf.enableZfs
+	initConfig.ZfsImportParams = conf.zfsImportParams
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

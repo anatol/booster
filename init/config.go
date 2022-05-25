@@ -32,6 +32,8 @@ type InitConfig struct {
 	VirtualConsole         *VirtualConsole     `yaml:",omitempty"`
 	EnableLVM              bool                `yaml:",omitempty"`
 	EnableMdraid           bool                `yaml:",omitempty"`
+	EnableZfs              bool                `yaml:",omitempty"`
+	ZfsImportParams        string              `yaml:",omitempty"` // TODO: remove it
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

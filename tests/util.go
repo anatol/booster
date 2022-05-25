@@ -242,6 +242,9 @@ type GeneratorConfig struct {
 	EnableLVM            bool           `yaml:"enable_lvm"`
 	EnableMdraid         bool           `yaml:"enable_mdraid"`
 	MdraidConfigPath     string         `yaml:"mdraid_config_path"`
+	EnableZfs            bool           `yaml:"enable_zfs"`
+	ZfsImportParams      string         `yaml:"zfs_import_params"`
+	ZfsCachePath         string         `yaml:"zfs_cache_path"`
 }
 
 func generateBoosterConfig(output string, opts Opts) error {
@@ -268,6 +271,9 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.EnableLVM = opts.enableLVM
 	conf.EnableMdraid = opts.enableMdraid
 	conf.MdraidConfigPath = opts.mdraidConf
+	conf.EnableZfs = opts.enableZfs
+	conf.ZfsImportParams = opts.zfsImportParams
+	conf.ZfsCachePath = opts.zfsCachePath
 	conf.Modules = opts.modules
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
@@ -304,6 +310,9 @@ type Opts struct {
 	enableLVM            bool
 	enableMdraid         bool
 	mdraidConf           string
+	enableZfs            bool
+	zfsImportParams      string
+	zfsCachePath         string // TODO: do we need any of these parameters?
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
