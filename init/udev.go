@@ -66,6 +66,15 @@ func validDmEvent(ev *uevent.Uevent) bool {
 var udevReader io.ReadCloser
 
 func udevListener() error {
+	defer func() {
+		// uevent.NewDecoder uses bufio.ReadString() that is blocking. If we try to close the underlying udev file descriptor
+		// while bufio tries to read from it then bufio panics. See issues #22, #31 and #153
+		// There is no clear way to prevent the panic so we just recover from it here and then safely exit the goroutine.
+		if r := recover(); r != nil {
+			warning("recovered udevListener panic: %v", r)
+		}
+	}()
+
 	var err error
 	udevReader, err = uevent.NewReader()
 	if err != nil {
