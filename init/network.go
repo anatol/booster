@@ -23,7 +23,7 @@ func runDhcp(ifname string) error {
 		if err == nil {
 			break
 		}
-		debug("%s got error from DHCP exhange: %v", ifname, err)
+		debug("%s got error from DHCP exchange: %v", ifname, err)
 		time.Sleep(time.Second)
 	}
 	var ack *dhcpv4.DHCPv4

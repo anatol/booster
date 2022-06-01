@@ -80,7 +80,7 @@ func (uuid UUID) toString() string {
 		// UUID version 4
 		return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 	} else {
-		// a regular non-UUID id (e.g. MSDOS id)
+		// a regular non-UUID id (e.g. MS-DOS id)
 		return hex.EncodeToString(uuid)
 	}
 }

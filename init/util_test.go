@@ -66,7 +66,7 @@ func TestFormatUUID(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, str, uuid.toString())
 
-	// msdos uuid
+	// ms-dos uuid
 	uuid = []byte{0x45, 0x22, 0x67, 0x77}
 	expected := "45226777"
 	require.Equal(t, expected, uuid.toString())

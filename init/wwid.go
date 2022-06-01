@@ -98,7 +98,7 @@ func wwid(device string) ([]string, error) {
 			vendor := strings.ReplaceAll(string(bytes.TrimSpace(i.VendorIdent[:])), " ", "_")
 			ids = append(ids, bus+"-"+vendor+"_"+product+"_"+serial+"-"+instanceID)
 		default:
-			return nil, fmt.Errorf("unknow S.M.A.R.T. device type: %s", dev.Type())
+			return nil, fmt.Errorf("unknown S.M.A.R.T. device type: %s", dev.Type())
 		}
 	}
 
