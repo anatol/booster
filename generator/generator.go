@@ -58,7 +58,7 @@ const (
 	netStatic
 )
 
-const (
+var (
 	imageModulesDir = "/usr/lib/modules/"
 	firmwareDir     = "/usr/lib/firmware/"
 )
