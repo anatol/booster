@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -210,7 +210,7 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 	if strings.HasPrefix(info.UUID, "LVM-") {
 		// for LVM there is a special case - add /dev/VG/LG symlink
 		lvmLinkPath := "/dev/" + strings.ReplaceAll(info.Name, "-", "/")
-		if err := os.MkdirAll(path.Dir(lvmLinkPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(lvmLinkPath), 0755); err != nil {
 			return err
 		}
 		if err := os.Symlink(devPath, lvmLinkPath); err != nil {

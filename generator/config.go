@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -133,7 +133,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	if opts.BuildCommand.ModulesDirectory != "" {
 		conf.modulesDir = opts.BuildCommand.ModulesDirectory
 	} else {
-		conf.modulesDir = path.Join(imageModulesDir, conf.kernelVersion)
+		conf.modulesDir = filepath.Join(imageModulesDir, conf.kernelVersion)
 	}
 	conf.debug = opts.Verbose
 	conf.readDeviceAliases = readDeviceAliases

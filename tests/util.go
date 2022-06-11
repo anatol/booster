@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -171,8 +170,8 @@ func detectKernelVersion() (map[string]string, error) {
 }
 
 func generateInitRamfs(workDir string, opts Opts) (string, error) {
-	output := path.Join(workDir, "booster.img")
-	config := path.Join(workDir, "config.yaml")
+	output := filepath.Join(workDir, "booster.img")
+	config := filepath.Join(workDir, "config.yaml")
 
 	if err := generateBoosterConfig(config, opts); err != nil {
 		return "", err

@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -119,7 +118,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 	wd := t.TempDir()
 	o.workDir = wd
 
-	modulesDir := path.Join(wd, "modules")
+	modulesDir := filepath.Join(wd, "modules")
 	require.NoError(t, os.Mkdir(modulesDir, 0755))
 
 	for _, l := range o.prepareModulesAt {
@@ -127,7 +126,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		dir := filepath.Dir(loc)
 		require.NoError(t, exec.Command("mkdir", "-p", dir).Run())
 		source := "assets/test_module.ko"
-		switch path.Ext(loc) {
+		switch filepath.Ext(loc) {
 		case ".xz":
 			source += ".xz"
 		case ".zst":

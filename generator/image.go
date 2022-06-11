@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -106,7 +105,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 		return nil
 	}
 
-	parent := path.Dir(dir)
+	parent := filepath.Dir(dir)
 	if err := img.AppendDirEntry(parent); err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 	img.m.Unlock()
 
 	// append parent dirs first
-	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
+	if err := img.AppendDirEntry(filepath.Dir(dest)); err != nil {
 		return err
 	}
 
@@ -203,7 +202,7 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 // AppendFile appends the file + its dependencies to the ramfs file
 // If input is a directory then content is added to the image recursively.
 func (img *Image) AppendFile(fn string) error {
-	fn = path.Clean(fn)
+	fn = filepath.Clean(fn)
 
 	img.m.Lock()
 	if img.contains[fn] {
@@ -212,7 +211,7 @@ func (img *Image) AppendFile(fn string) error {
 	}
 	img.m.Unlock()
 
-	if err := img.AppendDirEntry(path.Dir(fn)); err != nil {
+	if err := img.AppendDirEntry(filepath.Dir(fn)); err != nil {
 		return err
 	}
 
@@ -243,7 +242,7 @@ func (img *Image) AppendFile(fn string) error {
 
 		// now add the link target as well
 		if !filepath.IsAbs(linkTarget) {
-			linkTarget = path.Join(path.Dir(fn), linkTarget)
+			linkTarget = filepath.Join(filepath.Dir(fn), linkTarget)
 		}
 		if err := img.AppendFile(linkTarget); err != nil {
 			return err
@@ -258,7 +257,7 @@ func (img *Image) AppendFile(fn string) error {
 			return err
 		}
 		for _, f := range files {
-			if err := img.AppendFile(path.Join(fn, f.Name())); err != nil {
+			if err := img.AppendFile(filepath.Join(fn, f.Name())); err != nil {
 				return err
 			}
 		}
@@ -283,7 +282,7 @@ func (img *Image) AppendEntry(dest string, fileMode cpio.FileMode, content []byt
 	img.contains[dest] = true
 	img.m.Unlock()
 
-	if err := img.AppendDirEntry(path.Dir(dest)); err != nil {
+	if err := img.AppendDirEntry(filepath.Dir(dest)); err != nil {
 		return err
 	}
 

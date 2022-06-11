@@ -9,7 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -124,7 +124,7 @@ func readFontFile(font string) (blob []byte, err error) {
 	for _, d := range entries {
 		name := d.Name()
 		if strings.HasPrefix(name, font+".") {
-			fileName := path.Join(consolefontsDir, name)
+			fileName := filepath.Join(consolefontsDir, name)
 			debug("font %s matched to file %s", font, fileName)
 			blob, err := os.ReadFile(fileName)
 			if err != nil {

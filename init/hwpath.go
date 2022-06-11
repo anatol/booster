@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -12,7 +12,7 @@ import (
 )
 
 func hwPath(device string) (string, error) {
-	name := path.Base(device)
+	name := filepath.Base(device)
 
 	sysfs, err := sysfsPathForBlock(name)
 	if err != nil {
@@ -27,7 +27,7 @@ func hwPath(device string) (string, error) {
 			return "", err
 		}
 
-		sysname := path.Base(parent)
+		sysname := filepath.Base(parent)
 
 		skipped := false
 		switch subsystem {
@@ -62,7 +62,7 @@ func hwPath(device string) (string, error) {
 				return "", err
 			}
 			if ata := ataRE.FindString(parent); ata != "" {
-				base := path.Base(ata)
+				base := filepath.Base(ata)
 				portNo, err := sysfsAttributeValue(ata+"/ata_port/"+base, "port_no")
 				if err != nil {
 					return "", err
@@ -98,7 +98,7 @@ func hwPath(device string) (string, error) {
 			skipped = true
 		}
 		if !skipped {
-			parent = path.Dir(parent)
+			parent = filepath.Dir(parent)
 		}
 	}
 	return p, nil
@@ -120,24 +120,24 @@ func sysfsSkipSubsystem(p, subsystem string) (string, error) {
 		if s != subsystem {
 			break
 		}
-		p = path.Dir(p)
+		p = filepath.Dir(p)
 	}
 
 	return p, nil
 }
 
 func sysfsSubsystem(sysPath string) (string, error) {
-	l, err := os.Readlink(path.Join(sysPath, "subsystem"))
+	l, err := os.Readlink(filepath.Join(sysPath, "subsystem"))
 	if os.IsNotExist(err) {
 		return "", nil
 	}
-	return path.Base(l), err
+	return filepath.Base(l), err
 }
 
 func sysfsAttributeValue(sysPath, attr string) (string, error) {
 	for sysPath != "/" {
-		data, err := os.ReadFile(path.Join(sysPath, attr))
-		sysPath = path.Dir(sysPath)
+		data, err := os.ReadFile(filepath.Join(sysPath, attr))
+		sysPath = filepath.Dir(sysPath)
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -156,11 +156,11 @@ func sysfsSubsystems(sysPath string) (map[string]bool, error) {
 		if err != nil {
 			return nil, err
 		}
-		sysPath = path.Dir(sysPath)
+		sysPath = filepath.Dir(sysPath)
 		if l == "" {
 			continue
 		}
-		result[path.Base(l)] = true
+		result[filepath.Base(l)] = true
 	}
 	return result, nil
 }
