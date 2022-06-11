@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -219,7 +218,7 @@ func (k *Kmod) resolveDependencies() error {
 }
 
 func (k *Kmod) readKernelAliases() error {
-	f, err := os.Open(path.Join(k.hostModulesDir, "modules.alias"))
+	f, err := os.Open(filepath.Join(k.hostModulesDir, "modules.alias"))
 	if err != nil {
 		return err
 	}
@@ -248,7 +247,7 @@ func (k *Kmod) readKernelAliases() error {
 // module -> [values]
 // Note that values is an array as a module can contain multiple properties with the same name.
 func readBuiltinModinfo(dir string, propName string) (map[string][]string, error) {
-	data, err := os.ReadFile(path.Join(dir, "modules.builtin.modinfo"))
+	data, err := os.ReadFile(filepath.Join(dir, "modules.builtin.modinfo"))
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +279,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			errCh <- fmt.Errorf("unable to find module file for %s", modName)
 		}
 
-		modulePath := path.Join(k.hostModulesDir, p)
+		modulePath := filepath.Join(k.hostModulesDir, p)
 
 		f, err := os.Open(modulePath)
 		if err != nil {
@@ -290,7 +289,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 		defer f.Close()
 
 		var r io.Reader
-		ext := path.Ext(p)
+		ext := filepath.Ext(p)
 		switch ext {
 		case ".ko":
 			r = f
@@ -378,7 +377,7 @@ func (k *Kmod) scanModulesDir() error {
 			return err
 		}
 		if info.IsDir() {
-			if info.Name() == "build" && filename == path.Join(k.hostModulesDir, "build") {
+			if info.Name() == "build" && filename == filepath.Join(k.hostModulesDir, "build") {
 				// skip header files under ./build dir
 				return filepath.SkipDir
 			}
@@ -412,7 +411,7 @@ func (k *Kmod) scanModulesDir() error {
 }
 
 func (k *Kmod) readModuleBuiltin() error {
-	f, err := os.Open(path.Join(k.hostModulesDir, "modules.builtin"))
+	f, err := os.Open(filepath.Join(k.hostModulesDir, "modules.builtin"))
 	if err != nil {
 		return err
 	}
@@ -420,7 +419,7 @@ func (k *Kmod) readModuleBuiltin() error {
 
 	for s := bufio.NewScanner(f); s.Scan(); {
 		filename := s.Text()
-		module := path.Base(filename)
+		module := filepath.Base(filename)
 
 		if !strings.HasSuffix(module, ".ko") {
 			return fmt.Errorf("modules.builtin contains module filename that does not have *.ko extension: %s", filename)
@@ -439,7 +438,7 @@ func (k *Kmod) readModuleBuiltin() error {
 
 // TODO: read modules.bin file using following logic https://github.com/vadmium/module-init-tools/blob/master/index.c#L253
 func (k *Kmod) readModulesDep(dir string, nameToPathMapping *Bimap) (map[string][]string, error) {
-	f, err := os.Open(path.Join(dir, "modules.dep"))
+	f, err := os.Open(filepath.Join(dir, "modules.dep"))
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +476,7 @@ func (k *Kmod) readModulesDep(dir string, nameToPathMapping *Bimap) (map[string]
 }
 
 func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, map[string][]string, error) {
-	f, err := os.Open(path.Join(dir, "modules.softdep"))
+	f, err := os.Open(filepath.Join(dir, "modules.softdep"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -559,7 +558,7 @@ func matchAlias(needle string, aliases []alias) ([]alias, error) {
 	var result []alias
 
 	for _, a := range aliases {
-		match, err := path.Match(a.pattern, needle)
+		match, err := filepath.Match(a.pattern, needle)
 		if err != nil {
 			return nil, err
 		}
@@ -888,7 +887,7 @@ func readModprobeOptions() (map[string]string, error) {
 		}
 
 		for _, e := range dir {
-			filename := path.Join(d, e.Name())
+			filename := filepath.Join(d, e.Name())
 			content, err := os.ReadFile(filename)
 			if err != nil {
 				return nil, err

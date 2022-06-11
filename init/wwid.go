@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/anatol/smart.go"
@@ -15,7 +15,7 @@ import (
 func wwid(device string) ([]string, error) {
 	ids := []string{}
 
-	name := path.Base(device)
+	name := filepath.Base(device)
 
 	sysfs, err := sysfsPathForBlock(name)
 	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -161,7 +161,7 @@ func loadModules(modules ...string) (*sync.WaitGroup, error) {
 func matchAlias(alias string) ([]string, error) {
 	var result []string
 	for _, a := range aliases {
-		match, err := path.Match(a.pattern, alias)
+		match, err := filepath.Match(a.pattern, alias)
 		if err != nil {
 			return nil, err
 		}

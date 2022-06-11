@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -40,14 +40,14 @@ func TestModuleNames(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for name, fn := range kmod.nameToPathMapping.forward {
 		require.NotEqual(t, '/', fn[0], "module filename should not start with slash")
-		require.Equal(t, fn, path.Clean(fn), "filepath is not clean")
+		require.Equal(t, fn, filepath.Clean(fn), "filepath is not clean")
 
 		if _, ok := kmod.builtinModules[name]; ok {
 			continue // skip builtin modules
 		}
 
 		wg.Add(1)
-		go checkModuleName(name, path.Join(kmod.hostModulesDir, fn), &wg, ch)
+		go checkModuleName(name, filepath.Join(kmod.hostModulesDir, fn), &wg, ch)
 	}
 
 	// waitGroup as a channel
