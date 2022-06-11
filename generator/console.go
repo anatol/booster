@@ -14,7 +14,7 @@ import (
 )
 
 // path to console fonts, adjust it to your distro (e.g. Fedora uses /usr/lib/kbd/consolefonts path for it)
-const consolefontsDir = "/usr/share/kbd/consolefonts/"
+var consolefontsDir = "/usr/share/kbd/consolefonts/"
 
 func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*VirtualConsole, error) {
 	debug("enabling virtual console")
