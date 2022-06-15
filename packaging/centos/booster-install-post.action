@@ -1,0 +1,1 @@
+booster:install:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-install /usr/lib/booster

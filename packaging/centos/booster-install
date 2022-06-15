@@ -1,0 +1,47 @@
+#!/bin/bash -e
+
+kernels=()
+all=0
+line=$1
+
+if [ $# -eq 0 ]
+then
+    echo "Usage: ./booster-install <path-of-tracked-file>";
+    exit 0 
+fi
+
+echo "Running booster script"
+
+
+# line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
+if [[ "${line}" != usr/lib/modules/* ]]; then
+    # triggers when it's a change to usr/lib/booster/*
+    all=1
+fi
+
+kernels+=("/${line%/vmlinuz}")
+
+if [ "${all}" -eq "1" ]; then
+    # find out all installed kernels
+    kernels=($(ls -d /usr/lib/modules/*))
+fi
+
+for kernel in "${kernels[@]}"; do
+    echo "${kernels[@]}"
+    # if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+    #     echo "${kernel}/pkgbase"
+    #     # if pkgbase does not belong to any package then skip this kernel
+    #     continue
+    # fi
+
+    echo "${kernel##/usr/lib/modules/}"    
+    
+    echo "${pkgbase}"
+    # read -r pkgbase < "${kernel}/pkgbase"
+
+    booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-linux.img 
+    # install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+done
+
+wait
+
