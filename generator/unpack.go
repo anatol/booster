@@ -93,7 +93,7 @@ func runUnpack() error {
 		if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
 			return err
 		}
-		m := hdr.Mode &^ cpio.ModePerm
+		m := hdr.Mode & 0770000
 		switch m {
 		case cpio.TypeDir:
 			if err := os.Mkdir(out, 0755); err != nil {
@@ -103,6 +103,19 @@ func runUnpack() error {
 			if err := os.Symlink(hdr.Linkname, out); err != nil {
 				return err
 			}
+		case cpio.TypeSocket:
+			fallthrough
+		case cpio.TypeBlock:
+			fallthrough
+		case cpio.TypeChar:
+			fallthrough
+		case cpio.TypeFifo:
+			// for device files create an empty regular file
+			f, err := os.Create(out)
+			if err != nil {
+				return err
+			}
+			f.Close()
 		case cpio.TypeReg:
 			fout, err := os.Create(out)
 			if err != nil {
@@ -112,7 +125,7 @@ func runUnpack() error {
 				return err
 			}
 		default:
-			warning("Unknown mode for file %s: %x", hdr.Name, m)
+			warning("Unknown type for file %s: %#o", hdr.Name, m)
 		}
 		return nil
 	}
@@ -134,16 +147,24 @@ func runCat() error {
 
 func runLs() error {
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
-		m := hdr.Mode &^ cpio.ModePerm
+		m := hdr.Mode & 0770000
 		switch m {
 		case cpio.TypeDir:
 			fmt.Printf("%s/\n", hdr.Name)
 		case cpio.TypeSymlink:
 			fmt.Printf("%s -> %s\n", hdr.Name, hdr.Linkname)
+		case cpio.TypeSocket:
+			fallthrough
+		case cpio.TypeBlock:
+			fallthrough
+		case cpio.TypeChar:
+			fallthrough
+		case cpio.TypeFifo:
+			fmt.Println(hdr.Name)
 		case cpio.TypeReg:
 			fmt.Println(hdr.Name)
 		default:
-			warning("Unknown mode for file %s: %x", hdr.Name, m)
+			warning("Unknown mode for file %s: %#o", hdr.Name, m)
 		}
 		return nil
 	}
