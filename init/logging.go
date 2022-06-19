@@ -20,7 +20,7 @@ var (
 	verbosityLevel = levelInfo // by default show info messages and errors
 	printToConsole bool
 
-	kmsg *os.File
+	devKmsg *os.File
 )
 
 func printMessage(format string, requestedLevel, kernelLevel int, v ...interface{}) {
@@ -29,7 +29,18 @@ func printMessage(format string, requestedLevel, kernelLevel int, v ...interface
 	}
 
 	msg := fmt.Sprintf(format, v...)
-	_, _ = fmt.Fprint(kmsg, "<", kernelLevel, ">booster: ", msg, "\n")
+	if devKmsg != nil {
+		kmsg := msg
+		// The maximum size of the kmsg is determined by LOG_LINE_MAX in kernel/printk/printk.c
+		// Currently the kernel limit is 976. Trim our messages to something smaller than the limit.
+		if len(kmsg) > 903 {
+			kmsg = kmsg[:900] + "..."
+		}
+		_, err := fmt.Fprint(devKmsg, "<", kernelLevel, ">booster: ", kmsg, "\n")
+		if err != nil {
+			fmt.Printf("kmsg: %v\n", err)
+		}
+	}
 	if printToConsole {
 		fmt.Println(msg)
 	}
@@ -73,7 +84,7 @@ func disableKmsgThrottling() error {
 func console(format string, v ...interface{}) {
 	if quirk.TestEnabled {
 		msg := fmt.Sprintf(format, v...)
-		_, _ = fmt.Fprint(kmsg, "<", 2, ">booster: ", msg, "\n")
+		_, _ = fmt.Fprint(devKmsg, "<", 2, ">booster: ", msg, "\n")
 	} else {
 		fmt.Printf(format, v...)
 	}

@@ -671,7 +671,7 @@ func boost() error {
 	if err := mount("dev", "/dev", "devtmpfs", unix.MS_NOSUID, "mode=0755"); err != nil {
 		return err
 	}
-	kmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0600)
+	devKmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
