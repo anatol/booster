@@ -58,7 +58,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 
 	// adding fonts
 	if font, ok := vprop["FONT"]; ok {
-		if err := img.appendExtraFiles([]string{"setfont"}); err != nil {
+		if err := img.appendExtraFiles("setfont"); err != nil {
 			return nil, err
 		}
 

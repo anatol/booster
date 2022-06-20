@@ -105,7 +105,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	if err := img.appendExtraFiles(conf.extraFiles); err != nil {
+	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
 		return err
 	}
 
@@ -142,7 +142,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "dm_mod")
-		if err := img.appendExtraFiles([]string{"lvm"}); err != nil {
+		if err := img.appendExtraFiles("lvm"); err != nil {
 			return err
 		}
 	}
@@ -155,7 +155,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		// preload md_mod for speed. Level-specific drivers (e.g. raid1, raid456) are going to be detected loaded at boot-time
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "md_mod")
 
-		if err := img.appendExtraFiles([]string{"mdadm"}); err != nil {
+		if err := img.appendExtraFiles("mdadm"); err != nil {
 			return err
 		}
 
@@ -248,7 +248,7 @@ func (img *Image) appendInitBinary(initBinary string) error {
 	return img.AppendContent("/init", 0o755, content)
 }
 
-func (img *Image) appendExtraFiles(binaries []string) error {
+func (img *Image) appendExtraFiles(binaries ...string) error {
 	for _, f := range binaries {
 		if !filepath.IsAbs(f) {
 			// If the given name is not an absolute path, assume that it refers
