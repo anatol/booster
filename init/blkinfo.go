@@ -59,8 +59,8 @@ const (
 
 type gptPart struct {
 	num        int // index of the partition int the gpt table
-	typeGUID   []byte
-	uuid       []byte
+	typeGUID   UUID
+	uuid       UUID
 	name       string
 	attributes uint64
 }

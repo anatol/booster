@@ -139,18 +139,32 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
+	if blk.uuid != nil {
+		if err := os.Symlink(devpath, "/dev/disk/by-uuid/"+blk.uuid.toString()); err != nil {
+			return err
+		}
+	}
 
 	blk.symlinks = symlinks
+	// TODO: move symlink creation here
 
 	if isDevice {
 		blk.wwid, err = wwid(devpath)
 		if err != nil {
 			return fmt.Errorf("%s: %v", devpath, err)
 		}
+		for _, wwid := range blk.wwid {
+			if err := os.Symlink(devpath, "/dev/disk/by-id/"+wwid); err != nil {
+				return err
+			}
+		}
 
 		blk.hwPath, err = hwPath(devpath)
 		if err != nil {
 			return fmt.Errorf("%s: %v", devpath, err)
+		}
+		if err := os.Symlink(devpath, "/dev/disk/by-path/"+blk.hwPath); err != nil {
+			return err
 		}
 	}
 
@@ -212,6 +226,13 @@ func handleGptBlockDevice(blk *blkInfo) error {
 
 	for _, m := range luksMappings {
 		blk.resolveGptRef(m.ref)
+	}
+
+	for _, part := range gpt.partitions {
+		path := calculateDevPath(blk.path, part.num)
+		if err := os.Symlink(path, "/dev/disk/by-partuuid/"+part.uuid.toString()); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -736,6 +757,13 @@ func boost() error {
 
 	if err := configureVirtualConsole(); err != nil {
 		return err
+	}
+
+	diskBy := []string{"id", "partuuid", "path", "uuid"}
+	for _, by := range diskBy {
+		if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
+			return err
+		}
 	}
 
 	go func() { check(scanSysModaliases()) }()
