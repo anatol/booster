@@ -195,7 +195,7 @@ Create an universal image with many modules (such as SATA/TPM/NVME/... drivers) 
 
 Create an initramfs for kernel version 5.4.91-1-lts and copy it to /boot/booster-lts.img:
 
-    $ booster build --kernel-kersion 5.4.91-1-lts /boot/booster-lts.img
+    $ booster build --kernel-version 5.4.91-1-lts /boot/booster-lts.img
 
 Here is a `systemd-boot` configuration stored at /boot/loader/entries/booster.conf. In this example e122d09e-87a9-4b35-83f7-2592ef40cefa is a UUID for the LUKS partition and 08684949-bcbb-47bb-1c17-089aaa59e17e is a UUID for the encrypted filesystem (e.g. ext4). Please refer to your bootloader documentation for more info about its configuration.
 
