@@ -36,7 +36,6 @@ for kernel in "${kernels[@]}"; do
 
     echo "${kernel##/usr/lib/modules/}"    
     
-    echo "${pkgbase}"
     # read -r pkgbase < "${kernel}/pkgbase"
 
     booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-linux.img 

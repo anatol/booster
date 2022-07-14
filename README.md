@@ -69,3 +69,4 @@ Initial version of booster borrowed a lot of ideas from the distri's initramfs g
 
 ### Licence
 See [license](LICENSE)
+
