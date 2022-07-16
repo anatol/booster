@@ -56,7 +56,7 @@ func copyFile(src, dst string) (int64, error) {
 // Note: if you see tpm2 tests fail with "integrity check failed" error make sure you pull clevis changes from
 // https://github.com/latchset/clevis/issues/244
 func startSwtpm() (*os.Process, []string, error) {
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
 		return nil, nil, err
@@ -86,7 +86,7 @@ func startSwtpm() (*os.Process, []string, error) {
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tang/key.pub"); err != nil {
 		return nil, nil, err
@@ -275,7 +275,7 @@ func generateBoosterConfig(output string, opts Opts) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(output, data, 0644); err != nil {
+	if err := os.WriteFile(output, data, 0o644); err != nil {
 		return err
 	}
 	return nil
@@ -392,7 +392,7 @@ func compileBinaries(dir string) error {
 		return err
 	}
 
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if exists := fileExists("assets/init"); !exists {
 		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {

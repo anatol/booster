@@ -12,7 +12,7 @@ import (
 
 func checkFs(t *testing.T, name, fstype, uuidStr, label string, size int64, script string, data interface{}) {
 	if !fileExists("assets") {
-		require.NoError(t, os.Mkdir("assets", 0755))
+		require.NoError(t, os.Mkdir("assets", 0o755))
 	}
 
 	asset := "assets/" + name

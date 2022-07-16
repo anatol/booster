@@ -138,9 +138,7 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 	return initializeNetworkInterface(ifname)
 }
 
-var (
-	dmNameRe = regexp.MustCompile(`dm-\d+`)
-)
+var dmNameRe = regexp.MustCompile(`dm-\d+`)
 
 func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 	devName := ev.Vars["DEVNAME"]
@@ -210,7 +208,7 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 	if strings.HasPrefix(info.UUID, "LVM-") {
 		// for LVM there is a special case - add /dev/VG/LG symlink
 		lvmLinkPath := "/dev/" + strings.ReplaceAll(info.Name, "-", "/")
-		if err := os.MkdirAll(filepath.Dir(lvmLinkPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(lvmLinkPath), 0o755); err != nil {
 			return err
 		}
 		if err := os.Symlink(devPath, lvmLinkPath); err != nil {
@@ -225,11 +223,11 @@ func handleMapperDeviceUevent(ev *uevent.Uevent) error {
 // devMapperUpdateUdevDb writes Udev state to the database.
 // It is an equivalent to what "db_persist" udev option does (see 'man 7 udev').
 func devMapperUpdateUdevDb(major, minor int) error {
-	if err := os.MkdirAll("/run/udev/data/", 0755); err != nil {
+	if err := os.MkdirAll("/run/udev/data/", 0o755); err != nil {
 		return err
 	}
 
 	dbFile := fmt.Sprintf("/run/udev/data/b%d:%d", major, minor)
 	info("writing udev state to %s", dbFile)
-	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0644)
+	return os.WriteFile(dbFile, []byte("E:DM_UDEV_PRIMARY_SOURCE_FLAG=1\n"), 0o644)
 }

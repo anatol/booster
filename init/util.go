@@ -49,7 +49,6 @@ func deviceNo(path string) (uint64, error) {
 	var stat unix.Stat_t
 	if err := unix.Stat(path, &stat); err != nil {
 		return 0, err
-
 	}
 
 	return stat.Rdev, nil

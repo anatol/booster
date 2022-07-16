@@ -315,7 +315,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 			return
 		}
 
-		if err := img.AppendContent(imageModulesDir+modName+".ko", 0644, content); err != nil {
+		if err := img.AppendContent(imageModulesDir+modName+".ko", 0o644, content); err != nil {
 			errCh <- err
 			return
 		}

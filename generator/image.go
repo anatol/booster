@@ -33,7 +33,7 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := file.Chmod(0644); err != nil {
+	if err := file.Chmod(0o644); err != nil {
 		return nil, err
 	}
 
@@ -112,7 +112,7 @@ func (img *Image) AppendDirEntry(dir string) error {
 
 	hdr := &cpio.Header{
 		Name: strings.TrimPrefix(dir, "/"),
-		Mode: cpio.FileMode(0755) | cpio.TypeDir,
+		Mode: cpio.FileMode(0o755) | cpio.TypeDir,
 	}
 	img.m.Lock()
 	err := img.out.WriteHeader(hdr)
