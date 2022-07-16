@@ -49,20 +49,118 @@ func parseCmdline() error {
 	return nil
 }
 
+// obtain the next key / value param from a params string starting at a given index
+// will return the key and value and the next offset to send for the next call
+// note that quotes will be removed after this step and new strings are returned
+// can handle "param=true", param="true", param=true, param="tr ue", "param=tr ue"
+//            "param=tr\"ue", "param=tr\nue", param=test=true, param="test=true"
+//            param1=true\nparam2=false
+func getNextParam(params string, index int) (string, string, int) {
+	keyComplete := false // indicates if we are reading the key or value
+	inQuote := false     // indicates if we are within quotes
+	escaping := false    // indicates if we read an escape character "\"
+	copyMode := false    // indicates if we are copying runes yet (leading whitespace trim)
+	var key, value strings.Builder
+
+	// copy a given rune into the key or value, update copy mode if not set
+	copyRune := func(r rune) {
+		copyMode = true
+		if !keyComplete {
+			key.WriteRune(r)
+		} else {
+			value.WriteRune(r)
+		}
+	}
+
+	// walk through each rune
+	for i, r := range params[index:] {
+		// if we are in escape mode just copy the next rune and move on
+		if copyMode && escaping {
+			copyRune(r)
+			escaping = false
+			continue
+		}
+
+		switch r {
+		case '\\':
+			// now in copy mode if we were not already
+			copyMode = true
+			// escaping something, update flag and move on
+			escaping = true
+		case 0, '\n', '\r', '\t', ' ':
+			// if we haven't seen any non-whitespace yet just continue
+			if !copyMode {
+				continue
+			}
+
+			// whitespace/null is end of a parse sequence if not in quotes
+			if !inQuote {
+				// return what we collected and give them the next rune to pass back
+				return key.String(), value.String(), index + i + 1
+			}
+
+			// if we are in quotes we just copy it through
+			copyRune(r)
+		case '"':
+			// now in copy mode if we were not already
+			copyMode = true
+
+			// if we are in quote mode this ends it
+			if inQuote {
+				inQuote = false
+
+				// if we have parsed a key already this ends our parse too, otherwise continue as normal
+				if keyComplete {
+					return key.String(), value.String(), index + i + 1
+				}
+
+				continue
+			}
+
+			// if we are parsing a key, and it isn't empty, then something has gone wrong
+			// same for value
+			if (!keyComplete && key.Len() > 0) || (keyComplete && value.Len() > 0) {
+				// error, this quote is inside real characters
+				// we are going to recover as best we can, just copy the quote and hope for the best
+				warning("while parsing cmdline parameter unexpected \" found at %d, input may be malformed, attempting to proceed", index+i)
+				copyRune(r)
+				continue
+			}
+
+			inQuote = true
+		case '=':
+			// this separates key=value, but only while in key mode
+			if !keyComplete {
+				// done reading key, do nothing with the rune
+				keyComplete = true
+			} else {
+				// outside key mode just copy it through (value can have = in it)
+				copyRune(r)
+			}
+		default:
+			// anything else just copy and move on
+			copyRune(r)
+		}
+	}
+
+	// if we hit here return whatever we collected
+	return key.String(), value.String(), len(params)
+}
+
 func parseParams(params string) error {
 	var luksOptions []string
 
-	for _, part := range strings.Split(params, " ") {
-		var key, value string
-		// separate key/value based on the first = character;
-		// there may be multiple (e.g. in rd.luks.name)
-		if idx := strings.IndexByte(part, '='); idx > -1 {
-			key, value = part[:idx], part[idx+1:]
-		} else {
-			key = part
-		}
+	var key, value string
+	i := 0
+
+	for i < len(params) {
+		// read the next param to examine and update for next round
+		key, value, i = getNextParam(params, i)
 
 		switch key {
+		case "":
+			// probably trailing whitespace, just ignore it
+			warning("attempting to parse a parameter returned a blank key, cmdline may be malformed somewhere around %d", i)
 		case "booster.log":
 			for _, p := range strings.Split(value, ",") {
 				switch p {
@@ -122,7 +220,7 @@ func parseParams(params string) error {
 			if len(parts) != 2 {
 				return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", value)
 			}
-			uuid, err := parseUUID(stripQuotes(parts[0]))
+			uuid, err := parseUUID(parts[0])
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s %v", parts[0], err)
 			}
@@ -133,15 +231,14 @@ func parseParams(params string) error {
 			}
 			luksMappings = append(luksMappings, dev)
 		case "rd.luks.uuid":
-			stripped := stripQuotes(value)
-			u, err := parseUUID(stripped)
+			u, err := parseUUID(value)
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", value, err)
 			}
 
 			dev := luksMapping{
 				ref:  &deviceRef{refFsUUID, u},
-				name: "luks-" + stripped,
+				name: "luks-" + value,
 			}
 			luksMappings = append(luksMappings, dev)
 		default:

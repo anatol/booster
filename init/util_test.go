@@ -72,21 +72,6 @@ func TestFormatUUID(t *testing.T) {
 	require.Equal(t, expected, uuid.toString())
 }
 
-func TestStripQuotes(t *testing.T) {
-	check := func(in, out string) {
-		str := stripQuotes(in)
-		require.Equal(t, out, str)
-	}
-
-	check("Hello", "Hello")
-	check("He\"llo", "He\"llo")
-	check("Hell o", "Hell o")
-	check("\"Hello", "\"Hello")
-	check("Hello\"", "Hello\"")
-	check("\"Hello\"", "Hello")
-	check("\"\"He   llo\"", "\"He   llo")
-}
-
 func TestDeviceNo(t *testing.T) {
 	dir, err := os.ReadDir("/sys/block")
 	require.NoError(t, err)
