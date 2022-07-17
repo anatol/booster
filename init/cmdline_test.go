@@ -86,12 +86,16 @@ func TestGetNextParam(t *testing.T) {
 		test{"param17=\"te\"st0\"", "param17", "te", 12},
 		// param18"=test0
 		test{"param18\"=test0", "param18\"", "test0", 14},
-		// =test0
-		test{"=test0", "", "test0", 6},
 		// param19=te\nst0
 		test{"param19=te\nst0", "param19", "te", 11},
 		// param20=test0\r
 		test{"param20=test0\r", "param20", "test0", 14},
+		// =test0 // This is a worst case bad junk input, it will return empty key
+		test{"=test0", "", "test0", 6},
+		// param21="test0 param22="test1" // This is a worst case bad junk input, it will mangle 21 and swallow 22
+		test{"param21=\"test0 param22=\"test1\"", "param21", "test0 param22=", 24},
+		// param23="test0 param24=test1 // This is a worst case bad junk input, it will mangle 23 and swallow 24
+		test{"param23=\"test0 param24=test1", "param23", "test0 param24=test1", 28},
 	}
 
 	for _, test := range tests {
