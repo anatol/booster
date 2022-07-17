@@ -60,16 +60,15 @@ func getNextParam(params string, index int) (string, string, int) {
 	var inQuote = false     // indicates if we are within quotes
 	var escaping = false    // indicates if we read an escape character "\"
 	var copyMode = false    // indicates if we are copying runes yet (leading whitespace trim)
-	var key = ""
-	var value = ""
+	var key, value strings.Builder
 
 	// copy a given rune into the key or value, update copy mode if not set
 	var copyRune = func(r rune) {
 		copyMode = true
 		if !keyComplete {
-			key += string(r)
+			key.WriteRune(r)
 		} else {
-			value += string(r)
+			value.WriteRune(r)
 		}
 	}
 
@@ -97,7 +96,7 @@ func getNextParam(params string, index int) (string, string, int) {
 			// whitespace/null is end of a parse sequence if not in quotes
 			if !inQuote {
 				// return what we collected and give them the next rune to pass back
-				return key, value, index + i + 1
+				return key.String(), value.String(), index + i + 1
 			}
 
 			// if we are in quotes we just copy it through
@@ -112,7 +111,7 @@ func getNextParam(params string, index int) (string, string, int) {
 
 				// if we have parsed a key already this ends our parse too, otherwise continue as normal
 				if keyComplete {
-					return key, value, index + i + 1
+					return key.String(), value.String(), index + i + 1
 				}
 
 				continue
@@ -120,7 +119,7 @@ func getNextParam(params string, index int) (string, string, int) {
 
 			// if we are parsing a key, and it isn't empty, then something has gone wrong
 			// same for value
-			if (!keyComplete && len(key) > 0) || (keyComplete && len(value) > 0) {
+			if (!keyComplete && key.Len() > 0) || (keyComplete && value.Len() > 0) {
 				// error, this quote is inside real characters
 				// we are going to recover as best we can, just copy the quote and hope for the best
 				warning("while parsing cmdline parameter unexpected \" found at %d, input may be malformed, attempting to proceed", index+i)
@@ -145,7 +144,7 @@ func getNextParam(params string, index int) (string, string, int) {
 	}
 
 	// if we hit here return whatever we collected
-	return key, value, len(params)
+	return key.String(), value.String(), len(params)
 }
 
 func parseParams(params string) error {
