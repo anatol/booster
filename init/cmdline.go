@@ -220,27 +220,52 @@ func parseParams(params string) error {
 			if len(parts) != 2 {
 				return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", value)
 			}
+
 			uuid, err := parseUUID(parts[0])
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s %v", parts[0], err)
 			}
 
-			dev := luksMapping{
-				ref:  &deviceRef{refFsUUID, uuid},
-				name: parts[1],
-			}
-			luksMappings = append(luksMappings, dev)
+			m := findOrCreateLuksMapping(uuid)
+			m.name = parts[1]
 		case "rd.luks.uuid":
-			u, err := parseUUID(value)
+			uuid, err := parseUUID(value)
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", value, err)
 			}
 
-			dev := luksMapping{
-				ref:  &deviceRef{refFsUUID, u},
-				name: "luks-" + value,
+			findOrCreateLuksMapping(uuid)
+		case "rd.luks.key":
+			var uuid UUID
+			var keyfile string
+
+			parts := strings.SplitN(value, "=", 2)
+
+			if len(parts) == 1 {
+				// do we only have 1 luks device?
+				if len(luksMappings) == 1 {
+					// we attach to it and hope for the best
+					uuid = luksMappings[0].ref.data.(UUID)
+				} else {
+					// don't know what to do here
+					return fmt.Errorf("invalid rd.luks.key kernel parameter %s, more than 1 luks device", value)
+				}
+
+				keyfile = parts[0]
+			} else if len(parts) == 2 {
+				var err error
+				uuid, err = parseUUID(parts[0])
+				if err != nil {
+					return fmt.Errorf("invalid UUID %s in rd.luks.key boot param: %v", value, err)
+				}
+
+				keyfile = parts[1]
+			} else {
+				return fmt.Errorf("invalid rd.luks.key kernel parameter %s, expected format rd.luks.key=<UUID>=<keyfile>", value)
 			}
-			luksMappings = append(luksMappings, dev)
+
+			m := findOrCreateLuksMapping(uuid)
+			m.keyfile = keyfile
 		case "zfs":
 			zfsDataset = value
 		default:

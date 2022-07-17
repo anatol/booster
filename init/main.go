@@ -36,7 +36,7 @@ var (
 
 	initBinary = "/sbin/init" // path to init binary inside the user's chroot
 
-	luksMappings []luksMapping // list of LUKS devices that booster unlocked during boot process
+	luksMappings []*luksMapping // list of LUKS devices that booster unlocked during boot process
 
 	rootAutodiscoveryMode       bool
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags

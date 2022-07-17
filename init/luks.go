@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 type luksMapping struct {
 	ref     *deviceRef
 	name    string
+	keyfile string
 	options []string
 }
 
@@ -298,6 +300,47 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	info("password from %s token #%d does not match", t.Type, t.ID)
 }
 
+func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string) {
+	var err error
+	var password []byte
+
+	// keyfile might be in the format /path:UUID=<DEV UUID> to indicate the keyfile lives on another device
+	parts := regexp.MustCompile("(?i):UUID=").Split(keyfile, 2)
+
+	if len(parts) == 1 {
+		password, err = os.ReadFile(parts[0])
+
+		if err != nil {
+			warning("reading password: %v", err)
+		}
+	} else {
+		// read password from device matching uuid
+		uuid, err := parseUUID(parts[1])
+		if err != nil {
+			warning("invalid UUID %s in rd.luks.key boot param: %s", uuid, keyfile)
+		} else {
+			// TODO: access path on uuid device, read password
+			warning("user wants keyfile from device %s, but I don't know how to do that", uuid)
+		}
+	}
+
+	if len(password) > 0 {
+		for _, s := range checkSlots {
+			v, err := d.UnsealVolume(s, password)
+			if err == luks.ErrPassphraseDoesNotMatch {
+				continue
+			}
+			volumes <- v
+			return
+		}
+	}
+
+	warning("password in keyfile #{keyfile} was unable to unseal #{mappingName}\n")
+
+	// have to use keyboard password
+	requestKeyboardPassword(volumes, d, checkSlots, mappingName)
+}
+
 func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
 	for {
 		prompt := fmt.Sprintf("Enter passphrase for %s:", mappingName)
@@ -369,7 +412,13 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}
 	}
 	if len(checkSlotsWithPassword) > 0 {
-		go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
+		// is there a keyfile defined for the password for this volume?
+		if len(mapping.keyfile) > 0 {
+			// if the keyfile doesn't work we will fallback to password
+			go recoverKeyfilePassword(volumes, d, checkSlotsWithPassword, mapping.name, mapping.keyfile)
+		} else {
+			go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
+		}
 	}
 
 	v := <-volumes
@@ -381,7 +430,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
 		if blk.matchesRef(m.ref) {
-			return &m
+			return m
 		}
 	}
 
@@ -409,4 +458,25 @@ func handleLuksBlockDevice(blk *blkInfo) error {
 	info("a mapping for LUKS device %s has been found", blk.path)
 
 	return luksOpen(blk.path, m)
+}
+
+func findOrCreateLuksMapping(uuid UUID) *luksMapping {
+	blk := blkInfo{
+		uuid: uuid,
+	}
+
+	for _, o := range luksMappings {
+		if blk.matchesRef(o.ref) {
+			return o
+		}
+	}
+
+	// didn't locate the device make a new one
+	m := &luksMapping{
+		ref:  &deviceRef{refFsUUID, uuid},
+		name: "luks-" + uuid.toString(),
+	}
+	luksMappings = append(luksMappings, m)
+
+	return m
 }
