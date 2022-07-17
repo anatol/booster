@@ -123,6 +123,7 @@ func getNextParam(params string, index int) (string, string, int) {
 			if (!keyComplete && len(key) > 0) || (keyComplete && len(value) > 0) {
 				// error, this quote is inside real characters
 				// we are going to recover as best we can, just copy the quote and hope for the best
+				warning("while parsing cmdline parameter unexpected \" found at %d, input may be malformed, attempting to proceed", index+i)
 				copyRune(r)
 				continue
 			}
@@ -160,6 +161,7 @@ func parseParams(params string) error {
 		switch key {
 		case "":
 			// probably trailing whitespace, just ignore it
+			warning("attempting to parse a parameter returned a blank key, cmdline may be malformed somewhere around %d", i)
 		case "booster.log":
 			for _, p := range strings.Split(value, ",") {
 				switch p {
