@@ -83,6 +83,11 @@ func getNextParam(params string, index int) (string, string, int) {
 		}
 
 		switch r {
+		case '\\':
+			// now in copy mode if we were not already
+			copyMode = true
+			// escaping something, update flag and move on
+			escaping = true
 		case 0, '\n', '\r', '\t', ' ':
 			// if we haven't seen any non-whitespace yet just continue
 			if !copyMode {
@@ -97,9 +102,6 @@ func getNextParam(params string, index int) (string, string, int) {
 
 			// if we are in quotes we just copy it through
 			copyRune(r)
-		case '\\':
-			// escaping something, update flag and move on
-			escaping = true
 		case '"':
 			// now in copy mode if we were not already
 			copyMode = true

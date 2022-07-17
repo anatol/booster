@@ -50,6 +50,8 @@ func TestGetNextParam(t *testing.T) {
 	}
 
 	var tests = []test{
+		// \param00=test0 // an odd case, but we will allow it
+		test{"\\param00=test0", "param00", "test0", 14},
 		// param01=test0
 		test{"param01=test0", "param01", "test0", 13},
 		// "param02=test0"
