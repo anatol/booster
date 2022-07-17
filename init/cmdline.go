@@ -83,7 +83,7 @@ func getNextParam(params string, index int) (string, string, int) {
 		}
 
 		switch r {
-		case '\000', '\n', '\r', '\t', ' ':
+		case 0, '\n', '\r', '\t', ' ':
 			// if we haven't seen any non-whitespace yet just continue
 			if !copyMode {
 				continue
@@ -101,10 +101,31 @@ func getNextParam(params string, index int) (string, string, int) {
 			// escaping something, update flag and move on
 			escaping = true
 		case '"':
-			// we changed quote mode
-			inQuote = !inQuote
-			// also now in copy mode if we were not already
+			// now in copy mode if we were not already
 			copyMode = true
+
+			// if we are in quote mode this ends it
+			if inQuote {
+				inQuote = false
+
+				// if we have parsed a key already this ends our parse too, otherwise continue as normal
+				if keyComplete {
+					return key, value, index + i + 1
+				}
+
+				continue
+			}
+
+			// if we are parsing a key, and it isn't empty, then something has gone wrong
+			// same for value
+			if (!keyComplete && len(key) > 0) || (keyComplete && len(value) > 0) {
+				// error, this quote is inside real characters
+				// we are going to recover as best we can, just copy the quote and hope for the best
+				copyRune(r)
+				continue
+			}
+
+			inQuote = true
 		case '=':
 			// this separates key=value, but only while in key mode
 			if !keyComplete {
@@ -196,7 +217,7 @@ func parseParams(params string) error {
 			if len(parts) != 2 {
 				return fmt.Errorf("invalid rd.luks.name kernel parameter %s, expected format rd.luks.name=<UUID>=<name>", value)
 			}
-			uuid, err := parseUUID(stripQuotes(parts[0]))
+			uuid, err := parseUUID(parts[0])
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s %v", parts[0], err)
 			}
@@ -207,15 +228,14 @@ func parseParams(params string) error {
 			}
 			luksMappings = append(luksMappings, dev)
 		case "rd.luks.uuid":
-			stripped := stripQuotes(value)
-			u, err := parseUUID(stripped)
+			u, err := parseUUID(value)
 			if err != nil {
 				return fmt.Errorf("invalid UUID %s in rd.luks.uuid boot param: %v", value, err)
 			}
 
 			dev := luksMapping{
 				ref:  &deviceRef{refFsUUID, u},
-				name: "luks-" + stripped,
+				name: "luks-" + value,
 			}
 			luksMappings = append(luksMappings, dev)
 		default:
