@@ -51,53 +51,53 @@ func TestGetNextParam(t *testing.T) {
 
 	var tests = []test{
 		// \param00=test0 // an odd case, but we will allow it
-		test{"\\param00=test0", "param00", "test0", 14},
+		{"\\param00=test0", "param00", "test0", 14},
 		// param01=test0
-		test{"param01=test0", "param01", "test0", 13},
+		{"param01=test0", "param01", "test0", 13},
 		// "param02=test0"
-		test{"\"param02=test0\"", "param02", "test0", 15},
+		{"\"param02=test0\"", "param02", "test0", 15},
 		// param03="test0"
-		test{"param03=\"test0\"", "param03", "test0", 15},
+		{"param03=\"test0\"", "param03", "test0", 15},
 		// '   param04=test0   '
-		test{"   param04=test0   ", "param04", "test0", 17},
+		{"   param04=test0   ", "param04", "test0", 17},
 		// param05=te\0st
-		test{"param05=te\000st0", "param05", "te", 11},
+		{"param05=te\000st0", "param05", "te", 11},
 		// [tab]param06=test0[tab]
-		test{"\tparam06=test0\t", "param06", "test0", 15},
+		{"\tparam06=test0\t", "param06", "test0", 15},
 		// param07=te"st0
-		test{"param07=te\"st0", "param07", "te\"st0", 14},
+		{"param07=te\"st0", "param07", "te\"st0", 14},
 		// par"am08=test0
-		test{"par\"am08=test0", "par\"am08", "test0", 14},
+		{"par\"am08=test0", "par\"am08", "test0", 14},
 		// param09=test1=test2
-		test{"param09=test1=test2", "param09", "test1=test2", 19},
+		{"param09=test1=test2", "param09", "test1=test2", 19},
 		// param10=\"test1=test2\"
-		test{"param10=\"test1=test2\"", "param10", "test1=test2", 21},
+		{"param10=\"test1=test2\"", "param10", "test1=test2", 21},
 		// param11
-		test{"param11", "param11", "", 7},
+		{"param11", "param11", "", 7},
 		// "param12"
-		test{"\"param12\"", "param12", "", 9},
+		{"\"param12\"", "param12", "", 9},
 		// param13=
-		test{"param13=", "param13", "", 8},
+		{"param13=", "param13", "", 8},
 		// param14=te\ st0
-		test{"param14=te\\ st0", "param14", "te st0", 15},
+		{"param14=te\\ st0", "param14", "te st0", 15},
 		// param15="te\"st0"
-		test{"param15=\"te\\\"st0\"", "param15", "te\"st0", 17},
+		{"param15=\"te\\\"st0\"", "param15", "te\"st0", 17},
 		// param16=te"st0
-		test{"param16=te\"st0", "param16", "te\"st0", 14},
+		{"param16=te\"st0", "param16", "te\"st0", 14},
 		// param17="te"st0"
-		test{"param17=\"te\"st0\"", "param17", "te", 12},
+		{"param17=\"te\"st0\"", "param17", "te", 12},
 		// param18"=test0
-		test{"param18\"=test0", "param18\"", "test0", 14},
+		{"param18\"=test0", "param18\"", "test0", 14},
 		// param19=te\nst0
-		test{"param19=te\nst0", "param19", "te", 11},
+		{"param19=te\nst0", "param19", "te", 11},
 		// param20=test0\r
-		test{"param20=test0\r", "param20", "test0", 14},
+		{"param20=test0\r", "param20", "test0", 14},
 		// =test0 // This is a worst case bad junk input, it will return empty key
-		test{"=test0", "", "test0", 6},
+		{"=test0", "", "test0", 6},
 		// param21="test0 param22="test1" // This is a worst case bad junk input, it will mangle 21 and swallow 22
-		test{"param21=\"test0 param22=\"test1\"", "param21", "test0 param22=", 24},
+		{"param21=\"test0 param22=\"test1\"", "param21", "test0 param22=", 24},
 		// param23="test0 param24=test1 // This is a worst case bad junk input, it will mangle 23 and swallow 24
-		test{"param23=\"test0 param24=test1", "param23", "test0 param24=test1", 28},
+		{"param23=\"test0 param24=test1", "param23", "test0 param24=test1", 28},
 	}
 
 	for _, test := range tests {
