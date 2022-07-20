@@ -28,6 +28,7 @@ pkgver() {
 }
 
 build() {
+  go env -w GO111MODULE=on
   cd booster
 
   cd generator

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,6 +22,8 @@ func checkFs(t *testing.T, name, fstype, uuidStr, label string, size int64, scri
 		script = strings.ReplaceAll(script, "$UUID", uuidStr)
 		script = strings.ReplaceAll(script, "$LABEL", label)
 
+		fmt.Print("Script:")
+		fmt.Println(script)
 		f, err := os.Create(asset)
 		require.NoError(t, err)
 		_ = f.Close()

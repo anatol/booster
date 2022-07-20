@@ -3,7 +3,10 @@
 kernels=()
 all=0
 
-while read -r line; do
+
+for arg; do
+    line=$arg
+   echo "$line"
     # line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
     if [[ "${line}" != usr/lib/modules/* ]]; then
         # triggers when it's a change to usr/lib/booster/*
@@ -13,6 +16,9 @@ while read -r line; do
 
     kernels+=("/${line%/vmlinuz}")
 done
+
+echo $kernels
+exit()
 
 if [ "${all}" -eq "1" ]; then
     # find out all installed kernels
@@ -25,6 +31,7 @@ for kernel in "${kernels[@]}"; do
         continue
     fi
     read -r pkgbase < "${kernel}/pkgbase"
-
+    
+    echo "removing"
     rm /boot/booster-${pkgbase}.img
 done

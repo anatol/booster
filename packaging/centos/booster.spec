@@ -23,6 +23,7 @@ RPM build for booster package
 
 %build
 
+# TEST_DISABLE_KVM=1 
 # create directory to host action and script files
 sudo mkdir /usr/share/yum-plugins/post-actions || : # try and make directory or do nothing
 sudo mkdir /usr/share/yum-plugins/post-actions/scripts/ || : # try and make directory or do nothing
