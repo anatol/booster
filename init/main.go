@@ -180,11 +180,9 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		return handleGptBlockDevice(blk)
 	}
 
-	if cmdResume != nil {
-		if blk.matchesRef(cmdResume) {
-			if err := resume(devpath); err != nil {
-				return err
-			}
+	if blk.matchesRef(cmdResume) {
+		if err := resume(devpath); err != nil {
+			return err
 		}
 	}
 
@@ -220,9 +218,7 @@ func handleGptBlockDevice(blk *blkInfo) error {
 		blk.resolveGptRef(cmdRoot)
 	}
 
-	if cmdResume != nil {
-		blk.resolveGptRef(cmdResume)
-	}
+	blk.resolveGptRef(cmdResume)
 
 	for _, m := range luksMappings {
 		blk.resolveGptRef(m.ref)

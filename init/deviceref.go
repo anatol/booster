@@ -36,6 +36,10 @@ type gptPartoffData struct {
 }
 
 func (blk *blkInfo) matchesRef(d *deviceRef) bool {
+	if d == nil {
+		return false
+	}
+
 	switch d.format {
 	case refPath:
 		path := d.data.(string)
@@ -80,6 +84,10 @@ func calculateDevPath(parent string, partition int) string {
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
 func (blk *blkInfo) resolveGptRef(d *deviceRef) {
+	if d == nil {
+		return
+	}
+
 	if !d.dependsOnGpt() {
 		return
 	}
