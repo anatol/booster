@@ -345,13 +345,7 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
-	if rootRo {
-		rootMountFlags |= unix.MS_RDONLY
-	}
-	if rootRw {
-		rootMountFlags &^= unix.MS_RDONLY
-	}
+	rootMountFlags, options := mountFlags()
 	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
 	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
 		return err
@@ -359,6 +353,17 @@ func mountRootFs(dev, fstype string) error {
 
 	rootMounted.Done()
 	return nil
+}
+
+func mountFlags() (uintptr, string) {
+	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
+	if rootRo {
+		rootMountFlags |= unix.MS_RDONLY
+	}
+	if rootRw {
+		rootMountFlags &^= unix.MS_RDONLY
+	}
+	return rootMountFlags, options
 }
 
 // sunderMountFlags separates list of mount parameters (usually provided by a user) into `flags` and `options`
