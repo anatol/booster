@@ -74,7 +74,7 @@ func startSwtpm() (*os.Process, []string, error) {
 		cmd.Stderr = os.Stderr
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, nil, err
+		return nil, nil, unwrapExitError(err)
 	}
 
 	// wait till swtpm really starts
@@ -138,7 +138,7 @@ func shell(script string, env ...string) error {
 		sh.Stdout = os.Stdout
 		sh.Stderr = os.Stderr
 	}
-	return sh.Run()
+	return unwrapExitError(sh.Run())
 }
 
 func fileExists(file string) bool {
@@ -189,7 +189,7 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 		cmd.Stderr = os.Stderr
 	}
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("Cannot generate booster.img: %v", err)
+		return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
 	}
 
 	// check generated image integrity
@@ -213,7 +213,7 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 		verifyCmd.Stderr = os.Stderr
 	}
 	if err := verifyCmd.Run(); err != nil {
-		return "", fmt.Errorf("unable to verify integrity of the output image %s: %v", output, err)
+		return "", fmt.Errorf("unable to verify integrity of the output image %s: %v", output, unwrapExitError(err))
 	}
 
 	return output, nil
@@ -405,7 +405,7 @@ func compileBinaries(dir string) error {
 
 	if exists := fileExists("assets/init"); !exists {
 		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {
-			return err
+			return unwrapExitError(err)
 		}
 	}
 
@@ -428,7 +428,7 @@ func compileBinaries(dir string) error {
 		cmd.Stderr = os.Stderr
 	}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Cannot build init binary: %v", err)
+		return fmt.Errorf("Cannot build init binary: %v", unwrapExitError(err))
 	}
 
 	// Generate initramfs
@@ -442,8 +442,18 @@ func compileBinaries(dir string) error {
 		cmd.Stderr = os.Stderr
 	}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Cannot build generator binary: %v", err)
+		return fmt.Errorf("Cannot build generator binary: %v", unwrapExitError(err))
 	}
 
 	return os.Chdir(cwd)
+}
+
+func unwrapExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Errorf("%v: %v", err, string(exitErr.Stderr))
+	}
+	return err
 }

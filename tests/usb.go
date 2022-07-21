@@ -19,7 +19,7 @@ func (usb usbdev) toQemuParams() []string {
 func detectYubikeys() ([]usbdev, error) {
 	out, err := exec.Command("lsusb").CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, unwrapExitError(err)
 	}
 
 	yubikeys := make([]usbdev, 0)
