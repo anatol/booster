@@ -26,6 +26,7 @@ sudo mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=
 sudo mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@srv $cryptdev $mount/srv
 sudo mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@var $cryptdev $mount/var
 sudo pacstrap -c -M $mount base openssh
+sudo umount $mount/dev
 genfstab -U $mount | sudo tee $mount/etc/fstab
 
 echo "[Match]
