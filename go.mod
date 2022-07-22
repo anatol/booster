@@ -5,10 +5,10 @@ go 1.17
 require (
 	github.com/anatol/clevis.go v0.0.0-20220328171009-4f94523e7d17
 	github.com/anatol/devmapper.go v0.0.0-20211210164347-f67e20c4e7f7
+	github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f
 	github.com/anatol/luks.go v0.0.0-20211210165108-5d9a15b4f614
 	github.com/anatol/smart.go v0.0.0-20220218195151-5ee9e8fa73f0
 	github.com/anatol/tang.go v0.0.0-20220401181244-14a5a12378ca
-	github.com/anatol/uevent.go v1.0.1-0.20210811163347-3e166d38c549
 	github.com/anatol/vmtest v0.0.0-20211215032353-afd7b1dd38ef
 	github.com/cavaliergopher/cpio v1.0.1
 	github.com/google/go-tpm v0.3.3

@@ -637,6 +637,8 @@ func switchRoot() error {
 
 // Cleanup the state before handing off the machine to the new init
 func cleanup() {
+	close(udevQuitLoop)
+	udevConn.Close()
 	shutdownNetwork()
 }
 

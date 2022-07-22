@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,14 +9,14 @@ import (
 	"strings"
 
 	"github.com/anatol/devmapper.go"
-	"github.com/anatol/uevent.go"
+	"github.com/anatol/go-udev/netlink"
 	"golang.org/x/sys/unix"
 )
 
 // validDmEvent checks whether this udev event has correct flags.
 // This is similar to checks done by /usr/lib/udev/rules.d/10-dm.rules udev rules.
-func validDmEvent(ev *uevent.Uevent) bool {
-	dmCookie := ev.Vars["DM_COOKIE"]
+func validDmEvent(ev netlink.UEvent) bool {
+	dmCookie := ev.Env["DM_COOKIE"]
 	if dmCookie == "" {
 		info("udev event does not contain DM_COOKIE")
 		return false
@@ -62,57 +61,61 @@ func validDmEvent(ev *uevent.Uevent) bool {
 	return true
 }
 
-var udevReader io.ReadCloser
+var (
+	udevQuitLoop chan struct{}
+	udevConn     *netlink.UEventConn
+)
 
 func udevListener() error {
-	defer func() {
-		// uevent.NewDecoder uses bufio.ReadString() that is blocking. If we try to close the underlying udev file descriptor
-		// while bufio tries to read from it then bufio panics. See issues #22, #31 and #153
-		// There is no clear way to prevent the panic so we just recover from it here and then safely exit the goroutine.
-		if r := recover(); r != nil {
-			warning("recovered udevListener panic: %v", r)
-		}
-	}()
-
-	var err error
-	udevReader, err = uevent.NewReader()
-	if err != nil {
-		return err
+	udevConn = new(netlink.UEventConn)
+	if err := udevConn.Connect(netlink.KernelEvent); err != nil {
+		return fmt.Errorf("unable to connect to Netlink Kobject UEvent socket")
 	}
-	defer udevReader.Close()
+	defer udevConn.Close()
 
-	dec := uevent.NewDecoder(udevReader)
+	queue := make(chan netlink.UEvent)
+	errors := make(chan error)
+	udevQuitLoop = udevConn.Monitor(queue, errors, nil)
 
+exit:
 	for {
-		ev, err := dec.Decode()
-		if err == io.EOF {
-			// EOF is returned if uevent reader is closed concurrently
-			return nil
+		select {
+		case ev, ok := <-queue:
+			if !ok {
+				break exit
+			}
+			handleUdevEvent(ev)
+		case err, ok := <-errors:
+			if !ok {
+				break exit
+			}
+			warning("udev: %+v", err)
 		}
-		if err != nil {
-			return err
-		}
-		debug("udev event %+v", *ev)
+	}
 
-		// TODO: run each udev in a separate goroutine
-		if modalias, ok := ev.Vars["MODALIAS"]; ok {
-			go func() { check(loadModalias(modalias)) }()
-		} else if ev.Subsystem == "block" {
-			go func() { check(handleBlockDeviceUevent(ev)) }()
-		} else if ev.Subsystem == "net" {
-			go func() { check(handleNetworkUevent(ev)) }()
-		} else if ev.Subsystem == "hidraw" && ev.Action == "add" {
-			go func() { hidrawDevices <- ev.Vars["DEVNAME"] }()
-		}
+	return nil
+}
+
+func handleUdevEvent(ev netlink.UEvent) {
+	debug("udev event %+v", ev)
+
+	if modalias, ok := ev.Env["MODALIAS"]; ok {
+		go func() { check(loadModalias(modalias)) }()
+	} else if ev.Env["SUBSYSTEM"] == "block" {
+		go func() { check(handleBlockDeviceUevent(ev)) }()
+	} else if ev.Env["SUBSYSTEM"] == "net" {
+		go func() { check(handleNetworkUevent(ev)) }()
+	} else if ev.Env["SUBSYSTEM"] == "hidraw" && ev.Action == "add" {
+		go func() { hidrawDevices <- ev.Env["DEVNAME"] }()
 	}
 }
 
-func handleNetworkUevent(ev *uevent.Uevent) error {
+func handleNetworkUevent(ev netlink.UEvent) error {
 	if ev.Action != "add" {
 		return nil
 	}
 
-	ifname := ev.Vars["INTERFACE"]
+	ifname := ev.Env["INTERFACE"]
 	if ifname == "lo" {
 		return nil
 	}
@@ -127,8 +130,8 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 
 var dmNameRe = regexp.MustCompile(`dm-\d+`)
 
-func handleBlockDeviceUevent(ev *uevent.Uevent) error {
-	devName := ev.Vars["DEVNAME"]
+func handleBlockDeviceUevent(ev netlink.UEvent) error {
+	devName := ev.Env["DEVNAME"]
 
 	if dmNameRe.MatchString(devName) {
 		// mapper devices should not be added on "add" uevent
@@ -146,10 +149,10 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 
 	devPath := "/dev/" + devName
 
-	isPartition := ev.Vars["DEVTYPE"] == "partition"
+	isPartition := ev.Env["DEVTYPE"] == "partition"
 	if isPartition {
 		// if this device represents a partition inside a table (like GPT) then wait till the table is processed
-		parts := strings.Split(ev.Devpath, "/")
+		parts := strings.Split(ev.KObj, "/")
 		tablePath := "/dev/" + parts[len(parts)-2]
 		waitForDeviceToProcess(tablePath)
 	}
@@ -160,14 +163,14 @@ func handleBlockDeviceUevent(ev *uevent.Uevent) error {
 // handleMapperDeviceUevent handles device mapper related uevent
 // if udev event is valid then it return non-empty string that contains
 // new mapper device name (e.g. /dev/mapper/name)
-func handleMapperDeviceUevent(ev *uevent.Uevent) error {
-	devName := ev.Vars["DEVNAME"]
+func handleMapperDeviceUevent(ev netlink.UEvent) error {
+	devName := ev.Env["DEVNAME"]
 
-	major, err := strconv.Atoi(ev.Vars["MAJOR"])
+	major, err := strconv.Atoi(ev.Env["MAJOR"])
 	if err != nil {
 		return fmt.Errorf("udev['MAJOR']: %v", err)
 	}
-	minor, err := strconv.Atoi(ev.Vars["MINOR"])
+	minor, err := strconv.Atoi(ev.Env["MINOR"])
 	if err != nil {
 		return fmt.Errorf("udev['MAJOR']: %v", err)
 	}
