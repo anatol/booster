@@ -795,8 +795,8 @@ func boost() error {
 }
 
 func mountZfsRoot() error {
-	// note that 'zfs' module already in modulesForceLoad list and it already started loding
-	// this loadModule() is for zfs module syncronization - we need to wait till the full module loading
+	// note that 'zfs' module already in modulesForceLoad list and it already started loading
+	// this loadModule() is for zfs module synchronization - we need to wait till the full module loading
 	// before we try to import a pool
 	zfsWg, err := loadModules("zfs")
 	if err != nil {

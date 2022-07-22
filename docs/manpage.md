@@ -141,7 +141,7 @@ Device reference has one of the following values:
  * `PARTUUID=$UUID` or `/dev/disk/by-partuuid/$UUID` references device by GPT partition UUID.
  * `PARTUUID=$UUID/PARTNROFF=$OFFSET` references device by $OFFSET from a GPT partition specified by $UUID e.g. `PARTUUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665/PARTNROFF=2`.
  * `PARTLABEL=$LABEL` or `/dev/disk/by-partlabel/$LABEL` references device by GPT partition label.
- * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by determenistic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
+ * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by deterministic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
  * `WWID=$ID` or `/dev/disk/by-id/$ID` references device by its wwid e.g. `nvme-KXG6AZNV256G_TOSHIBA_40SA13GZF6B1-part3`
 
 ### UUID parameters
