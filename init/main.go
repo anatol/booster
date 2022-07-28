@@ -159,6 +159,17 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 			if err := os.Symlink(devpath, "/dev/disk/by-id/"+wwid); err != nil {
 				return err
 			}
+
+			if blk.format == "gpt" {
+				for _, p := range blk.data.(gptData).partitions {
+					num := p.num
+					partPath := calculateDevPath(devpath, num)
+					path := fmt.Sprintf("/dev/disk/by-id/%s-part%d", wwid, num+1) // devname partitions start with "1"
+					if err := os.Symlink(partPath, path); err != nil {
+						return err
+					}
+				}
+			}
 		}
 
 		blk.hwPath, err = hwPath(devpath)
@@ -167,6 +178,16 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		}
 		if err := os.Symlink(devpath, "/dev/disk/by-path/"+blk.hwPath); err != nil {
 			return err
+		}
+		if blk.format == "gpt" {
+			for _, p := range blk.data.(gptData).partitions {
+				num := p.num
+				partPath := calculateDevPath(devpath, num)
+				path := fmt.Sprintf("/dev/disk/by-path/%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
+				if err := os.Symlink(partPath, path); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
