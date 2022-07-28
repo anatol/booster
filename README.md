@@ -38,7 +38,7 @@ Run `xbps-reconfigure -f linux` to create the initramfs for a previously install
 
 #### Manual
 Or optionally the image can be generated manually as `booster -o mybooster.img`. Note that by default booster generates
-host specific images with minimum binaries needed for the current host. Providing `-universal` flag to `booster` tool
+host specific images with minimum binaries needed for the current host. Providing `--universal` flag to `booster` tool
 will add more modules and tools and the result image will be bigger.
 
 Once the image is generated it is time to configure the bootloader.
