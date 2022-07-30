@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,18 +120,6 @@ func handleNetworkUevent(ev *uevent.Uevent) error {
 	if config.Network == nil {
 		info("network is disabled, skipping interface %s", ifname)
 		return nil
-	}
-
-	if len(config.Network.Interfaces) > 0 {
-		i, err := net.InterfaceByName(ifname)
-		if err != nil {
-			return err
-		}
-
-		if !macListContains(i.HardwareAddr, config.Network.Interfaces) {
-			info("interface %s is not in 'active' list, skipping it", ifname)
-			return nil
-		}
 	}
 
 	return initializeNetworkInterface(ifname)

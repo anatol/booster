@@ -93,10 +93,18 @@ func shutdownNetwork() {
 var initializedIfnames []string
 
 func initializeNetworkInterface(ifname string) error {
-	debug("%s: start initializing network interface", ifname)
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
 		return err
+	}
+	hardwareAddr := link.Attrs().HardwareAddr
+	debug("detected network interface %s (%s)", ifname, hardwareAddr)
+
+	if len(config.Network.Interfaces) > 0 {
+		if !macListContains(hardwareAddr, config.Network.Interfaces) {
+			info("interface %s (%s) is not in 'active' list, skipping it", ifname, hardwareAddr)
+			return nil
+		}
 	}
 
 	ch := make(chan netlink.LinkUpdate)
