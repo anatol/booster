@@ -55,7 +55,7 @@ func copyFile(src, dst string) (int64, error) {
 // Note: if you see tpm2 tests fail with "integrity check failed" error make sure you pull clevis changes from
 // https://github.com/latchset/clevis/issues/244
 func startSwtpm() (*os.Process, []string, error) {
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
 		return nil, nil, err
@@ -85,7 +85,7 @@ func startSwtpm() (*os.Process, []string, error) {
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tang/key.pub"); err != nil {
 		return nil, nil, err
@@ -247,6 +247,9 @@ type GeneratorConfig struct {
 	EnableLVM            bool           `yaml:"enable_lvm"`
 	EnableMdraid         bool           `yaml:"enable_mdraid"`
 	MdraidConfigPath     string         `yaml:"mdraid_config_path"`
+	EnableZfs            bool           `yaml:"enable_zfs"`
+	ZfsImportParams      string         `yaml:"zfs_import_params"`
+	ZfsCachePath         string         `yaml:"zfs_cache_path"`
 }
 
 func generateBoosterConfig(output string, opts Opts) error {
@@ -273,6 +276,9 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.EnableLVM = opts.enableLVM
 	conf.EnableMdraid = opts.enableMdraid
 	conf.MdraidConfigPath = opts.mdraidConf
+	conf.EnableZfs = opts.enableZfs
+	conf.ZfsImportParams = opts.zfsImportParams
+	conf.ZfsCachePath = opts.zfsCachePath
 	conf.Modules = opts.modules
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
@@ -280,7 +286,7 @@ func generateBoosterConfig(output string, opts Opts) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(output, data, 0644); err != nil {
+	if err := os.WriteFile(output, data, 0o644); err != nil {
 		return err
 	}
 	return nil
@@ -309,6 +315,9 @@ type Opts struct {
 	enableLVM            bool
 	enableMdraid         bool
 	mdraidConf           string
+	enableZfs            bool
+	zfsImportParams      string
+	zfsCachePath         string // TODO: do we need any of these parameters?
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
@@ -397,7 +406,7 @@ func compileBinaries(dir string) error {
 		return err
 	}
 
-	_ = os.Mkdir("assets", 0755)
+	_ = os.Mkdir("assets", 0o755)
 
 	if exists := fileExists("assets/init"); !exists {
 		if err := exec.Command("gcc", "-static", "-o", "assets/init", "init/init.c").Run(); err != nil {

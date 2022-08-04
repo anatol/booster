@@ -75,7 +75,7 @@ func disableKmsgThrottling() error {
 		return nil
 	}
 
-	return os.WriteFile(sysKmsgFile, enable, 0644)
+	return os.WriteFile(sysKmsgFile, enable, 0o644)
 }
 
 // console prints message to console

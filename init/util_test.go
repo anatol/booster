@@ -72,21 +72,6 @@ func TestFormatUUID(t *testing.T) {
 	require.Equal(t, expected, uuid.toString())
 }
 
-func TestStripQuotes(t *testing.T) {
-	check := func(in, out string) {
-		str := stripQuotes(in)
-		require.Equal(t, out, str)
-	}
-
-	check("Hello", "Hello")
-	check("He\"llo", "He\"llo")
-	check("Hell o", "Hell o")
-	check("\"Hello", "\"Hello")
-	check("Hello\"", "Hello\"")
-	check("\"Hello\"", "Hello")
-	check("\"\"He   llo\"", "\"He   llo")
-}
-
 func TestDeviceNo(t *testing.T) {
 	dir, err := os.ReadDir("/sys/block")
 	require.NoError(t, err)
@@ -120,7 +105,7 @@ func TestFromUnicode16(t *testing.T) {
 		require.Equal(t, out, s)
 	}
 	// examples are generated with 'iconv -f utf-8 -t utf-16le'
-	check([]byte{0x31, 00}, binary.LittleEndian, "1")
+	check([]byte{0x31, 0x00}, binary.LittleEndian, "1")
 	check([]byte{0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x04, 0x0, 0x0, 0x0, 0x0}, binary.LittleEndian, "привет")
 	check([]byte{0x04, 0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x0, 0x0}, binary.BigEndian, "привет")
 }

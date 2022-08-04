@@ -90,13 +90,13 @@ func runUnpack() error {
 	dir := opts.UnpackCommand.Args.OutputDir
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
 		out := filepath.Join(dir, hdr.Name)
-		if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return err
 		}
-		m := hdr.Mode & 0770000
+		m := hdr.Mode & 0o770000
 		switch m {
 		case cpio.TypeDir:
-			if err := os.Mkdir(out, 0755); err != nil {
+			if err := os.Mkdir(out, 0o755); err != nil {
 				return err
 			}
 		case cpio.TypeSymlink:
@@ -147,7 +147,7 @@ func runCat() error {
 
 func runLs() error {
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
-		m := hdr.Mode & 0770000
+		m := hdr.Mode & 0o770000
 		switch m {
 		case cpio.TypeDir:
 			fmt.Printf("%s/\n", hdr.Name)

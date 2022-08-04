@@ -49,7 +49,6 @@ func deviceNo(path string) (uint64, error) {
 	var stat unix.Stat_t
 	if err := unix.Stat(path, &stat); err != nil {
 		return 0, err
-
 	}
 
 	return stat.Rdev, nil
@@ -83,16 +82,6 @@ func (uuid UUID) toString() string {
 		// a regular non-UUID id (e.g. MS-DOS id)
 		return hex.EncodeToString(uuid)
 	}
-}
-
-// stripQuotes removes leading and trailing quote symbols if they wrap the given sentence
-func stripQuotes(in string) string {
-	l := len(in)
-	if in[0] == '"' && in[l-1] == '"' {
-		return in[1 : l-1]
-	}
-
-	return in
 }
 
 func getKernelVersion() (string, error) {

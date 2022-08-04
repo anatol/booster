@@ -183,5 +183,5 @@ func writeResolvConf(servers []net.IP) error {
 	}
 	resolvConf.WriteString("search .\n")
 
-	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0644)
+	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0o644)
 }

@@ -35,6 +35,9 @@ type UserConfig struct {
 	EnableLVM            bool   `yaml:"enable_lvm"`
 	EnableMdraid         bool   `yaml:"enable_mdraid"`
 	MdraidConfigPath     string `yaml:"mdraid_config_path"`
+	EnableZfs            bool   `yaml:"enable_zfs"`
+	ZfsImportParams      string `yaml:"zfs_import_params"`
+	ZfsCachePath         string `yaml:"zfs_cache_path"`
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -143,6 +146,9 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.enableLVM = u.EnableLVM
 	conf.enableMdraid = u.EnableMdraid
 	conf.mdraidConfigPath = u.MdraidConfigPath
+	conf.enableZfs = u.EnableZfs
+	conf.zfsImportParams = u.ZfsImportParams
+	conf.zfsCachePath = u.ZfsCachePath
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {
 		conf.vconsolePath = "/etc/vconsole.conf"

@@ -45,6 +45,8 @@ var (
 	rootFsType     string
 	rootFlags      string
 	rootRo, rootRw bool
+
+	zfsDataset string
 )
 
 type set map[string]bool
@@ -139,18 +141,53 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
+	if blk.uuid != nil {
+		if err := os.Symlink(devpath, "/dev/disk/by-uuid/"+blk.uuid.toString()); err != nil {
+			return err
+		}
+	}
 
 	blk.symlinks = symlinks
+	// TODO: move symlink creation here
 
 	if isDevice {
 		blk.wwid, err = wwid(devpath)
 		if err != nil {
 			return fmt.Errorf("%s: %v", devpath, err)
 		}
+		for _, wwid := range blk.wwid {
+			if err := os.Symlink(devpath, "/dev/disk/by-id/"+wwid); err != nil {
+				return err
+			}
+
+			if blk.format == "gpt" {
+				for _, p := range blk.data.(gptData).partitions {
+					num := p.num
+					partPath := calculateDevPath(devpath, num)
+					path := fmt.Sprintf("/dev/disk/by-id/%s-part%d", wwid, num+1) // devname partitions start with "1"
+					if err := os.Symlink(partPath, path); err != nil {
+						return err
+					}
+				}
+			}
+		}
 
 		blk.hwPath, err = hwPath(devpath)
 		if err != nil {
 			return fmt.Errorf("%s: %v", devpath, err)
+		}
+		if err := os.Symlink(devpath, "/dev/disk/by-path/"+blk.hwPath); err != nil {
+			return err
+		}
+		if blk.format == "gpt" {
+			for _, p := range blk.data.(gptData).partitions {
+				num := p.num
+				partPath := calculateDevPath(devpath, num)
+				path := fmt.Sprintf("/dev/disk/by-path/%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
+				if err := os.Symlink(partPath, path); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -166,11 +203,9 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		return handleGptBlockDevice(blk)
 	}
 
-	if cmdResume != nil {
-		if blk.matchesRef(cmdResume) {
-			if err := resume(devpath); err != nil {
-				return err
-			}
+	if blk.matchesRef(cmdResume) {
+		if err := resume(devpath); err != nil {
+			return err
 		}
 	}
 
@@ -206,12 +241,17 @@ func handleGptBlockDevice(blk *blkInfo) error {
 		blk.resolveGptRef(cmdRoot)
 	}
 
-	if cmdResume != nil {
-		blk.resolveGptRef(cmdResume)
-	}
+	blk.resolveGptRef(cmdResume)
 
 	for _, m := range luksMappings {
 		blk.resolveGptRef(m.ref)
+	}
+
+	for _, part := range gpt.partitions {
+		path := calculateDevPath(blk.path, part.num)
+		if err := os.Symlink(path, "/dev/disk/by-partuuid/"+part.uuid.toString()); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -288,7 +328,7 @@ func resume(devpath string) error {
 
 	info("resuming device %s, devno=(%d,%d)", devpath, major, minor)
 	rd := fmt.Sprintf("%d:%d", major, minor)
-	return os.WriteFile("/sys/power/resume", []byte(rd), 0644)
+	return os.WriteFile("/sys/power/resume", []byte(rd), 0o644)
 }
 
 func fsck(dev string) error {
@@ -328,13 +368,7 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
-	if rootRo {
-		rootMountFlags |= unix.MS_RDONLY
-	}
-	if rootRw {
-		rootMountFlags &^= unix.MS_RDONLY
-	}
+	rootMountFlags, options := mountFlags()
 	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
 	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
 		return err
@@ -342,6 +376,17 @@ func mountRootFs(dev, fstype string) error {
 
 	rootMounted.Done()
 	return nil
+}
+
+func mountFlags() (uintptr, string) {
+	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
+	if rootRo {
+		rootMountFlags |= unix.MS_RDONLY
+	}
+	if rootRw {
+		rootMountFlags &^= unix.MS_RDONLY
+	}
+	return rootMountFlags, options
 }
 
 // sunderMountFlags separates list of mount parameters (usually provided by a user) into `flags` and `options`
@@ -671,7 +716,7 @@ func boost() error {
 	if err := mount("dev", "/dev", "devtmpfs", unix.MS_NOSUID, "mode=0755"); err != nil {
 		return err
 	}
-	devKmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0600)
+	devKmsg, err = os.OpenFile("/dev/kmsg", unix.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -718,7 +763,7 @@ func boost() error {
 	}
 
 	// Per systemd convention https://systemd.io/INITRD_INTERFACE/
-	if err := os.Mkdir("/run/initramfs", 0755); err != nil {
+	if err := os.Mkdir("/run/initramfs", 0o755); err != nil {
 		return err
 	}
 
@@ -738,8 +783,21 @@ func boost() error {
 		return err
 	}
 
+	diskBy := []string{"id", "partuuid", "path", "uuid"}
+	for _, by := range diskBy {
+		if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
+			return err
+		}
+	}
+
 	go func() { check(scanSysModaliases()) }()
 	go func() { check(scanSysBlock()) }()
+
+	if config.EnableZfs {
+		if err := mountZfsRoot(); err != nil {
+			return err
+		}
+	}
 
 	if config.MountTimeout != 0 {
 		// TODO: cancellable, timeout context?
@@ -757,6 +815,61 @@ func boost() error {
 	return switchRoot()
 }
 
+func mountZfsRoot() error {
+	// note that 'zfs' module already in modulesForceLoad list and it already started loading
+	// this loadModule() is for zfs module synchronization - we need to wait till the full module loading
+	// before we try to import a pool
+	zfsWg, err := loadModules("zfs")
+	if err != nil {
+		return err
+	}
+	zfsWg.Wait()
+
+	// TODO: handle zfsDataset == bootfs
+	parts := strings.Split(zfsDataset, "/")
+	pool := parts[0]
+
+	debug("importing zfs pool %s", pool)
+
+	err = exec.Command("zpool", "import", "-c", "/etc/zfs/zpool.cache", "-N", pool).Run()
+	if err != nil {
+		return unwrapExitError(err)
+	}
+
+	// find all child datasets and mount them
+	// zfs list -H -o name -t filesystem -r $zfsDataset
+	var datasets []byte
+	datasets, err = exec.Command("zfs", "list", "-H", "-o", "name", "-t", "filesystem", "-r", zfsDataset).Output()
+	if err != nil {
+		return unwrapExitError(err)
+	}
+
+	flags, options := mountFlags()
+	options = strings.Join([]string{"zfsutil", options}, ",")
+	for _, ds := range strings.Split(strings.TrimSpace(string(datasets)), "\n") {
+		val, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", ds).Output()
+		if err != nil {
+			return unwrapExitError(err)
+		}
+
+		mt := strings.TrimSpace(string(val))
+		switch mt {
+		case "none":
+			continue
+		case "legacy": // todo handle it
+		default:
+			err := mount(ds, filepath.Join(newRoot, mt), "zfs", flags, options)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	rootMounted.Done()
+
+	return nil
+}
+
 var config InitConfig
 
 func readConfig() error {
@@ -769,7 +882,7 @@ func readConfig() error {
 }
 
 func mount(source, target, fstype string, flags uintptr, options string) error {
-	if err := os.MkdirAll(target, 0755); err != nil {
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		return err
 	}
 	if err := unix.Mount(source, target, fstype, flags, options); err != nil {

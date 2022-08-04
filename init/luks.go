@@ -290,7 +290,6 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 		v, err := d.UnsealVolume(s, password)
 		if err == luks.ErrPassphraseDoesNotMatch {
 			continue
-
 		}
 		info("password from %s token #%d matches", t.Type, t.ID)
 		volumes <- v

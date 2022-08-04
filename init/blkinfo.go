@@ -59,8 +59,8 @@ const (
 
 type gptPart struct {
 	num        int // index of the partition int the gpt table
-	typeGUID   []byte
-	uuid       []byte
+	typeGUID   UUID
+	uuid       UUID
 	name       string
 	attributes uint64
 }
@@ -134,11 +134,13 @@ func probeGpt(f *os.File) *blkInfo {
 }
 
 func convertGptUUID(d []byte) []byte {
-	return []byte{d[3], d[2], d[1], d[0],
+	return []byte{
+		d[3], d[2], d[1], d[0],
 		d[5], d[4],
 		d[7], d[6],
 		d[8], d[9],
-		d[10], d[11], d[12], d[13], d[14], d[15]}
+		d[10], d[11], d[12], d[13], d[14], d[15],
+	}
 }
 
 func probeMbr(f *os.File) *blkInfo {

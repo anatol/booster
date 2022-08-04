@@ -69,6 +69,8 @@ Booster advantages:
 
  * `enable_mdraid` is a flag that enables MdRaid assembly at the boot time. This flag also makes sure all the required modules/binaries are added to the image.
 
+ * `enable_zfs` is a flag that enables ZFS filesystem as root filesystem. This flag also makes sure all the required modules/binaries are added to the image. Note that if ZFS is enabled then `zfs=` boot option must be used instead of `root=` boot option.
+
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
 
@@ -113,6 +115,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `resume=$deviceref` device reference to suspend-to-disk device.
+ * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
  * `booster.log` configures booster init logging. It accepts a comma separated list of following values:
 
    One of the level values (from more verbose to less verbose) - `debug`, `info`, `warning`, `error`. If the level is not specified then `info` used by default.
@@ -138,7 +141,7 @@ Device reference has one of the following values:
  * `PARTUUID=$UUID` or `/dev/disk/by-partuuid/$UUID` references device by GPT partition UUID.
  * `PARTUUID=$UUID/PARTNROFF=$OFFSET` references device by $OFFSET from a GPT partition specified by $UUID e.g. `PARTUUID=fd59d06d-ffa8-473b-94f0-6584cb2b6665/PARTNROFF=2`.
  * `PARTLABEL=$LABEL` or `/dev/disk/by-partlabel/$LABEL` references device by GPT partition label.
- * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by determenistic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
+ * `HWPATH=$PATH` or `/dev/disk/by-path/$PATH` references device by deterministic hardware path e.g. `pci-0000:02:00.0-nvme-1-part2`.
  * `WWID=$ID` or `/dev/disk/by-id/$ID` references device by its wwid e.g. `nvme-KXG6AZNV256G_TOSHIBA_40SA13GZF6B1-part3`
 
 ### UUID parameters

@@ -119,7 +119,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 	o.workDir = wd
 
 	modulesDir := filepath.Join(wd, "modules")
-	require.NoError(t, os.Mkdir(modulesDir, 0755))
+	require.NoError(t, os.Mkdir(modulesDir, 0o755))
 
 	for _, l := range o.prepareModulesAt {
 		loc := modulesDir + "/" + l
@@ -139,12 +139,12 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		require.NoError(t, exec.Command("cp", source, loc).Run())
 	}
 
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(o.builtin), 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(o.kernelAliases), 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0644))
-	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(o.softDeps), 0644))
-	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(o.hostModules), 0644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", generateBuiltinFile(o.builtin), 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(o.kernelAliases), 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", generateSoftdepFile(o.softDeps), 0o644))
+	require.NoError(t, os.WriteFile(wd+"/proc_modules", generateProcModulesFile(o.hostModules), 0o644))
 
 	listAsSet := func(in []string) set {
 		out := make(set)
@@ -183,12 +183,12 @@ func createTestInitRamfs(t *testing.T, o *options) {
 	if o.vConsoleConfig != "" {
 		conf.enableVirtualConsole = true
 		conf.vconsolePath = wd + "/vconsole.conf"
-		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(o.vConsoleConfig), 0644))
+		require.NoError(t, os.WriteFile(conf.vconsolePath, []byte(o.vConsoleConfig), 0o644))
 	}
 
 	if o.localeConfig != "" {
 		conf.localePath = wd + "/locale.conf"
-		require.NoError(t, os.WriteFile(conf.localePath, []byte(o.localeConfig), 0644))
+		require.NoError(t, os.WriteFile(conf.localePath, []byte(o.localeConfig), 0o644))
 	}
 
 	err := generateInitRamfs(&conf)
@@ -202,7 +202,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 	require.NoError(t, verifyCompressedFile(compression, wd+"/booster.img"))
 
 	if o.unpackImage {
-		require.NoError(t, os.Mkdir(wd+"/image.unpacked", 0755))
+		require.NoError(t, os.Mkdir(wd+"/image.unpacked", 0o755))
 
 		unpCmd := exec.Command("unp", wd+"/booster.img")
 		unpCmd.Dir = wd + "/image.unpacked"
@@ -419,7 +419,7 @@ func TestExtraFiles(t *testing.T) {
 	files := []string{"e", "q", "z"}
 	d := t.TempDir()
 	for _, f := range files {
-		require.NoError(t, os.WriteFile(d+"/"+f, []byte{}, 0644))
+		require.NoError(t, os.WriteFile(d+"/"+f, []byte{}, 0o644))
 	}
 
 	opts := options{

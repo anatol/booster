@@ -36,6 +36,10 @@ type gptPartoffData struct {
 }
 
 func (blk *blkInfo) matchesRef(d *deviceRef) bool {
+	if d == nil {
+		return false
+	}
+
 	switch d.format {
 	case refPath:
 		path := d.data.(string)
@@ -80,6 +84,10 @@ func calculateDevPath(parent string, partition int) string {
 
 // checks if the reference is a gpt-specific and if yes then tries to resolve it to a device name
 func (blk *blkInfo) resolveGptRef(d *deviceRef) {
+	if d == nil {
+		return
+	}
+
 	if !d.dependsOnGpt() {
 		return
 	}
@@ -182,7 +190,7 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 	if strings.HasPrefix(param, "UUID=") {
 		uuid := strings.TrimPrefix(param, "UUID=")
 
-		u, err := parseUUID(stripQuotes(uuid))
+		u, err := parseUUID(uuid)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
@@ -190,7 +198,7 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 	}
 	if strings.HasPrefix(param, "/dev/disk/by-uuid/") {
 		uuid := strings.TrimPrefix(param, "/dev/disk/by-uuid/")
-		u, err := parseUUID(stripQuotes(uuid))
+		u, err := parseUUID(uuid)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
@@ -214,13 +222,13 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse PARTNROFF= value %s", param)
 			}
-			u, err := parseUUID(stripQuotes(uuid))
+			u, err := parseUUID(uuid)
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 			}
 			return &deviceRef{refGptUUIDPartoff, gptPartoffData{u, partnoff}}, nil
 		} else {
-			u, err := parseUUID(stripQuotes(uuid))
+			u, err := parseUUID(uuid)
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 			}
@@ -229,7 +237,7 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 	}
 	if strings.HasPrefix(param, "/dev/disk/by-partuuid/") {
 		uuid := strings.TrimPrefix(param, "/dev/disk/by-partuuid/")
-		u, err := parseUUID(stripQuotes(uuid))
+		u, err := parseUUID(uuid)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}

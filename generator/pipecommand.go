@@ -67,5 +67,4 @@ func newPipeCommandWriter(w io.Writer, app string, args ...string) (io.WriteClos
 	}
 
 	return pipeCommandWriter{cmd, pipe}, nil
-
 }

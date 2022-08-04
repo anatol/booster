@@ -35,6 +35,7 @@ var assetGenerators = map[string]assetGenerator{
 	"systemd-tpm2.img":         {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
 	"systemd-recovery.img":     {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
 	"swap.raw":                 {"swap.sh", nil},
+	"zfs.img":                  {"zfs.sh", nil},
 
 	// non-images
 	"tpm2/tpm2-00.permall.pristine": {"swtpm.sh", nil},

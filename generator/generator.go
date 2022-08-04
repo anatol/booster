@@ -38,6 +38,9 @@ type generatorConfig struct {
 	enableLVM               bool
 	enableMdraid            bool
 	mdraidConfigPath        string
+	enableZfs               bool
+	zfsImportParams         string
+	zfsCachePath            string
 
 	// virtual console configs
 	enableVirtualConsole     bool
@@ -105,7 +108,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	if err := img.appendExtraFiles(conf.extraFiles); err != nil {
+	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
 		return err
 	}
 
@@ -142,7 +145,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "dm_mod")
-		if err := img.appendExtraFiles([]string{"lvm"}); err != nil {
+		if err := img.appendExtraFiles("lvm"); err != nil {
 			return err
 		}
 	}
@@ -155,7 +158,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 		// preload md_mod for speed. Level-specific drivers (e.g. raid1, raid456) are going to be detected loaded at boot-time
 		conf.modulesForceLoad = append(conf.modulesForceLoad, "md_mod")
 
-		if err := img.appendExtraFiles([]string{"mdadm"}); err != nil {
+		if err := img.appendExtraFiles("mdadm"); err != nil {
 			return err
 		}
 
@@ -167,7 +170,34 @@ func generateInitRamfs(conf *generatorConfig) error {
 		if err != nil {
 			return err
 		}
-		if err := img.AppendContent("/etc/mdadm.conf", 0644, content); err != nil {
+		if err := img.AppendContent("/etc/mdadm.conf", 0o644, content); err != nil {
+			return err
+		}
+	}
+
+	if conf.enableZfs {
+		if err := kmod.activateModules(false, true, "zfs"); err != nil {
+			return err
+		}
+		conf.modulesForceLoad = append(conf.modulesForceLoad, "zfs")
+
+		if err := img.appendExtraFiles("zpool", "zfs"); err != nil {
+			return err
+		}
+
+		zfsCachePath := conf.zfsCachePath
+		if zfsCachePath == "" {
+			zfsCachePath = "/etc/zfs/zpool.cache"
+		}
+		content, err := os.ReadFile(zfsCachePath)
+		if err != nil {
+			return err
+		}
+		if err := img.AppendContent("/etc/zfs/zpool.cache", 0o644, content); err != nil {
+			return err
+		}
+
+		if err := img.AppendFile("/etc/default/zfs"); err != nil {
 			return err
 		}
 	}
@@ -203,7 +233,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	// appending initrd-release file per recommendation from https://systemd.io/INITRD_INTERFACE/
-	if err := img.AppendContent("/etc/initrd-release", 0644, []byte{}); err != nil {
+	if err := img.AppendContent("/etc/initrd-release", 0o644, []byte{}); err != nil {
 		return err
 	}
 
@@ -232,7 +262,7 @@ func appendCompatibilitySymlinks(img *Image) error {
 			return err
 		}
 
-		mode := cpio.FileMode(0777) | cpio.TypeSymlink
+		mode := cpio.FileMode(0o777) | cpio.TypeSymlink
 		if err := img.AppendEntry(l.src, mode, []byte(l.target)); err != nil {
 			return err
 		}
@@ -245,10 +275,10 @@ func (img *Image) appendInitBinary(initBinary string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", initBinary, err)
 	}
-	return img.AppendContent("/init", 0755, content)
+	return img.AppendContent("/init", 0o755, content)
 }
 
-func (img *Image) appendExtraFiles(binaries []string) error {
+func (img *Image) appendExtraFiles(binaries ...string) error {
 	for _, f := range binaries {
 		if !filepath.IsAbs(f) {
 			// If the given name is not an absolute path, assume that it refers
@@ -319,6 +349,8 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.VirtualConsole = vconsole
 	initConfig.EnableLVM = conf.enableLVM
 	initConfig.EnableMdraid = conf.enableMdraid
+	initConfig.EnableZfs = conf.enableZfs
+	initConfig.ZfsImportParams = conf.zfsImportParams
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}
@@ -338,7 +370,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 		return err
 	}
 
-	return img.AppendContent(initConfigPath, 0644, content)
+	return img.AppendContent(initConfigPath, 0o644, content)
 }
 
 func (img *Image) appendAliasesFile(aliases []alias) error {
@@ -349,5 +381,5 @@ func (img *Image) appendAliasesFile(aliases []alias) error {
 		buff.WriteString(a.module)
 		buff.WriteString("\n")
 	}
-	return img.AppendContent(imageModulesDir+"booster.alias", 0644, buff.Bytes())
+	return img.AppendContent(imageModulesDir+"booster.alias", 0o644, buff.Bytes())
 }
