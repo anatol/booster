@@ -53,8 +53,8 @@ func parseCmdline() error {
 // will return the key and value and the next offset to send for the next call
 // note that quotes will be removed after this step and new strings are returned
 // can handle "param=true", param="true", param=true, param="tr ue", "param=tr ue"
-//            "param=tr\"ue", "param=tr\nue", param=test=true, param="test=true"
-//            param1=true\nparam2=false
+// "param=tr\"ue", "param=tr\nue", param=test=true, param="test=true"
+// param1=true\nparam2=false
 func getNextParam(params string, index int) (string, string, int) {
 	keyComplete := false // indicates if we are reading the key or value
 	inQuote := false     // indicates if we are within quotes

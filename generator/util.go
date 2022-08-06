@@ -29,7 +29,8 @@ func parseProperties(data string, strip bool) map[string]string {
 
 // Opening a lot of module files in parallel requires high limit of open file descriptors
 // TODO: Golang's 1024 descriptors limit is removed in 1.19 (https://github.com/golang/go/issues/46279)
-//       drop this function once Golang 1.19 becomes default version.
+//
+//	drop this function once Golang 1.19 becomes default version.
 func increaseOpenFileLimit() {
 	limit := unix.Rlimit{
 		Cur: unix.RLIM_INFINITY,

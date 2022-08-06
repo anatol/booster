@@ -550,9 +550,10 @@ func (k *Kmod) readModulesSoftDep(dir string) (map[string][]string, map[string][
 }
 
 // this function may return multiple matches for the input match, e.g.
-//   modprobe -qaR 'serio:ty06pr00id00ex00'
-//     atkbd
-//     serio_raw
+//
+//	modprobe -qaR 'serio:ty06pr00id00ex00'
+//	  atkbd
+//	  serio_raw
 func matchAlias(needle string, aliases []alias) ([]alias, error) {
 	// TODO: implement it according to https://github.com/vadmium/module-init-tools/blob/master/modprobe.c#L2000
 	var result []alias

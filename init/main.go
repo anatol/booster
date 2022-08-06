@@ -462,8 +462,8 @@ func isSystemd(path string) (bool, error) {
 
 // moveMountpointsToHost moves some of the initramfs mounts into the host filesystem
 // it is needed for example in following cases:
-//    /run might contain some udev state that needs to be passed from initramfs to host
-//    runit expects that /dev/ is mounted at the moment runit starts
+//   - /run might contain some udev state that needs to be passed from initramfs to host
+//   - runit expects that /dev/ is mounted at the moment runit starts
 func moveMountpointsToHost() error {
 	for _, m := range []string{"/run", "/dev", "/proc", "/sys"} {
 		// remount root as it might contain state that we need to pass to the new root
@@ -532,8 +532,8 @@ func deleteContent(path string, rootDev uint64) error {
 // IT IS A DANGEROUS OPERATION
 // We need to be *extra* careful here and do not remove user's content from the root filesystem.
 // Thus we perform many checks to be sure that
-//   * current process is a booster init
-//   * remove files at the iniramfs only and do not cross mount boundaries
+//   - current process is a booster init
+//   - remove files at the iniramfs only and do not cross mount boundaries
 func deleteRamfs() error {
 	if os.Getpid() != 1 {
 		return fmt.Errorf("init PID is not 1")
