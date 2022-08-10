@@ -83,7 +83,7 @@ func TestExt4Wwid(t *testing.T) {
 func TestExt4Hwpath(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
-		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-0:0:0:0"},
+		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-2:0:0:0"},
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()

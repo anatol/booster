@@ -131,7 +131,7 @@ func TestGptWwid(t *testing.T) {
 func TestGptHwpath(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
-		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-0:0:0:0-part3"},
+		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-2:0:0:0-part3"},
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
