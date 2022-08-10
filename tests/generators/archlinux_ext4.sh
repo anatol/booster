@@ -14,7 +14,6 @@ mount=$(mktemp -d)
 sudo mount $lodev $mount
 
 sudo pacstrap -c -M $mount base openssh
-sudo umount $mount/dev
 genfstab -U $mount | sudo tee $mount/etc/fstab
 
 echo "[Match]
