@@ -106,6 +106,19 @@ func markDeviceProcessed(dev string) {
 	wg.Done()
 }
 
+func diskSymlink(typ, oldname, newname string) error {
+	name := fmt.Sprintf("/dev/disk/by-%s/%s", typ, newname)
+	err := os.Symlink(oldname, name)
+	if os.IsExist(err) {
+		// ignore "symlink already exists" error as in some cases (e.g. btrfs multidisk) multiple underlying disks are reported
+		// with the same filesystem UUID.
+		debug("%v", err)
+		err = nil
+	}
+
+	return err
+}
+
 // addBlockDevice is called upon discovering a new block device e.g. via udev events or scanning sysfs.
 // devpath is a full path to the block device and should include /dev/... prefix
 // symlinks is an array of symlinks to the given block device
@@ -141,14 +154,14 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", devpath, err)
 	}
+
+	blk.symlinks = symlinks
+
 	if blk.uuid != nil {
-		if err := os.Symlink(devpath, "/dev/disk/by-uuid/"+blk.uuid.toString()); err != nil {
+		if err := diskSymlink("uuid", devpath, blk.uuid.toString()); err != nil {
 			return err
 		}
 	}
-
-	blk.symlinks = symlinks
-	// TODO: move symlink creation here
 
 	if isDevice {
 		blk.wwid, err = wwid(devpath)
@@ -156,7 +169,7 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 			return fmt.Errorf("%s: %v", devpath, err)
 		}
 		for _, wwid := range blk.wwid {
-			if err := os.Symlink(devpath, "/dev/disk/by-id/"+wwid); err != nil {
+			if err := diskSymlink("id", devpath, wwid); err != nil {
 				return err
 			}
 
@@ -164,8 +177,8 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 				for _, p := range blk.data.(gptData).partitions {
 					num := p.num
 					partPath := calculateDevPath(devpath, num)
-					path := fmt.Sprintf("/dev/disk/by-id/%s-part%d", wwid, num+1) // devname partitions start with "1"
-					if err := os.Symlink(partPath, path); err != nil {
+					name := fmt.Sprintf("%s-part%d", wwid, num+1) // devname partitions start with "1"
+					if err := diskSymlink("id", partPath, name); err != nil {
 						return err
 					}
 				}
@@ -176,15 +189,16 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		if err != nil {
 			return fmt.Errorf("%s: %v", devpath, err)
 		}
-		if err := os.Symlink(devpath, "/dev/disk/by-path/"+blk.hwPath); err != nil {
+		if err := diskSymlink("path", devpath, blk.hwPath); err != nil {
 			return err
 		}
+
 		if blk.format == "gpt" {
 			for _, p := range blk.data.(gptData).partitions {
 				num := p.num
 				partPath := calculateDevPath(devpath, num)
-				path := fmt.Sprintf("/dev/disk/by-path/%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
-				if err := os.Symlink(partPath, path); err != nil {
+				name := fmt.Sprintf("%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
+				if err := diskSymlink("path", partPath, name); err != nil {
 					return err
 				}
 			}
@@ -249,7 +263,7 @@ func handleGptBlockDevice(blk *blkInfo) error {
 
 	for _, part := range gpt.partitions {
 		path := calculateDevPath(blk.path, part.num)
-		if err := os.Symlink(path, "/dev/disk/by-partuuid/"+part.uuid.toString()); err != nil {
+		if err := diskSymlink("partuuid", path, part.uuid.toString()); err != nil {
 			return err
 		}
 	}
