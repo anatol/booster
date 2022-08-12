@@ -37,7 +37,7 @@ Install booster with `xbps-install -S booster`.
 Run `xbps-reconfigure -f linux` to create the initramfs for a previously installed kernel.
 
 #### Manual
-Or optionally the image can be generated manually as `booster -o mybooster.img`. Note that by default booster generates
+Or optionally the image can be generated manually as `booster build mybooster.img`. Note that by default booster generates
 host specific images with minimum binaries needed for the current host. Providing `--universal` flag to `booster` tool
 will add more modules and tools and the result image will be bigger.
 
