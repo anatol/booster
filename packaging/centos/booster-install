@@ -1,46 +1,41 @@
 #!/bin/bash -e
 
-kernels=()
-all=0
-line=$1
+# IF INSTALL ALL: 
+#   build new booster image for all kernel images
+# ELSE 
+#   build booster image for specified kernel module version
 
-if [ $# -eq 0 ]
+
+install_all="$1"
+
+if [ $# -eq 1 ];
 then
-    echo "Usage: ./booster-install <path-of-tracked-file>";
-    exit 0 
+    if [[ ! $install_all ]]; 
+    then
+        echo "Usage: ./booster-install <install_all> <module_version>  -v (for verbose) # install_all is TRUE or FALSE, module_version required if not install_all"
+        exit 0
+    fi
+elif  [ $# -ne 2 ]; then
+    echo "Usage: ./booster-install <install_all> <module_version> -v (for verbose) # install_all is TRUE or FALSE, module_version required if not install_all"
+    exit 0
 fi
 
-echo "Running booster script"
+if [[ "$install_all" == "TRUE" ]]; 
+then 
+    for version in $(cd /usr/lib/modules && dirname -- */modules.dep); do
+        FILE="/boot/booster-$module_version.img"
+        echo "booster build --force --kernel-version $module_version $FILE"
+        booster build --force --kernel-version $module_version $FILE
+    done
 
-
-# line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
-if [[ "${line}" != usr/lib/modules/* ]]; then
-    # triggers when it's a change to usr/lib/booster/*
-    all=1
+else 
+    module_version="$2"
+    if [[ -f /usr/lib/modules/$module_version/modules.dep ]] 
+    then
+        FILE="/boot/booster-$module_version.img"
+        echo "booster build --force --kernel-version $module_version $FILE"
+        booster build --force --kernel-version $module_version $FILE
+    fi
 fi
 
-kernels+=("/${line%/vmlinuz}")
-
-if [ "${all}" -eq "1" ]; then
-    # find out all installed kernels
-    kernels=($(ls -d /usr/lib/modules/*))
-fi
-
-for kernel in "${kernels[@]}"; do
-    echo "${kernels[@]}"
-    # if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
-    #     echo "${kernel}/pkgbase"
-    #     # if pkgbase does not belong to any package then skip this kernel
-    #     continue
-    # fi
-
-    echo "${kernel##/usr/lib/modules/}"    
-    
-    # read -r pkgbase < "${kernel}/pkgbase"
-
-    booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-linux.img 
-    # install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
-done
-
-wait
-
+wait # wait for booster images to build
