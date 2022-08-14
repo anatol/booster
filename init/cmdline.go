@@ -60,11 +60,13 @@ func getNextParam(params string, index int) (string, string, int) {
 	inQuote := false     // indicates if we are within quotes
 	escaping := false    // indicates if we read an escape character "\"
 	copyMode := false    // indicates if we are copying runes yet (leading whitespace trim)
+	var lastRune rune
 	var key, value strings.Builder
 
 	// copy a given rune into the key or value, update copy mode if not set
 	copyRune := func(r rune) {
 		copyMode = true
+		lastRune = r
 		if !keyComplete {
 			key.WriteRune(r)
 		} else {
@@ -119,7 +121,7 @@ func getNextParam(params string, index int) (string, string, int) {
 
 			// if we are parsing a key, and it isn't empty, then something has gone wrong
 			// same for value
-			if (!keyComplete && key.Len() > 0) || (keyComplete && value.Len() > 0) {
+			if (!keyComplete && key.Len() > 0) || (keyComplete && value.Len() > 0 && lastRune != '=') {
 				// error, this quote is inside real characters
 				// we are going to recover as best we can, just copy the quote and hope for the best
 				warning("while parsing cmdline parameter unexpected \" found at %d, input may be malformed, attempting to proceed", index+i)

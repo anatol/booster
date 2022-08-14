@@ -50,63 +50,100 @@ func TestGetNextParam(t *testing.T) {
 	}
 
 	tests := []test{
-		// \param00=test0 // an odd case, but we will allow it
-		{"\\param00=test0", "param00", "test0", 14},
-		// param01=test0
-		{"param01=test0", "param01", "test0", 13},
-		// "param02=test0"
-		{"\"param02=test0\"", "param02", "test0", 15},
-		// param03="test0"
-		{"param03=\"test0\"", "param03", "test0", 15},
-		// '   param04=test0   '
-		{"   param04=test0   ", "param04", "test0", 17},
-		// param05=te\0st
-		{"param05=te\000st0", "param05", "te", 11},
-		// [tab]param06=test0[tab]
-		{"\tparam06=test0\t", "param06", "test0", 15},
-		// param07=te"st0
-		{"param07=te\"st0", "param07", "te\"st0", 14},
-		// par"am08=test0
-		{"par\"am08=test0", "par\"am08", "test0", 14},
-		// param09=test1=test2
-		{"param09=test1=test2", "param09", "test1=test2", 19},
-		// param10=\"test1=test2\"
-		{"param10=\"test1=test2\"", "param10", "test1=test2", 21},
+		// \param00=test00 // an odd case, but we will allow it
+		{"\\param00=test00", "param00", "test00", 15},
+		// param01=test01
+		{"param01=test01", "param01", "test01", 14},
+		// "param02=test02"
+		{"\"param02=test02\"", "param02", "test02", 16},
+		// param03="test03"
+		{"param03=\"test03\"", "param03", "test03", 16},
+		// '   param04=test04   '
+		{"   param04=test04   ", "param04", "test04", 18},
+		// param05=te\0st05
+		{"param05=te\000st05", "param05", "te", 11},
+		// [tab]param06=test06[tab]
+		{"\tparam06=test06\t", "param06", "test06", 16},
+		// param07=te"st07
+		{"param07=te\"st07", "param07", "te\"st07", 15},
+		// par"am08=test08
+		{"par\"am08=test08", "par\"am08", "test08", 15},
+		// param09=test09=test10
+		{"param09=test09=test10", "param09", "test09=test10", 21},
+		// param10=\"test11=test12\"
+		{"param10=\"test11=test12\"", "param10", "test11=test12", 23},
 		// param11
 		{"param11", "param11", "", 7},
 		// "param12"
 		{"\"param12\"", "param12", "", 9},
 		// param13=
 		{"param13=", "param13", "", 8},
-		// param14=te\ st0
-		{"param14=te\\ st0", "param14", "te st0", 15},
-		// param15="te\"st0"
-		{"param15=\"te\\\"st0\"", "param15", "te\"st0", 17},
-		// param16=te"st0
-		{"param16=te\"st0", "param16", "te\"st0", 14},
-		// param17="te"st0"
-		{"param17=\"te\"st0\"", "param17", "te", 12},
-		// param18"=test0
-		{"param18\"=test0", "param18\"", "test0", 14},
-		// param19=te\nst0
-		{"param19=te\nst0", "param19", "te", 11},
-		// param20=test0\r
-		{"param20=test0\r", "param20", "test0", 14},
-		// =test0 // This is a worst case bad junk input, it will return empty key
-		{"=test0", "", "test0", 6},
-		// param21="test0 param22="test1" // This is a worst case bad junk input, it will mangle 21 and swallow 22
-		{"param21=\"test0 param22=\"test1\"", "param21", "test0 param22=", 24},
-		// param23="test0 param24=test1 // This is a worst case bad junk input, it will mangle 23 and swallow 24
-		{"param23=\"test0 param24=test1", "param23", "test0 param24=test1", 28},
+		// param14=te\ st14
+		{"param14=te\\ st14", "param14", "te st14", 16},
+		// param15="te\"st15"
+		{"param15=\"te\\\"st15\"", "param15", "te\"st15", 18},
+		// param16=te"st16
+		{"param16=te\"st16", "param16", "te\"st16", 15},
+		// param17="te"st17"
+		{"param17=\"te\"st17\"", "param17", "te", 12},
+		// param18"=test18
+		{"param18\"=test18", "param18\"", "test18", 15},
+		// param19=te\nst19
+		{"param19=te\nst19", "param19", "te", 11},
+		// param20=test20\r
+		{"param20=test20\r", "param20", "test20", 15},
+		// =test21 // This is a worst case bad junk input, it will return empty key
+		{"=test21", "", "test21", 7},
+		// param22="test22 param23="test23" // This is a worst case bad junk input, it will mangle 22 and swallow 23
+		{"param22=\"test22 param23=\"test23\"", "param22", "test22 param23=", 25},
+		// param24="test24 param25=test25 // This is a worst case bad junk input, it will mangle 24 and swallow 25
+		{"param24=\"test24 param25=test25", "param24", "test24 param25=test25", 30},
 	}
 
 	for _, test := range tests {
 		var k, v string
 		var i int
 
+		t.Log("Testing ", test.input, "\n")
 		k, v, i = getNextParam(test.input, 0)
 		require.Equal(t, test.outKey, k)
 		require.Equal(t, test.outValue, v)
 		require.Equal(t, test.outIndex, i)
+	}
+}
+
+func TestGetNextParamMulti(t *testing.T) {
+	type testOutput struct {
+		outKey   string
+		outValue string
+		outIndex int
+	}
+
+	type multiTest struct {
+		input  string
+		output []testOutput
+	}
+
+	tests := []multiTest{
+		{
+			"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\" root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\"",
+			[]testOutput{
+				{"rd.luks.uuid", "639b8fdd-36ba-443e-be3e-e5b335935502", 51},
+				{"root", "UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385", 100},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		var k, v string
+		i := 0
+
+		t.Log("Testing ", test.input)
+		for _, output := range test.output {
+			k, v, i = getNextParam(test.input, i)
+			require.Equal(t, output.outKey, k)
+			require.Equal(t, output.outValue, v)
+			require.Equal(t, output.outIndex, i)
+		}
 	}
 }
