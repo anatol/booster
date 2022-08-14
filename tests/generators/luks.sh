@@ -37,7 +37,8 @@ if [ "$CLEVIS_PIN" != "" ]; then
   # custom TPM2TOOLS_TCTI does not work due to https://github.com/latchset/clevis/issues/244
   sudo TPM2TOOLS_TCTI=swtpm clevis luks bind -y -k - -d $lodev $CLEVIS_PIN "$CLEVIS_CONFIG" <<<"$LUKS_PASSWORD"
 fi
-sudo cryptsetup open --disable-external-tokens --type $LUKS_TYPE $lodev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
+# sudo cryptsetup open --disable-external-tokens --type $LUKS_TYPE $lodev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
+sudo cryptsetup open --type $LUKS_TYPE $lodev $LUKS_DEV_NAME <<<"$LUKS_PASSWORD"
 sudo mkfs.ext4 -U $FS_UUID -L atestlabel12 /dev/mapper/$LUKS_DEV_NAME
 dir=$(mktemp -d)
 sudo mount /dev/mapper/$LUKS_DEV_NAME $dir

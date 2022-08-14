@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -158,14 +157,20 @@ func detectKernelVersion() (map[string]string, error) {
 		if _, err := os.Stat(vmlinux); err != nil {
 			continue
 		}
-		pkgbase, err := os.ReadFile(filepath.Join(kernelsDir, ver, "pkgbase"))
-		if err != nil {
-			return nil, err
-		}
-		pkgbase = bytes.TrimSpace(pkgbase)
 
-		kernels[string(pkgbase)] = ver
+		// TODO: find pkgbase equivalent for Centos
+		// pkgbase, err := os.ReadFile(filepath.Join(kernelsDir, ver, "pkgbase"))
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// pkgbase = bytes.TrimSpace(pkgbase)
+		pkgbase := "linux"
+
+		kernels[pkgbase] = ver
 	}
+
+	kernels["linux"] = files[0].Name()
+	// kernels["linux"] = "5.18.11-1.el7.elrepo.x86_64"
 	return kernels, nil
 }
 

@@ -1,0 +1,27 @@
+# action_key:transaction_state:command
+# action_key can be: pkgglob, /path/to/file (wildcards allowed)
+# transaction_state can be: install,update,remove,any
+# command can be: any shell command
+#  the following variables are allowed to be passed to any command:
+#   $name - package name
+#   $arch - package arch
+#   $ver - package version
+#   $rel - package release
+#   $epoch - package epoch
+#   $repoid - package repository id
+#   $state - text string of state of the package in the transaction set
+#
+# file matches cannot be used with removes b/c we don't have the info available
+
+# PACAKGES:
+# On package installation of booster, create booster image for all kerenel modules
+booster:install:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-install TRUE
+# On package update of booster, create booster image for all kerenel modules
+booster:update:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-install TRUE
+
+# On install of kernel version, generate booster image for this kernel version
+/lib/modules/*:install:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-install FALSE "$ver-$rel.$arch"
+# On kernel update, generate booster image for this new kernel version
+/lib/modules/*:update:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-install FALSE "$ver-$rel.$arch"
+# On removal of kernel version, remove booster for this kernel version
+/lib/modules/*:remove:/bin/bash /usr/share/yum-plugins/post-actions/scripts/booster-remove FALSE "$ver-$rel.$arch"
