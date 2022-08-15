@@ -1,0 +1,26 @@
+#!/bin/bash -e
+
+booster_imgs=(/boot/booster*)
+remove_all="$1"
+
+if [ $# -eq 1 ]; then
+  if [ ! $remove_all ]; then
+    echo "Usage: ./booster-remove <remove_all> <module_version> # remove_all is TRUE or FALSE, module_version required if not remove_all"
+    exit 0
+  fi
+elif [ $# -ne 2 ]; then
+  echo "Usage: ./booster-remove <remove_all> <module_version> # remove_all is TRUE or FALSE, module_version required if not remove_all"
+  exit 0
+fi
+
+if [[ $remove_all == "TRUE" ]]; then
+  for img_path in "${booster_imgs[@]}"; do
+    rm -v "$img_path"
+  done
+else
+  module_version="$2"
+  booster_img="/boot/booster-$module_version.img"
+  if [[ -f $booster_img ]]; then
+    rm -v "$booster_img"
+  fi
+fi
