@@ -1,0 +1,41 @@
+#!/bin/bash -e
+
+# IF INSTALL ALL: 
+#   build new booster image for all kernel images
+# ELSE 
+#   build booster image for specified kernel module version
+
+
+install_all="$1"
+
+if [ $# -eq 1 ];
+then
+    if [[ ! $install_all ]]; 
+    then
+        echo "Usage: ./booster-install <install_all> <module_version>  -v (for verbose) # install_all is TRUE or FALSE, module_version required if not install_all"
+        exit 0
+    fi
+elif  [ $# -ne 2 ]; then
+    echo "Usage: ./booster-install <install_all> <module_version> -v (for verbose) # install_all is TRUE or FALSE, module_version required if not install_all"
+    exit 0
+fi
+
+if [[ "$install_all" == "TRUE" ]]; 
+then 
+    for version in $(cd /usr/lib/modules && dirname -- */modules.dep); do
+        FILE="/boot/booster-$module_version.img"
+        echo "booster build --force --kernel-version $module_version $FILE"
+        booster build --force --kernel-version $module_version $FILE
+    done
+
+else 
+    module_version="$2"
+    if [[ -f /usr/lib/modules/$module_version/modules.dep ]] 
+    then
+        FILE="/boot/booster-$module_version.img"
+        echo "booster build --force --kernel-version $module_version $FILE"
+        booster build --force --kernel-version $module_version $FILE
+    fi
+fi
+
+wait # wait for booster images to build
