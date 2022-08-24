@@ -1,5 +1,16 @@
 Booster - fast and secure initramfs generator
 
+Release 0.9 (2022 Aug 24)
+  * Load 'efivarfs' before mounting the filesystem (#149)
+  * generator: add drivers/ata to the list of default modules (#149)
+  * Recover panic in udev goroutine (#22 #31 #153)
+  * Always use path/filepath pkg for operating systems paths
+  * Adding a more advanced parser to allow handling more complex cmdline parameters (#73)
+  * Add zfs support (#33)
+  * Print NIC hardware address (#155)
+  * Replace github.com/s-urbaniak/uevent.go with github.com/pilebones/go-udev/netlink (#155)
+  * Add support to allow unlocking a luks volume by keyfile (#37)
+
 Release 0.8 (2022 May 6)
   * Add `booster.log` boot parameter that replaces and extends the functionality of `booster.debug`. `booster.debug` is marked as deprecated.
   * `booster.disable_concurrent_module_loading` boot parameter has been removed. This parameter has been used as a safety net if concurrent module loading does not work properly. Concurrent module loading has been thoroughly tested and found no major issues. Drop the unneeded parameter.
@@ -14,7 +25,7 @@ Release 0.8 (2022 May 6)
   * Add support for partitions used for hibernation
   * Add uas to the list of default modules (#121)
   * Handle multiple luks mappings in the kernel command line (#124)
-^  * Handle firmware files compressed with xz (#127)
+  * Handle firmware files compressed with xz (#127)
   * Handle non-/usr filesystem hierarchy (such as used by Alpine Linux)
   * Add /usr/lib64 to the list of elf directories to handle Fedora Linux (#137)
   * Handle HWPATH=xxx device reference in boot parameters (#112)
