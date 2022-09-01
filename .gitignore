@@ -1,1 +1,17 @@
+# IDE config files
 .idea
+
+# Build artifacts
+init/init
+generator/generator
+
+# Assets
+init/assets
+tests/assets
+generator/assets/*.cmd
+generator/assets/*.symvers
+generator/assets/*.order
+generator/assets/*.ko*
+generator/assets/*.mod
+generator/assets/*.mod.*
+generator/assets/*.o
