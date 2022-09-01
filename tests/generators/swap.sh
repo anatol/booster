@@ -1,13 +1,15 @@
+#!/usr/bin/env bash
+
 trap 'quit' EXIT ERR
 
 quit() {
   set +o errexit
-  sudo losetup -d $lodev
+  sudo losetup -d "${lodev}"
 }
 
-truncate --size 10G $OUTPUT
-lodev=$(sudo losetup -f -P --show $OUTPUT)
-sudo fdisk $lodev <<<"g
+truncate --size 10G "${OUTPUT}"
+lodev=$(sudo losetup -f -P --show "${OUTPUT}")
+sudo fdisk "${lodev}" <<< "g
 n
 
 
@@ -19,4 +21,4 @@ r
 w
 "
 
-sudo mkswap --uuid 5ec330f5-ac5e-48d2-98b6-87fd3e9b272f ${lodev}p1
+sudo mkswap --uuid 5ec330f5-ac5e-48d2-98b6-87fd3e9b272f "${lodev}p1"
