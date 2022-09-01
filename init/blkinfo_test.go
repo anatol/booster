@@ -65,16 +65,39 @@ func fileExists(file string) bool {
 	return err == nil
 }
 
-func TestBlkInfo(t *testing.T) {
+func TestBlkInfoFAT(t *testing.T) {
 	checkFs(t, "fat", "fat", "2a341c62", "FATLBL", 10, "mkfs.vfat -F32 -n $LABEL -i $UUID $OUTPUT", nil)
-	checkFs(t, "ext4", "ext4", "717be5ba-d42d-4aaa-b846-8a23cc7471b0", "extlabel", 10, "mkfs.ext4 -L $LABEL -U $UUID $OUTPUT", nil)
-	checkFs(t, "btrfs", "btrfs", "1884e1eb-186f-4b1b-af11-45ea80da8e3c", "btrfs111", 200, "mkfs.btrfs -L $LABEL -U $UUID $OUTPUT", nil)
-	checkFs(t, "xfs", "xfs", "ee7cad9a-0202-4c00-a320-418a9276d70d", "xfs44", 100, "mkfs.xfs -L $LABEL -m uuid=$UUID $OUTPUT", nil)
-	checkFs(t, "f2fs", "f2fs", "6af49bb0-0bd8-4b82-a1d1-286dfe37d729", "test1привет", 100, "mkfs.f2fs -l $LABEL -U $UUID $OUTPUT", nil)
-	checkFs(t, "luks1", "luks", "6faf1e59-9999-4da4-97f9-c815e7353777", "", 100, "cryptsetup luksFormat -q --type=luks1 --iter-time=1 --uuid=$UUID $OUTPUT <<< 'tetspassphrase'", nil)
-	checkFs(t, "luks2", "luks", "51df71ed-8e4a-4a7a-956d-b782706a52d1", "bazz", 10, "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=$UUID --label=$LABEL $OUTPUT <<< 'tetspassphrase'", nil)
-	checkFs(t, "swap", "swap", "5f3d4e16-3fa4-42fe-a64d-2dc6685bcc7e", "eightly", 10, "mkswap --uuid $UUID --label $LABEL $OUTPUT", nil)
+}
 
+func TestBlkInfoExt4(t *testing.T) {
+	checkFs(t, "ext4", "ext4", "717be5ba-d42d-4aaa-b846-8a23cc7471b0", "extlabel", 10, "mkfs.ext4 -L $LABEL -U $UUID $OUTPUT", nil)
+}
+
+func TestBlkInfoBtrfs(t *testing.T) {
+	checkFs(t, "btrfs", "btrfs", "1884e1eb-186f-4b1b-af11-45ea80da8e3c", "btrfs111", 200, "mkfs.btrfs -L $LABEL -U $UUID $OUTPUT", nil)
+}
+
+func TestBlkInfoXFS(t *testing.T) {
+	checkFs(t, "xfs", "xfs", "ee7cad9a-0202-4c00-a320-418a9276d70d", "xfs44", 100, "mkfs.xfs -L $LABEL -m uuid=$UUID $OUTPUT", nil)
+}
+
+func TestBlkInfoF2FS(t *testing.T) {
+	checkFs(t, "f2fs", "f2fs", "6af49bb0-0bd8-4b82-a1d1-286dfe37d729", "test1привет", 100, "mkfs.f2fs -l $LABEL -U $UUID $OUTPUT", nil)
+}
+
+func TestBlkInfoLUKS1(t *testing.T) {
+	checkFs(t, "luks1", "luks", "6faf1e59-9999-4da4-97f9-c815e7353777", "", 100, "cryptsetup luksFormat -q --type=luks1 --iter-time=1 --uuid=$UUID $OUTPUT <<< 'tetspassphrase'", nil)
+}
+
+func TestBlkInfoLUKS2(t *testing.T) {
+	checkFs(t, "luks2", "luks", "51df71ed-8e4a-4a7a-956d-b782706a52d1", "bazz", 10, "cryptsetup luksFormat -q --type=luks2 --iter-time=1 --uuid=$UUID --label=$LABEL $OUTPUT <<< 'tetspassphrase'", nil)
+}
+
+func TestBlkInfoSwap(t *testing.T) {
+	checkFs(t, "swap", "swap", "5f3d4e16-3fa4-42fe-a64d-2dc6685bcc7e", "eightly", 10, "mkswap --uuid $UUID --label $LABEL $OUTPUT", nil)
+}
+
+func TestBlkInfoGPT(t *testing.T) {
 	typeGUID := []byte{203, 52, 81, 177, 53, 176, 64, 249, 160, 234, 133, 102, 237, 5, 222, 109}
 	sector1UUID := []byte{83, 69, 58, 7, 155, 238, 67, 151, 166, 20, 158, 143, 163, 135, 10, 114}
 	sector2UUID := []byte{62, 161, 141, 185, 105, 31, 69, 94, 164, 13, 32, 212, 38, 177, 150, 95}
@@ -91,15 +114,22 @@ func TestBlkInfo(t *testing.T) {
 			name:       "hello",
 			attributes: gptPartitionAttributeReadOnly,
 		}}})
-	checkFs(t, "mbr", "mbr", "2beab180", "", 1, "fdisk $OUTPUT <<< 'o\nx\ni\n0x$UUID\nr\nw\n'", nil)
+}
 
+func TestBlkInfoMBR(t *testing.T) {
+	checkFs(t, "mbr", "mbr", "2beab180", "", 1, "fdisk $OUTPUT <<< 'o\nx\ni\n0x$UUID\nr\nw\n'", nil)
+}
+
+func TestBlkInfoLVM(t *testing.T) {
 	createLVM := `
 trap 'sudo losetup -d $lodev' EXIT
 
 lodev=$(sudo losetup -f --show $OUTPUT)
 sudo pvcreate -u $UUID --norestorefile $lodev`
 	checkFs(t, "lvm", "lvm", "Iy3Z8K-49rL-KK4W-NE9C-FZe5-5qWL-lCg9hj", "", 10, createLVM, nil)
+}
 
+func TestBlkInfoMdraid(t *testing.T) {
 	createMdraid := `
 trap 'sudo mdadm --stop /dev/md/BlkInfoTest; sudo losetup -d $lodev' EXIT
 
