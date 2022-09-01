@@ -1,15 +1,17 @@
+#!/usr/bin/env bash
+
 trap 'quit' EXIT ERR
 
 quit() {
   set +o errexit
-  sudo umount $dir
-  rm -r $dir
-  sudo losetup -d $lodev
+  sudo umount "${dir}"
+  rm -r "${dir}"
+  sudo losetup -d "${lodev}"
 }
 
-truncate --size 100M $OUTPUT
-lodev=$(sudo losetup --sector-size 4096 -f -P --show $OUTPUT)
-sudo fdisk $lodev <<<"g
+truncate --size 100M "${OUTPUT}"
+lodev=$(sudo losetup --sector-size 4096 -f -P --show "${OUTPUT}")
+sudo fdisk "${lodev}" <<< "g
 n
 
 
@@ -21,10 +23,10 @@ r
 w
 "
 
-sudo mkfs.ext4 ${lodev}p1
+sudo mkfs.ext4 "${lodev}p1"
 dir=$(mktemp -d)
-sudo mount ${lodev}p1 $dir
+sudo mount "${lodev}p1" "${dir}"
 
-sudo chown $USER $dir
-mkdir $dir/sbin
-cp assets/init $dir/sbin/init
+sudo chown "${USER}" "${dir}"
+mkdir "${dir}/sbin"
+cp assets/init "${dir}/sbin/init"

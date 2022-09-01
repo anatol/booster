@@ -1,16 +1,18 @@
+#!/usr/bin/env bash
+
 trap 'quit' EXIT ERR
 
 quit() {
   set +o errexit
-  sudo umount $dir
-  rm -r $dir
-  sudo losetup -d $lodev
+  sudo umount "${dir}"
+  rm -r "${dir}"
+  sudo losetup -d "${lodev}"
 }
 
-truncate --size 100M $OUTPUT
-lodev=$(sudo losetup -f -P --show $OUTPUT)
+truncate --size 100M "${OUTPUT}"
+lodev=$(sudo losetup -f -P --show "${OUTPUT}")
 # create 4 partitions of size 10, 15, 11, 63 megabytes
-sudo gdisk $lodev <<<"o
+sudo gdisk "${lodev}" <<< "o
 y
 n
 
@@ -66,10 +68,10 @@ w
 y
 "
 
-sudo mkfs.ext4 -U $FS_UUID -L $FS_LABEL ${lodev}p3
+sudo mkfs.ext4 -U "${FS_UUID}" -L "${FS_LABEL}" "${lodev}p3"
 dir=$(mktemp -d)
-sudo mount ${lodev}p3 $dir
+sudo mount "${lodev}p3" "${dir}"
 
-sudo chown $USER $dir
-mkdir $dir/sbin
-cp assets/init $dir/sbin/init
+sudo chown "${USER}" "${dir}"
+mkdir "${dir}/sbin"
+cp assets/init "${dir}/sbin/init"
