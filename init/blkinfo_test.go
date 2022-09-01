@@ -78,7 +78,7 @@ func TestBlkInfoBtrfs(t *testing.T) {
 }
 
 func TestBlkInfoXFS(t *testing.T) {
-	checkFs(t, "xfs", "xfs", "ee7cad9a-0202-4c00-a320-418a9276d70d", "xfs44", 100, "mkfs.xfs -L $LABEL -m uuid=$UUID $OUTPUT", nil)
+	checkFs(t, "xfs", "xfs", "ee7cad9a-0202-4c00-a320-418a9276d70d", "xfs44", 300, "mkfs.xfs -L $LABEL -m uuid=$UUID $OUTPUT", nil)
 }
 
 func TestBlkInfoF2FS(t *testing.T) {
