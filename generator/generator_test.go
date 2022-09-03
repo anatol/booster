@@ -429,13 +429,9 @@ func TestExtraFiles(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	for _, f := range []string{"/usr/bin/true", "/usr/bin/false"} {
-		_, err := os.Stat(opts.workDir + "/image.unpacked" + f)
-		require.NoError(t, err)
-
+		checkFileExistence(t, opts.workDir+"/image.unpacked"+f)
 	}
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/true")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/false")
 	checkDirListing(t, opts.workDir+"/image.unpacked/"+d, files...)
 }
 
