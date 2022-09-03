@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const imageModulesDir = "/usr/lib/modules"
+const imageModulesDir = "/lib/modules"
 
 var (
 	loadedModules    = make(map[string]bool)

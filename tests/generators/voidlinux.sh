@@ -23,7 +23,7 @@ sudo mv 60:ae:0c:d6:f0:95:17:80:bc:93:46:7a:89:af:a3:2d.plist "${mount}/var/db/x
 
 sudo xbps-install -y -R https://alpha.de.repo.voidlinux.org/current -c /var/cache/xbps -r "${mount}" -Su base-system linux
 
-modulesdir="${mount}/usr/lib/modules"
+modulesdir="${mount}/lib/modules"
 # Makes the fairly reasonable assumption that the "|" character will never appear in a kernel version
 kernelver=$(find "${modulesdir}" -maxdepth 1 -type d ! -name "modules" -print0 | xargs -0 stat -c "%Y|%n" | sort -r | cut -d "|" -f 2 | xargs basename)
 printf '%s' "${kernelver}" > assets/voidlinux/vmlinuz-version

@@ -28,7 +28,7 @@ func TestModuleNames(t *testing.T) {
 	conf := &generatorConfig{
 		universal:           true,
 		kernelVersion:       ver,
-		modulesDir:          "/usr/lib/modules/" + ver,
+		modulesDir:          filepath.Join("/lib/modules/", ver),
 		readHostModules:     readHostModules,
 		readDeviceAliases:   readDeviceAliases,
 		readModprobeOptions: readModprobeOptions,
@@ -164,7 +164,7 @@ func TestReadBuiltinModinfo(t *testing.T) {
 	ver, err := readKernelVersion()
 	require.NoError(t, err)
 
-	fws, err := readBuiltinModinfo("/usr/lib/modules/"+ver, "file")
+	fws, err := readBuiltinModinfo(filepath.Join("/lib/modules/", ver), "file")
 	require.NoError(t, err)
 
 	_ = fws

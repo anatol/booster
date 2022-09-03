@@ -1,7 +1,7 @@
 [Trigger]
 Type = Path
 Operation = Remove
-Target = usr/lib/modules/*/vmlinuz
+Target = lib/modules/*/vmlinuz
 
 [Trigger]
 Type = Package

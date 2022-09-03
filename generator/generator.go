@@ -62,8 +62,8 @@ const (
 )
 
 var (
-	imageModulesDir = "/usr/lib/modules/"
-	firmwareDir     = "/usr/lib/firmware/"
+	imageModulesDir = "/lib/modules/"
+	firmwareDir     = "/lib/firmware/"
 )
 
 // This is default modules list checked by booster. It either specifies a name of the module

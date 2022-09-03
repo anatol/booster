@@ -43,7 +43,7 @@ Booster advantages:
  * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
  * `modules` is a comma-separated list of extra modules to add to or remove from the generated image.
-    One can use a module name or a path relative to the modules dir (/usr/lib/modules/$KERNEL_VERSION).
+    One can use a module name or a path relative to the modules dir (`/lib/modules/$KERNEL_VERSION`).
     The compression algorithm suffix (e.g. ".xz", ".gz) can be omitted from the module filename.
     If the element starts with a minus sign (`-`) then it means "do not add it to the image", otherwise modules are added.
     If the path ends with a slash symbol (/) then it is considered a directory and all modules from this directory need to be added recursively.
@@ -186,9 +186,9 @@ If the element starts with minus sign `-` then it removes given modules from the
 If the element is a module name then this module is added/removed. Note that by convention a kernel module name can be computed from its filename by replacing all dashes to underscore, e.g.
 For the module `hid-apple.ko.gz` name will be `hid_apple`.
 
-If the element is a path to the module file relative to `/usr/lib/modules/$KERNEL_VERSION` then the module is added/removed. Note that the compression algorithm suffix can be omitted from the module filename.
+If the element is a path to the module file relative to `/lib/modules/$KERNEL_VERSION` then the module is added/removed. Note that the compression algorithm suffix can be omitted from the module filename.
 
-If the element ends with the slash symbol `/` then this element is considered a directory relative to `/usr/lib/modules/$KERNEL_VERSION`.
+If the element ends with the slash symbol `/` then this element is considered a directory relative to `/lib/modules/$KERNEL_VERSION`.
 Booster goes over this directory recursively and adds/removes the modules to the image. Minus sign can be used with the directories.
 
 Star symbol `*` is a shortcut for "all modules", it can be used to add all modules or remove all modules from the image.

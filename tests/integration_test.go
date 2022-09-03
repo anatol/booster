@@ -233,7 +233,7 @@ func TestLoadExtraModules(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	require.NoError(t, vm.ConsoleExpect("booster: finit(foo): open /usr/lib/modules/foo.ko: no such file or directory"))
+	require.NoError(t, vm.ConsoleExpect("booster: finit(foo): open /lib/modules/foo.ko: no such file or directory"))
 	require.NoError(t, vm.ConsoleExpect("booster: loading module xfs"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
