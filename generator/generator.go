@@ -243,16 +243,16 @@ func generateInitRamfs(conf *generatorConfig) error {
 // appendCompatibilitySymlinks appends symlinks for compatibility with older firmware that loads extra files from non-standard locations
 func appendCompatibilitySymlinks(img *Image) error {
 	symlinks := []struct{ src, target string }{
-		{"/lib", "/usr/lib"},
-		{"/usr/local/lib", "/usr/lib"},
-		{"/usr/sbin", "/usr/bin"},
-		{"/bin", "/usr/bin"},
-		{"/sbin", "/usr/bin"},
-		{"/usr/local/bin", "/usr/bin"},
-		{"/usr/local/sbin", "/usr/bin"},
-		{"/var/run", "/run"},
-		{"/usr/lib64", "/usr/lib"},
-		{"/lib64", "/usr/lib"},
+		{"/lib", "usr/lib"},
+		{"/usr/local/lib", "usr/lib"},
+		{"/usr/sbin", "usr/bin"},
+		{"/bin", "usr/bin"},
+		{"/sbin", "usr/bin"},
+		{"/usr/local/bin", "usr/bin"},
+		{"/usr/local/sbin", "usr/bin"},
+		{"/var/run", "run"},
+		{"/usr/lib64", "usr/lib"},
+		{"/lib64", "usr/lib"},
 	}
 
 	for _, l := range symlinks {
