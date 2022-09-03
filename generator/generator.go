@@ -243,22 +243,23 @@ func generateInitRamfs(conf *generatorConfig) error {
 // appendCompatibilitySymlinks appends symlinks for compatibility with older firmware that loads extra files from non-standard locations
 func appendCompatibilitySymlinks(img *Image) error {
 	symlinks := []struct{ src, target string }{
-		{"/lib", "/usr/lib"},
-		{"/usr/local/lib", "/usr/lib"},
-		{"/usr/sbin", "/usr/bin"},
-		{"/bin", "/usr/bin"},
-		{"/sbin", "/usr/bin"},
-		{"/usr/local/bin", "/usr/bin"},
-		{"/usr/local/sbin", "/usr/bin"},
-		{"/var/run", "/run"},
-		{"/usr/lib64", "/usr/lib"},
-		{"/lib64", "/usr/lib"},
+		{"/lib", "usr/lib"},
+		{"/usr/local/lib", "../lib"},
+		{"/usr/sbin", "bin"},
+		{"/bin", "usr/bin"},
+		{"/sbin", "usr/bin"},
+		{"/usr/local/bin", "../bin"},
+		{"/usr/local/sbin", "../bin"},
+		{"/var/run", "../run"},
+		{"/usr/lib64", "lib"},
+		{"/lib64", "usr/lib"},
 	}
 
 	for _, l := range symlinks {
 		// Ensure that target always exist which may not be the
 		// case if we only install files from /lib or /bin.
-		if err := img.AppendDirEntry(l.target); err != nil {
+		targetDir := filepath.Dir(filepath.Join(filepath.Dir(l.src), l.target))
+		if err := img.AppendDirEntry(targetDir); err != nil {
 			return err
 		}
 
