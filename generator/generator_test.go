@@ -324,9 +324,9 @@ func TestUniversalMode(t *testing.T) {
 	require.Equal(t, "matestkernel", cfg.Kernel)
 
 	// all except kernel/testfoo.ko need to be in the image
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "cbc.ko", "virtio_scsi.ko", "booster.alias")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "foo.ko", "cbc.ko", "virtio_scsi.ko", "booster.alias")
 
-	aliasesFile, err := os.ReadFile(opts.workDir + "/image.unpacked/usr/lib/modules/booster.alias")
+	aliasesFile, err := os.ReadFile(filepath.Join(opts.workDir, "/image.unpacked/lib/modules/booster.alias"))
 	require.NoError(t, err)
 
 	expectedAliases := `pci:v*d*sv*sd*bc0Csc03i30* cbc
@@ -335,9 +335,9 @@ cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 `
 	require.Equal(t, expectedAliases, string(aliasesFile))
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/whiteheat.fw.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/usbdux_firmware.bin.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/rtw88/rtw8723d_fw.bin.xz"))
 }
 
 func TestSoftDependencies(t *testing.T) {
@@ -352,7 +352,7 @@ func TestSoftDependencies(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	// all except kernel/testfoo.ko need to be in the image
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "foo.ko", "a.ko", "b.ko", "c.ko", "d.ko", "booster.alias")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "foo.ko", "a.ko", "b.ko", "c.ko", "d.ko", "booster.alias")
 }
 
 func TestComplexPatterns(t *testing.T) {
@@ -367,7 +367,7 @@ func TestComplexPatterns(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	// all except kernel/testfoo.ko need to be in the image
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "booster.alias", "k4.ko", "k5.ko", "k7_1.ko")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "booster.alias", "k4.ko", "k5.ko", "k7_1.ko")
 }
 
 func TestHostMode(t *testing.T) {
@@ -394,9 +394,9 @@ func TestHostMode(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	// all except kernel/testfoo.ko need to be in the image
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "cbc.ko", "virtio_scsi.ko", "booster.alias")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "cbc.ko", "virtio_scsi.ko", "booster.alias")
 
-	aliasesFile, err := os.ReadFile(opts.workDir + "/image.unpacked/usr/lib/modules/booster.alias")
+	aliasesFile, err := os.ReadFile(filepath.Join(opts.workDir, "/image.unpacked/lib/modules/booster.alias"))
 	require.NoError(t, err)
 
 	expectedAliases := `cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
@@ -410,9 +410,9 @@ pci:v*d*sv*sd*bc0Csc03i30* cbc`
 
 	require.Equal(t, expectedAliases, sortedAliases)
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/whiteheat.fw.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/usbdux_firmware.bin.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/rtw88/rtw8723d_fw.bin.xz"))
 }
 
 func TestExtraFiles(t *testing.T) {
@@ -454,19 +454,19 @@ func TestCompressedModules(t *testing.T) {
 	}
 	createTestInitRamfs(t, &opts)
 
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "plain.ko", "zst.ko", "xz.ko", "lz4.ko", "gz.ko", "booster.alias")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "plain.ko", "zst.ko", "xz.ko", "lz4.ko", "gz.ko", "booster.alias")
 	checkFilesEqual(t,
 		"assets/test_module.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/plain.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/zst.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/xz.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/lz4.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/gz.ko",
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/plain.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/zst.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/xz.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/lz4.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/gz.ko"),
 	)
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/whiteheat.fw.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/usbdux_firmware.bin.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/rtw88/rtw8723d_fw.bin.xz"))
 }
 
 func TestModuleNameAliases(t *testing.T) {
@@ -477,12 +477,12 @@ func TestModuleNameAliases(t *testing.T) {
 	}
 	createTestInitRamfs(t, &opts)
 
-	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/", "zst.ko", "xz.ko", "gz.ko", "booster.alias")
+	checkDirListing(t, filepath.Join(opts.workDir, "/image.unpacked/lib/modules/"), "zst.ko", "xz.ko", "gz.ko", "booster.alias")
 	checkFilesEqual(t,
 		"assets/test_module.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/zst.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/xz.ko",
-		opts.workDir+"/image.unpacked/usr/lib/modules/gz.ko",
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/zst.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/xz.ko"),
+		filepath.Join(opts.workDir, "/image.unpacked/lib/modules/gz.ko"),
 	)
 }
 
@@ -495,9 +495,9 @@ func TestStripBinaries(t *testing.T) {
 	}
 	createTestInitRamfs(t, &opts)
 
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin.xz")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.xz")
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/whiteheat.fw.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/usbdux_firmware.bin.xz"))
+	checkFileExistence(t, filepath.Join(opts.workDir, "/image.unpacked/lib/firmware/rtw88/rtw8723d_fw.bin.xz"))
 }
 
 func TestEnableVirtualConsole(t *testing.T) {

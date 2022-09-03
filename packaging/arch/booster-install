@@ -4,30 +4,30 @@ kernels=()
 all=0
 
 while read -r line; do
-    # line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
-    if [[ "${line}" != usr/lib/modules/* ]]; then
-        # triggers when it's a change to usr/lib/booster/*
-        all=1
-        break
-    fi
+  # line is like usr/lib/modules/5.8.2-arch1-1/vmlinuz
+  if [[ ${line} != usr/lib/modules/* ]]; then
+    # triggers when it's a change to usr/lib/booster/*
+    all=1
+    break
+  fi
 
-    kernels+=("/${line%/vmlinuz}")
+  kernels+=("/${line%/vmlinuz}")
 done
 
 if [ "${all}" -eq "1" ]; then
-    # find out all installed kernels
-    kernels=($(ls -d /usr/lib/modules/*))
+  # find out all installed kernels
+  mapfile -d '' kernels < <(find /lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
 fi
 
 for kernel in "${kernels[@]}"; do
-    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
-        # if pkgbase does not belong to any package then skip this kernel
-        continue
-    fi
-    read -r pkgbase < "${kernel}/pkgbase"
+  if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+    # if pkgbase does not belong to any package then skip this kernel
+    continue
+  fi
+  read -r pkgbase < "${kernel}/pkgbase"
 
-    booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-${pkgbase}.img &
-    install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+  booster build --force --kernel-version "$(basename "${kernel}")" "/boot/booster-${pkgbase}.img" &
+  install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 done
 
 wait

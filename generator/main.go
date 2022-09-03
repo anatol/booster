@@ -20,7 +20,7 @@ var opts struct {
 		InitBinary       string `long:"init-binary" default:"/usr/lib/booster/init" description:"Booster 'init' binary location"`
 		Compression      string `long:"compression" choice:"zstd" choice:"gzip" choice:"xz" choice:"lz4" choice:"none" description:"Output file compression"`
 		KernelVersion    string `long:"kernel-version" description:"Linux kernel version to generate initramfs for"`
-		ModulesDirectory string `long:"modules-dir" description:"Directory with kernel modules, if not set then /usr/lib/modules/$kernel-version is used"`
+		ModulesDirectory string `long:"modules-dir" description:"Directory with kernel modules, if not set then /lib/modules/$kernel-version is used"`
 		ConfigFile       string `long:"config" default:"/etc/booster.yaml" description:"Configuration file path"`
 		Universal        bool   `long:"universal" description:"Add wide range of modules/tools to allow this image boot at different machines"`
 		Strip            bool   `long:"strip" description:"Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image"`

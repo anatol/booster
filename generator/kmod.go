@@ -25,7 +25,7 @@ type alias struct {
 type Kmod struct {
 	universal         bool // if false - include modules for current host only
 	kernelVersion     string
-	hostModulesDir    string // host path to modules e.g. /usr/lib/modules/5.9.9-arch1-1, note that image path is always /usr/lib/modules
+	hostModulesDir    string // host path to modules e.g. /lib/modules/5.9.9-arch1-1, note that image path is always /lib/modules
 	nameToPathMapping *Bimap // kernel module name to path (relative to modulesDir)
 	builtinModules    set
 	requiredModules   set                 // set of modules that we need to be added to the image

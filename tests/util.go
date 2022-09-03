@@ -22,7 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const kernelsDir = "/usr/lib/modules"
+const kernelsDir = "/lib/modules"
 
 var (
 	binariesDir    string // working dir shared between all tests
