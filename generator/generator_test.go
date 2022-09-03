@@ -419,7 +419,7 @@ func TestExtraFiles(t *testing.T) {
 	files := []string{"e", "q", "z"}
 	d := t.TempDir()
 	for _, f := range files {
-		require.NoError(t, os.WriteFile(d+"/"+f, []byte{}, 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(d, f), []byte{}, 0o644))
 	}
 
 	opts := options{
@@ -429,10 +429,10 @@ func TestExtraFiles(t *testing.T) {
 	createTestInitRamfs(t, &opts)
 
 	for _, f := range []string{"/usr/bin/true", "/usr/bin/false"} {
-		checkFileExistence(t, opts.workDir+"/image.unpacked"+f)
+		checkFileExistence(t, filepath.Join(opts.workDir, "image.unpacked", f))
 	}
 
-	checkDirListing(t, opts.workDir+"/image.unpacked/"+d, files...)
+	checkDirListing(t, filepath.Join(opts.workDir, "image.unpacked", d), files...)
 }
 
 func TestInvalidExtraFiles(t *testing.T) {
