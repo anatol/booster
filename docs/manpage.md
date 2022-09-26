@@ -129,6 +129,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
    If debug level is enabled then kmsg throttling gets disabled automatically.
  * `booster.debug` an obsolete option that is equivalent to `booster.log=debug,console`.
  * `quiet` Set booster init verbosity to minimum. This option is ignored if `booster.debug` or `booster.log` is set.
+ * `modules` a comma-separated list of extra kernel modules which should be force loaded.
  * `init=$PATH` path to user-space init binary. If not specified then default value `/sbin/init` is used.
 
 ## NOTES

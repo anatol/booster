@@ -192,7 +192,13 @@ func parseParams(params string) error {
 			if err != nil {
 				return fmt.Errorf("root=%s: %v", value, err)
 			}
+		case "modules":
+			if (value == "") {
+				break
+			}
 
+			modules := strings.Split(value, ",")
+			config.ModulesForceLoad = append(config.ModulesForceLoad, modules...)
 		case "resume":
 			var err error
 			cmdResume, err = parseDeviceRef(value)
