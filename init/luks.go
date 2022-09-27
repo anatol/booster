@@ -292,6 +292,9 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 		v, err := d.UnsealVolume(s, password)
 		if err == luks.ErrPassphraseDoesNotMatch {
 			continue
+		} else if err != nil {
+			warning("unlocking slot %v: %v", s, err)
+			continue
 		}
 		info("password from %s token #%d matches", t.Type, t.ID)
 		volumes <- v
@@ -329,6 +332,9 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
 				continue
+			} else if err != nil {
+				warning("unlocking slot %v: %v", s, err)
+				continue
 			}
 			volumes <- v
 			return
@@ -356,6 +362,9 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 		for _, s := range checkSlots {
 			v, err := d.UnsealVolume(s, password)
 			if err == luks.ErrPassphraseDoesNotMatch {
+				continue
+			} else if err != nil {
+				warning("unlocking slot %v: %v", s, err)
 				continue
 			}
 			volumes <- v
