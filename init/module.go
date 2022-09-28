@@ -158,16 +158,18 @@ func loadModules(modules ...string) *sync.WaitGroup {
 }
 
 // returns all module names that match given alias
-func matchAlias(alias string) ([]string, error) {
+func matchAlias(tofind ...string) ([]string, error) {
 	var result []string
 	for _, a := range aliases {
-		match, err := filepath.Match(a.pattern, alias)
-		if err != nil {
-			return nil, err
-		}
-		if match {
-			debug("modalias %v matched module %v", alias, a.module)
-			result = append(result, a.module)
+		for _, f := range tofind {
+			match, err := filepath.Match(a.pattern, f)
+			if err != nil {
+				return nil, err
+			}
+			if match {
+				debug("modalias %v matched module %v", f, a.module)
+				result = append(result, a.module)
+			}
 		}
 	}
 	return result, nil

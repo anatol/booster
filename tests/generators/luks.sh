@@ -32,7 +32,7 @@ fi
 
 truncate --size 40M "${OUTPUT}"
 lodev=$(sudo losetup -f -P --show "${OUTPUT}")
-sudo cryptsetup luksFormat --uuid "${LUKS_UUID}" --type "${LUKS_TYPE}" "${lodev}" <<< "${LUKS_PASSWORD}"
+sudo cryptsetup luksFormat --uuid "${LUKS_UUID}" --type "${LUKS_TYPE}" ${LUKS_PARAMS} "${lodev}" <<< "${LUKS_PASSWORD}"
 
 if [ "${CLEVIS_PIN}" != "" ]; then
   # custom TPM2TOOLS_TCTI does not work due to https://github.com/latchset/clevis/issues/244

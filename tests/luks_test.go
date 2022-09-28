@@ -70,3 +70,17 @@ func TestLUKS2WithQuotesOverUUID(t *testing.T) {
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
+
+// test that loadable crypto modules work https://github.com/anatol/booster/issues/188
+func TestLoadableCryptoModule(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/luks2.external.module.img",
+		kernelArgs: []string{"rd.luks.name=ad575500-a9e3-4692-b1b2-eed95a6e8ce2=cryptroot", "root=/dev/mapper/cryptroot"},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}

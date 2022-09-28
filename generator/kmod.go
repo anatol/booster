@@ -115,30 +115,43 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 				continue
 			}
 
-			var mod string
+			var mods []string
 			if _, ok := k.nameToPathMapping.forward[m]; ok {
 				// matched
-				mod = m
+				mods = append(mods, m)
 			} else if name, ok := k.nameToPathMapping.reverse[m]; ok {
 				// m is a filename that contains the module
-				mod = name
+				mods = append(mods, name)
 			} else {
-				debug("requested module %s is missing", m)
-				if failIfMissing {
-					return fmt.Errorf("module %s does not exist", m)
+				aliases, err := matchAlias(m, k.aliases)
+				if err != nil {
+					return err
 				}
-				continue
+
+				if len(aliases) == 0 {
+					debug("requested module %s is missing", m)
+					if failIfMissing {
+						return fmt.Errorf("module %s does not exist", m)
+					}
+					continue
+				} else {
+					for _, a := range aliases {
+						mods = append(mods, a.module)
+					}
+				}
 			}
 
-			if activate {
-				if !k.requiredModules[mod] {
-					debug("activate module %s", mod)
-					k.requiredModules[mod] = true
-				}
-			} else {
-				if k.requiredModules[mod] {
-					debug("deactivate module %s", mod)
-					delete(k.requiredModules, mod)
+			for _, mod := range mods {
+				if activate {
+					if !k.requiredModules[mod] {
+						debug("activate module %s", mods)
+						k.requiredModules[mod] = true
+					}
+				} else {
+					if k.requiredModules[mod] {
+						debug("deactivate module %s", mods)
+						delete(k.requiredModules, mod)
+					}
 				}
 			}
 		}
@@ -596,7 +609,11 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 	var filteredAliases []alias
 
 	for _, a := range k.aliases {
-		if k.requiredModules[a.module] {
+		ok := k.requiredModules[a.module] ||
+			// crypto requests modules by their aliases crypto-$EXTENSION
+			strings.HasPrefix(a.pattern, "crypto-")
+
+		if ok {
 			filteredAliases = append(filteredAliases, a)
 		}
 	}
@@ -624,6 +641,13 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 
 		for _, m := range matched {
 			uniqAliases[m] = true
+		}
+	}
+
+	for _, a := range filteredAliases {
+		// crypto requests modules by their aliases crypto-$EXTENSION
+		if strings.HasPrefix(a.pattern, "crypto-") {
+			uniqAliases[a] = true
 		}
 	}
 

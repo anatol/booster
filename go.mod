@@ -6,7 +6,7 @@ require (
 	github.com/anatol/clevis.go v0.0.0-20220716012302-d1beef1d3450
 	github.com/anatol/devmapper.go v0.0.0-20220907161421-ba4de5fc0fd1
 	github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f
-	github.com/anatol/luks.go v0.0.0-20220927162701-5918c2456d3f
+	github.com/anatol/luks.go v0.0.0-20220929015814-d2d4eb57f6eb
 	github.com/anatol/smart.go v0.0.0-20220917195147-c0b00d90f8cc
 	github.com/anatol/tang.go v0.0.0-20220716012326-2fda8b4503da
 	github.com/anatol/vmtest v0.0.0-20220413190228-7a42f1f6d7b8

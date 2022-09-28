@@ -429,8 +429,43 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	v := <-volumes
 
+	if err := loadRequiredCryptoModules(v.StorageEncryption); err != nil {
+		return err
+	}
+
 	module.Wait()
 	return v.SetupMapper(mapping.name)
+}
+
+func loadRequiredCryptoModules(encryption string) error {
+	// at non-booster systems loading crypto modules mechanism is following:
+	//   1. dmsetup asks kernel to load a table with some encryption configuration, e.g. xts-camellia-plain
+	//   2. kernel's crypto/api.c checks if modules present for mode and block cipher, if not - initiates loading it.
+	//      The module names look like crypto-$MODE
+	//   3. kernel starts a user process and invokes "modprobe crypro-$MODE" to load the required module
+	// As we do not want to add modprobe to the image we try to emulate this functionality here by loading these modules directly
+	parts := strings.Split(encryption, "-")
+	mode := parts[0]
+	cipher := parts[1]
+	var modules []string
+
+	cryptoAliases := []string{"crypto-" + mode, "crypto-" + cipher}
+	for _, a := range cryptoAliases {
+		mods, err := matchAlias(a)
+		if err != nil {
+			return fmt.Errorf("unable to match modalias %s: %v", a, err)
+		}
+		if len(mods) == 0 {
+			debug("no match found for alias %s", a)
+			continue
+		}
+		modules = append(modules, mods...)
+	}
+
+	w := loadModules(modules...)
+	w.Wait()
+
+	return nil
 }
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
