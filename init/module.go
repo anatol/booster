@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,10 +30,7 @@ func loadModalias(alias string) error {
 		return nil
 	}
 
-	mods, err := matchAlias(alias)
-	if err != nil {
-		return fmt.Errorf("unable to match modalias %s: %v", alias, err)
-	}
+	mods := matchAlias(alias)
 	if len(mods) == 0 {
 		debug("no match found for alias %s", alias)
 		return nil
@@ -158,13 +154,14 @@ func loadModules(modules ...string) *sync.WaitGroup {
 }
 
 // returns all module names that match given alias
-func matchAlias(tofind ...string) ([]string, error) {
+func matchAlias(tofind ...string) []string {
 	var result []string
 	for _, a := range aliases {
 		for _, f := range tofind {
 			match, err := filepath.Match(a.pattern, f)
 			if err != nil {
-				return nil, err
+				warning("unable to use modalias %s", a.pattern)
+				continue
 			}
 			if match {
 				debug("modalias %v matched module %v", f, a.module)
@@ -172,5 +169,5 @@ func matchAlias(tofind ...string) ([]string, error) {
 			}
 		}
 	}
-	return result, nil
+	return result
 }

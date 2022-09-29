@@ -451,10 +451,7 @@ func loadRequiredCryptoModules(encryption string) error {
 
 	cryptoAliases := []string{"crypto-" + mode, "crypto-" + cipher}
 	for _, a := range cryptoAliases {
-		mods, err := matchAlias(a)
-		if err != nil {
-			return fmt.Errorf("unable to match modalias %s: %v", a, err)
-		}
+		mods := matchAlias(a)
 		if len(mods) == 0 {
 			debug("no match found for alias %s", a)
 			continue
