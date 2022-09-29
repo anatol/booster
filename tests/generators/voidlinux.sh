@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-trap 'quit' EXIT ERR
+#trap 'quit' EXIT ERR
 
 quit() {
   set +o errexit
@@ -25,9 +25,9 @@ sudo xbps-install -y -R https://alpha.de.repo.voidlinux.org/current -c /var/cach
 
 modulesdir="${mount}/usr/lib/modules"
 # Makes the fairly reasonable assumption that the "|" character will never appear in a kernel version
-kernelver=$(find "${modulesdir}" -maxdepth 1 -type d ! -name "modules" -print 0 | xargs -0 stat -c "%Y|%n" | sort -r | cut -d "|" -f 2 | xargs basename)
+kernelver=$(find "${modulesdir}" -maxdepth 1 -type d ! -name "modules" -print0 | xargs -0 stat -c "%Y|%n" | sort -r | cut -d "|" -f 2 | xargs basename)
 printf '%s' "${kernelver}" > assets/voidlinux/vmlinuz-version
-sudo cp -r "${modulesdir}/${kernelver} assets/voidlinux/modules"
+sudo cp -r "${modulesdir}/${kernelver}" assets/voidlinux/modules
 sudo mv "${mount}/boot/config-${kernelver}" assets/voidlinux/config
 sudo mv "${mount}/boot/vmlinuz-${kernelver}" assets/voidlinux/vmlinuz
 sudo chown -R "${USER}" assets/voidlinux
