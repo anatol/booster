@@ -290,10 +290,7 @@ func handleMdraidBlockDevice(blk *blkInfo) error {
 	info("trying to assemble mdraid array %s", blk.uuid.toString())
 
 	if mod, ok := raidModules[blk.data.(mdraidData).level]; ok {
-		wg, err := loadModules(mod)
-		if err != nil {
-			return err
-		}
+		wg := loadModules(mod)
 		wg.Wait()
 	} else {
 		return fmt.Errorf("unknown raid level for device %s", blk.path)
@@ -372,10 +369,7 @@ func mountRootFs(dev, fstype string) error {
 		return nil // mount process is in progress
 	}
 
-	wg, err := loadModules(fstype)
-	if err != nil {
-		return err
-	}
+	wg := loadModules(fstype)
 	wg.Wait()
 
 	if err := fsck(dev); err != nil {
@@ -749,10 +743,7 @@ func boost() error {
 
 	// Mount efivarfs if running in EFI mode
 	if _, err := os.Stat("/sys/firmware/efi"); !errors.Is(err, os.ErrNotExist) {
-		wg, err := loadModules("efivarfs")
-		if err != nil {
-			return err
-		}
+		wg := loadModules("efivarfs")
 		wg.Wait()
 		if err := mount("efivarfs", "/sys/firmware/efi/efivars", "efivarfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
 			return err
@@ -791,9 +782,7 @@ func boost() error {
 
 	go func() { check(udevListener()) }()
 
-	if _, err := loadModules(config.ModulesForceLoad...); err != nil {
-		return err
-	}
+	_ = loadModules(config.ModulesForceLoad...)
 
 	if err := configureVirtualConsole(); err != nil {
 		return err
@@ -835,10 +824,7 @@ func mountZfsRoot() error {
 	// note that 'zfs' module already in modulesForceLoad list and it already started loading
 	// this loadModule() is for zfs module synchronization - we need to wait till the full module loading
 	// before we try to import a pool
-	zfsWg, err := loadModules("zfs")
-	if err != nil {
-		return err
-	}
+	zfsWg := loadModules("zfs")
 	zfsWg.Wait()
 
 	// TODO: handle zfsDataset == bootfs
@@ -847,7 +833,7 @@ func mountZfsRoot() error {
 
 	debug("importing zfs pool %s", pool)
 
-	err = exec.Command("zpool", "import", "-c", "/etc/zfs/zpool.cache", "-N", pool).Run()
+	err := exec.Command("zpool", "import", "-c", "/etc/zfs/zpool.cache", "-N", pool).Run()
 	if err != nil {
 		return unwrapExitError(err)
 	}

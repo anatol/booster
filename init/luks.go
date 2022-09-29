@@ -377,10 +377,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 }
 
 func luksOpen(dev string, mapping *luksMapping) error {
-	module, err := loadModules("dm_crypt")
-	if err != nil {
-		return err
-	}
+	module := loadModules("dm_crypt")
 
 	d, err := luks.Open(dev)
 	if err != nil {
