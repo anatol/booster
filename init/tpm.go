@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
@@ -41,11 +42,21 @@ func openTPM() (io.ReadWriteCloser, error) {
 		}
 		return dev, nil
 	}
-
 	return tpm2.OpenTPM("/dev/tpmrm0")
 }
 
+// Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
+func tpmAwaitReady() bool {
+	timedOut := waitTimeout(&tpmReadyWg, time.Second*3)
+	if timedOut {
+		info("no tpm devices found after 3 seconds.")
+	}
+	return !timedOut
+}
+
 func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash []byte) ([]byte, error) {
+	tpmAwaitReady()
+
 	dev, err := openTPM()
 	if err != nil {
 		return nil, err

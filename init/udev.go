@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anatol/devmapper.go"
 	"github.com/anatol/go-udev/netlink"
@@ -64,9 +65,17 @@ func validDmEvent(ev netlink.UEvent) bool {
 var (
 	udevQuitLoop chan struct{}
 	udevConn     *netlink.UEventConn
+
+	tpmReady sync.Once
+	// Wait() will return after the TPM is ready.
+	// Only works after we start listening for udev events.
+	tpmReadyWg sync.WaitGroup
 )
 
 func udevListener() error {
+	// Initialize tpmReadyWg
+	tpmReadyWg.Add(1)
+
 	udevConn = new(netlink.UEventConn)
 	if err := udevConn.Connect(netlink.KernelEvent); err != nil {
 		return fmt.Errorf("unable to connect to Netlink Kobject UEvent socket")
@@ -107,7 +116,14 @@ func handleUdevEvent(ev netlink.UEvent) {
 		go func() { check(handleNetworkUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "hidraw" && ev.Action == "add" {
 		go func() { hidrawDevices <- ev.Env["DEVNAME"] }()
+	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
+		go handleTpmReadyUevent(ev)
 	}
+}
+
+func handleTpmReadyUevent(ev netlink.UEvent) {
+	info("tpm available: %s", ev.Env["DEVNAME"])
+	tpmReady.Do(tpmReadyWg.Done)
 }
 
 func handleNetworkUevent(ev netlink.UEvent) error {

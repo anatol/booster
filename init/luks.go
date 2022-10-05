@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -54,11 +55,23 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 	}
 
 	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
+	waitedForTpm := false
 	for {
 		password, err := clevis.Decrypt(payload)
 		if err != nil {
 			var netError *net.OpError
-			if !errors.As(err, &netError) {
+			if errors.Is(err, fs.ErrNotExist) && !waitedForTpm {
+				waitedForTpm = true
+				// the tpm device might not be ready yet
+				// wait max 3 seconds until it is ready
+				if tpmAwaitReady() {
+					// the tpm is now available, so try again
+					continue
+				} else {
+					// timed out waiting for tpm
+					return nil, err
+				}
+			} else if !errors.As(err, &netError) {
 				return nil, err
 			}
 
