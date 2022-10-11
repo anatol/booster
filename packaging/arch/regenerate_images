@@ -1,7 +1,7 @@
 #!/bin/bash -e
 
 # find out all installed kernels
-kernels=($(ls -d /usr/lib/modules/*))
+mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
 
 for kernel in "${kernels[@]}"; do
     if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then

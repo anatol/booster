@@ -16,7 +16,7 @@ done
 
 if [ "${all}" -eq "1" ]; then
     # find out all installed kernels
-    kernels=($(ls -d /usr/lib/modules/*))
+    mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
 fi
 
 for kernel in "${kernels[@]}"; do
