@@ -4,14 +4,14 @@
 mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
 
 for kernel in "${kernels[@]}"; do
-    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
-        # if pkgbase does not belong to any package then skip this kernel
-        continue
-    fi
-    read -r pkgbase < "${kernel}/pkgbase"
+  if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+    # if pkgbase does not belong to any package then skip this kernel
+    continue
+  fi
+  read -r pkgbase < "${kernel}/pkgbase"
 
-    booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-${pkgbase}.img &
-    install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+  booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-${pkgbase}.img &
+  install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 done
 
 wait
