@@ -198,7 +198,11 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 
 		if err := img.AppendFile("/etc/default/zfs"); err != nil {
-			return err
+			if os.IsNotExist(err) {
+				debug("Adding /etc/default/zfs to the image: %v", err)
+			} else {
+				return err
+			}
 		}
 	}
 
