@@ -419,7 +419,11 @@ func (k *Kmod) scanModulesDir() error {
 			aliases = []string{strings.TrimSuffix(relativePath, compressionSuffix)}
 		}
 
-		return k.nameToPathMapping.Add(modName, relativePath, aliases...)
+		if err := k.nameToPathMapping.Add(modName, relativePath, aliases...); err != nil {
+			// warning in case of multiple modules with the same name https://github.com/anatol/booster/issues/192
+			warning("%v", err)
+		}
+		return nil;
 	})
 }
 
@@ -442,7 +446,9 @@ func (k *Kmod) readModuleBuiltin() error {
 
 		k.builtinModules[modName] = true
 		if err := k.nameToPathMapping.Add(modName, filename); err != nil {
-			return err
+			// there can be multiple modules with the same name
+			warning("%v", err)
+
 		}
 	}
 
