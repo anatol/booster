@@ -29,6 +29,7 @@ var assetGenerators = map[string]assetGenerator{
 	"lvm.img":                   {"lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
 	"mdraid_raid1.img":          {"mdraid_raid1.sh", []string{"FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}},
 	"mdraid_raid5.img":          {"mdraid_raid5.sh", []string{"FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}},
+	"btrfs_raid0.img":           {"btrfs_raid0.sh", []string{"FS_UUID=5eaa0c1c-e1dc-4be7-9b03-9f1ed5a87289"}},
 	"archlinux.ext4.raw":        {"archlinux_ext4.sh", nil},
 	"archlinux.btrfs.raw":       {"archlinux_btrfs.sh", []string{"LUKS_PASSWORD=hello"}},
 	"voidlinux.img":             {"voidlinux.sh", nil},

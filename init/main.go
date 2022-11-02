@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/yookoala/realpath"
@@ -27,9 +26,9 @@ const (
 var (
 	// all boot params (from cmdline) that look like module.name=value considered as potential module parameters for 'module'
 	// it preserved to moduleParams for later use. cmdline is not modified.
-	moduleParams = make(map[string][]string)
-	rootMounting int32          // shows if there is a mounting operation in progress
-	rootMounted  sync.WaitGroup // waits until the root partition is mounted
+	moduleParams      = make(map[string][]string)
+	rootMountingMutex sync.Mutex
+	rootMounted       sync.WaitGroup // waits until the root partition is mounted
 
 	cmdRoot   *deviceRef
 	cmdResume *deviceRef
@@ -365,12 +364,13 @@ func fsck(dev string) error {
 }
 
 func mountRootFs(dev, fstype string) error {
-	if !atomic.CompareAndSwapInt32(&rootMounting, 0, 1) {
-		return nil // mount process is in progress
-	}
-
 	wg := loadModules(fstype)
 	wg.Wait()
+
+	rootMountingMutex.Lock()
+	defer rootMountingMutex.Unlock()
+
+	// TODO: if root is already mounted we could return right here
 
 	if err := fsck(dev); err != nil {
 		return err
@@ -379,6 +379,9 @@ func mountRootFs(dev, fstype string) error {
 	rootMountFlags, options := mountFlags()
 	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
 	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
+		// Note that this mounting function might be called multiple times
+		// e.g. in case of multiple devices needed to assemble the root array, see https://github.com/anatol/booster/issues/194
+		// It will try to mount it until mount() is successful.
 		return err
 	}
 
