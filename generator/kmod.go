@@ -250,6 +250,12 @@ func (k *Kmod) readKernelAliases() error {
 		}
 		pattern := line[:idx]
 		module := line[idx+1:]
+
+		// As per modprobe.d(5), - and _ can be used
+		// interchangeably in both module and alias names.
+		pattern = normalizeModuleName(pattern)
+		module = normalizeModuleName(module)
+
 		k.aliases = append(k.aliases, alias{pattern, module})
 	}
 
@@ -704,7 +710,7 @@ func readDeviceAliases() (set, error) {
 		if err != nil {
 			return err
 		}
-		al := strings.TrimSpace(string(b))
+		al := normalizeModuleName(strings.TrimSpace(string(b)))
 		if al == "" {
 			return nil
 		}
