@@ -109,7 +109,7 @@ func handleUdevEvent(ev netlink.UEvent) {
 	debug("udev event %+v", ev)
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
-		go func() { check(loadModalias(modalias)) }()
+		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
