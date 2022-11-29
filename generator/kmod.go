@@ -621,8 +621,8 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 
 	for _, a := range k.aliases {
 		ok := k.requiredModules[a.module] ||
-			// crypto requests modules by their aliases crypto-$EXTENSION
-			strings.HasPrefix(a.pattern, "crypto-")
+			// crypto requests modules by their aliases crypto_$EXTENSION
+			strings.HasPrefix(a.pattern, "crypto_")
 
 		if ok {
 			filteredAliases = append(filteredAliases, a)
@@ -656,8 +656,8 @@ func (k *Kmod) filterAliasesForRequiredModules(conf *generatorConfig) ([]alias, 
 	}
 
 	for _, a := range filteredAliases {
-		// crypto requests modules by their aliases crypto-$EXTENSION
-		if strings.HasPrefix(a.pattern, "crypto-") {
+		// crypto requests modules by their aliases crypto_$EXTENSION
+		if strings.HasPrefix(a.pattern, "crypto_") {
 			uniqAliases[a] = true
 		}
 	}
