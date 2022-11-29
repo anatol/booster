@@ -429,7 +429,7 @@ func (k *Kmod) scanModulesDir() error {
 			// warning in case of multiple modules with the same name https://github.com/anatol/booster/issues/192
 			warning("%v", err)
 		}
-		return nil;
+		return nil
 	})
 }
 
@@ -454,7 +454,6 @@ func (k *Kmod) readModuleBuiltin() error {
 		if err := k.nameToPathMapping.Add(modName, filename); err != nil {
 			// there can be multiple modules with the same name
 			warning("%v", err)
-
 		}
 	}
 
