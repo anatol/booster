@@ -82,6 +82,7 @@ var defaultModulesList = []string{
 	"kernel/drivers/usb/host/",
 	"kernel/drivers/hid/",
 	"kernel/drivers/ata/",
+	"kernel/drivers/scsi/",
 	"hid_generic", "sd_mod", "ahci",
 	"sdhci", "sdhci_acpi", "sdhci_pci", "mmc_block", // mmc
 	"nvme", "usb_storage", "uas",
