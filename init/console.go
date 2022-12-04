@@ -74,8 +74,8 @@ func loadKmap(fd uintptr, file string) error {
 			ke.kbValue = *(*uint16)(unsafe.Pointer(&blob[curr]))
 			curr += 2
 
-			if _, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, KDSKBENT, uintptr(unsafe.Pointer(&ke))); errno != 0 {
-				return os.NewSyscallError(fmt.Sprintf("ioctl (cmd=0x%x)", KDSKBENT), errno)
+			if err := ioctl(fd, KDSKBENT, uintptr(unsafe.Pointer(&ke))); err != nil {
+				return err
 			}
 		}
 	}
