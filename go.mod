@@ -12,7 +12,7 @@ require (
 	github.com/anatol/vmtest v0.0.0-20220413190228-7a42f1f6d7b8
 	github.com/cavaliergopher/cpio v1.0.1
 	github.com/google/go-tpm v0.3.3
-	github.com/google/renameio v1.0.1
+	github.com/google/renameio/v2 v2.0.0
 	github.com/insomniacslk/dhcp v0.0.0-20221128164207-f26e6d78f622
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/klauspost/compress v1.15.12
