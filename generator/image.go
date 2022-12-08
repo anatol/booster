@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/cavaliergopher/cpio"
-	"github.com/google/renameio"
+	"github.com/google/renameio/v2"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
