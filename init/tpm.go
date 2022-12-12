@@ -54,7 +54,7 @@ func tpmAwaitReady() bool {
 	return !timedOut
 }
 
-func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash []byte) ([]byte, error) {
+func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte) ([]byte, error) {
 	tpmAwaitReady()
 
 	dev, err := openTPM()
@@ -68,7 +68,7 @@ func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyH
 		return nil, fmt.Errorf("open %s: device is not a TPM 2.0", dev)
 	}
 
-	sessHandle, _, err := policyPCRSession(dev, pcrs, bank, policyHash)
+	sessHandle, _, err := policyPCRSession(dev, pcrs, bank, policyHash, password != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyH
 	}
 	defer tpm2.FlushContext(dev, objectHandle)
 
-	unsealed, err := tpm2.UnsealWithSession(dev, sessHandle, objectHandle, "")
+	unsealed, err := tpm2.UnsealWithSession(dev, sessHandle, objectHandle, string(password))
 	if err != nil {
 		return nil, fmt.Errorf("unable to unseal data: %v", err)
 	}
@@ -114,7 +114,7 @@ func parsePCRBank(bank string) tpm2.Algorithm {
 }
 
 // Returns session handle and policy digest.
-func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, algo tpm2.Algorithm, expectedDigest []byte) (handle tpmutil.Handle, policy []byte, retErr error) {
+func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, algo tpm2.Algorithm, expectedDigest []byte, usePassword bool) (handle tpmutil.Handle, policy []byte, retErr error) {
 	// This session assumes the bus is trusted, so we:
 	// - use nil for tpmkey, encrypted salt, and symmetric
 	// - use and all-zeros caller nonce, and ignore the returned nonce
@@ -142,6 +142,12 @@ func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, algo tpm2.Algorithm, e
 	// An empty expected digest means that digest verification is skipped.
 	if err := tpm2.PolicyPCR(dev, sessHandle, nil, pcrSelection); err != nil {
 		return tpm2.HandleNull, nil, fmt.Errorf("unable to bind PCRs to auth policy: %v", err)
+	}
+
+	if usePassword {
+		if err := tpm2.PolicyPassword(dev, sessHandle); err != nil {
+			return tpm2.HandleNull, nil, err
+		}
 	}
 
 	policy, err = tpm2.PolicyGetDigest(dev, sessHandle)

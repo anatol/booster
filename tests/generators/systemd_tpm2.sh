@@ -25,7 +25,12 @@ sudo cryptsetup luksFormat --uuid "${LUKS_UUID}" --type luks2 "${lodev}" <<< "${
 
 printf '%s' "${LUKS_PASSWORD}" > assets/cryptenroll.passphrase
 # it looks like edk2 extends PCR 0-7 so let's use some other PCR outside of this range
-sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --tpm2-device=swtpm: --tpm2-pcrs=10+13 "${lodev}"
+if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
+  printf '%s' "${CRYPTENROLL_TPM2_PIN}" > assets/cryptenroll.tpm2-pin
+  sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --tpm2-device=swtpm: --tpm2-pcrs=10+13 --tpm2-with-pin=true "${lodev}"
+else
+  sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --tpm2-device=swtpm: --tpm2-pcrs=10+13 "${lodev}"
+fi
 
 sudo cryptsetup open --disable-external-tokens --type luks2 "${lodev}" "${LUKS_DEV_NAME}" <<< "${LUKS_PASSWORD}"
 sudo mkfs.ext4 -U "${FS_UUID}" -L atestlabel12 "/dev/mapper/${LUKS_DEV_NAME}"
@@ -34,3 +39,7 @@ sudo mount "/dev/mapper/${LUKS_DEV_NAME}" "${dir}"
 sudo chown "${USER}" "${dir}"
 mkdir "${dir}/sbin"
 cp assets/init "${dir}/sbin/init"
+
+if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
+  sudo cryptsetup -v luksKillSlot "${lodev}" 0
+fi

@@ -61,6 +61,26 @@ func TestSystemdTPM2(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+func TestSystemdTPM2WithPin(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-withpin.img",
+		kernelArgs: []string{"rd.luks.uuid=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "root=UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618"},
+		params:     params,
+		extraFiles: "fido2-assert",
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Please enter TPM pin:"))
+	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 func TestSystemdRecovery(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-recovery.img",

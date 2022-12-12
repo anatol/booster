@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -241,6 +242,7 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 		PCRs       []int  `json:"tpm2-pcrs"`
 		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
 		PolicyHash string `json:"tpm2-policy-hash"` // base64
+		Pin        bool   `json:"tpm2-pin"`
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
@@ -271,7 +273,19 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 
 	bank := parsePCRBank(node.PCRBank)
 
-	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash)
+	var authValue []byte
+	if node.Pin {
+		prompt := fmt.Sprintf("Please enter TPM pin: ")
+		pin, err := readPassword(prompt, "")
+		if err != nil {
+			return nil, err
+		}
+
+		hash := sha256.Sum256(pin)
+		authValue = hash[:]
+	}
+
+	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue)
 	if err != nil {
 		return nil, err
 	}
