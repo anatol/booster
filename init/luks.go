@@ -455,7 +455,7 @@ func loadRequiredCryptoModules(encryption string) error {
 	//   1. dmsetup asks kernel to load a table with some encryption configuration, e.g. xts-camellia-plain
 	//   2. kernel's crypto/api.c checks if modules present for mode and block cipher, if not - initiates loading it.
 	//      The module names look like crypto_$MODE
-	//   3. kernel starts a user process and invokes "modprobe crypro_$MODE" to load the required module
+	//   3. kernel starts a user process and invokes "modprobe crypto_$MODE" to load the required module
 	// As we do not want to add modprobe to the image we try to emulate this functionality here by loading these modules directly
 	parts := strings.Split(encryption, "-")
 	mode := parts[0]
