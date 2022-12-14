@@ -30,19 +30,23 @@ var defaultECCParams = &tpm2.ECCParams{
 var enableSwEmulator bool
 
 func openTPM() (io.ReadWriteCloser, error) {
-	if enableSwEmulator {
-		swEmulatorPort := 2321
-		dev, err := net.Dial("tcp", fmt.Sprintf(":%d", swEmulatorPort))
-		if err != nil {
-			return nil, err
-		}
+	var dev io.ReadWriteCloser
+	var err error
 
-		if _, err := tpm2.GetManufacturer(dev); err != nil {
-			return nil, fmt.Errorf("open tcp port %d: device is not a TPM 2.0", swEmulatorPort)
-		}
-		return dev, nil
+	if enableSwEmulator {
+		dev, err = net.Dial("tcp", ":2321") // swtpm emulator is listening at port 2321
+	} else {
+		dev, err = tpm2.OpenTPM("/dev/tpmrm0")
 	}
-	return tpm2.OpenTPM("/dev/tpmrm0")
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tpm2.GetManufacturer(dev); err != nil {
+		return nil, fmt.Errorf("device is not a TPM 2.0")
+	}
+
+	return dev, nil
 }
 
 // Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
@@ -62,11 +66,6 @@ func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyH
 		return nil, err
 	}
 	defer dev.Close()
-
-	_, err = tpm2.GetManufacturer(dev)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: device is not a TPM 2.0", dev)
-	}
 
 	sessHandle, _, err := policyPCRSession(dev, pcrs, bank, policyHash, password != nil)
 	if err != nil {
