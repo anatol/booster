@@ -130,6 +130,7 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		devicesMutex.Unlock()
 		return nil
 	}
+	seenDevices[devpath] = true
 	_, ok := processingDevices[devpath]
 	if !ok {
 		wg := &sync.WaitGroup{}
