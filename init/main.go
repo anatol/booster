@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/yookoala/realpath"
 	"golang.org/x/sys/unix"
@@ -368,6 +369,12 @@ func mountRootFs(dev, fstype string) error {
 	wg := loadModules(fstype)
 	wg.Wait()
 
+	if fstype == "btrfs" {
+		if err := waitForBtrfsDevicesReady(dev); err != nil {
+			return err
+		}
+	}
+
 	rootMountingMutex.Lock()
 	defer rootMountingMutex.Unlock()
 
@@ -388,6 +395,27 @@ func mountRootFs(dev, fstype string) error {
 
 	rootMounted.Done()
 	return nil
+}
+
+// Wait until all devices of a multiple-device filesystem are scanned and registered within the kernel module
+func waitForBtrfsDevicesReady(dev string) error {
+	controlFile, err := os.OpenFile("/dev/btrfs-control", os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer controlFile.Close()
+
+	/* this should be 4k */
+	var btrfsIoctlVolArgs struct {
+		fs   int64
+		name [4088]uint8
+	}
+
+	copy(btrfsIoctlVolArgs.name[:], dev)
+
+	var BTRFS_IOCTL_MAGIC uintptr = 0x94
+	BTRFS_IOC_DEVICES_READY := ior(BTRFS_IOCTL_MAGIC, 39, unsafe.Sizeof(btrfsIoctlVolArgs))
+	return ioctl(controlFile.Fd(), BTRFS_IOC_DEVICES_READY, uintptr(unsafe.Pointer(&btrfsIoctlVolArgs)))
 }
 
 func mountFlags() (uintptr, string) {
