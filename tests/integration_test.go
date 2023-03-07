@@ -106,7 +106,7 @@ func TestInvalidInitBinary(t *testing.T) {
 func TestVfio(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		modules:          "e1000", // add network module needed for ssh
-		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1,vfio_virqfd",
+		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1",
 		params:           []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
 		disk:             "assets/archlinux.ext4.raw",
 		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
