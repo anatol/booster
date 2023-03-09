@@ -263,7 +263,7 @@ func appendCompatibilitySymlinks(img *Image) error {
 	for _, l := range symlinks {
 		// Ensure that target always exist which may not be the
 		// case if we only install files from /lib or /bin.
-		targetDir := filepath.Dir(filepath.Join(filepath.Dir(l.src), l.target))
+		targetDir := filepath.Join(filepath.Dir(l.src), l.target)
 		if err := img.AppendDirEntry(targetDir); err != nil {
 			return err
 		}
