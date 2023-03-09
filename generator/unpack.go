@@ -2,8 +2,10 @@ package main
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -88,9 +90,34 @@ func processImage(file string, fn processCpioEntryFn) error {
 
 func runUnpack() error {
 	dir := opts.UnpackCommand.Args.OutputDir
+
+	// Some symlinks are relative (e.g. bin → usr/bin), to resolve
+	// them properly we thus need to change to the output directory.
+	if err := os.Chdir(dir); err != nil {
+		return err
+	}
+
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
 		out := filepath.Join(dir, hdr.Name)
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		dirFp := filepath.Dir(out)
+
+		// Resolve symlinks for the dirFp and update out
+		// accordingly (e.g. bin/busybox → usr/bin/busybox).
+		//
+		// XXX: Can't use filepath.EvalSymlinks as it emits
+		// an error if a symlink points to an non-existent file.
+		stat, err := os.Lstat(dirFp)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		} else if stat.Mode().Type() == fs.ModeSymlink {
+			dirFp, err = os.Readlink(dirFp)
+			if err != nil {
+				return err
+			}
+			out = filepath.Join(dirFp, filepath.Base(out))
+		}
+
+		if err := os.MkdirAll(dirFp, 0o755); err != nil {
 			return err
 		}
 		m := hdr.Mode & 0o770000
