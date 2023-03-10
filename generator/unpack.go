@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -133,16 +134,27 @@ func runUnpack() error {
 }
 
 func runCat() error {
+	var foundFile bool
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
 		if hdr.Name == opts.CatCommand.Args.File {
 			if _, err := io.Copy(os.Stdout, r); err != nil {
 				return err
 			}
+
+			foundFile = true
 			return errStop
 		}
 		return nil
 	}
-	return processImage(opts.CatCommand.Args.Image, fn)
+
+	err := processImage(opts.CatCommand.Args.Image, fn)
+	if err != nil {
+		return err
+	} else if !foundFile {
+		return fs.ErrNotExist
+	}
+
+	return nil
 }
 
 func runLs() error {
