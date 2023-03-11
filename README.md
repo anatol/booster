@@ -36,6 +36,11 @@ Install booster with `xbps-install -S booster`.
 
 Run `xbps-reconfigure -f linux` to create the initramfs for a previously installed kernel.
 
+#### Alpine Linux
+Install booster using `apk add booster`.
+
+Refer to `/usr/share/doc/booster/README.alpine` for bootloader configuration instructions (which depend on the desired setup).
+
 #### Manual
 Or optionally the image can be generated manually as `booster build mybooster.img`. Note that by default booster generates
 host specific images with minimum binaries needed for the current host. Providing `--universal` flag to `booster` tool
