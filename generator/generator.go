@@ -289,10 +289,15 @@ func (img *Image) appendExtraFiles(binaries ...string) error {
 		if !filepath.IsAbs(f) {
 			// If the given name is not an absolute path, assume that it refers
 			// to an executable and lookup the path to the executable using $PATH.
-			var err error
-			f, err = exec.LookPath(f)
-			if err != nil {
-				return err
+			var err_lp error
+			var err_abs error
+			f, err_lp = exec.LookPath(f)
+			f, err_abs = filepath.Abs(f)
+			if err_lp != nil {
+				return err_lp
+			}
+			if err_abs != nil {
+				return err_abs
 			}
 		}
 
