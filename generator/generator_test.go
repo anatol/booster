@@ -550,3 +550,9 @@ func TestModprobeOptions(t *testing.T) {
 	}
 	require.Equal(t, expect, cfg.ModprobeOptions)
 }
+
+func TestLookupFile(t *testing.T) {
+	path, err := lookupPath("echo")
+	require.NoError(t, err)
+	require.Equal(t, "/usr/bin/echo", path)
+}

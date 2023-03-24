@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -290,7 +289,7 @@ func (img *Image) appendExtraFiles(binaries ...string) error {
 			// If the given name is not an absolute path, assume that it refers
 			// to an executable and lookup the path to the executable using $PATH.
 			var err error
-			f, err = exec.LookPath(f)
+			f, err = lookupPath(f)
 			if err != nil {
 				return err
 			}
@@ -301,6 +300,31 @@ func (img *Image) appendExtraFiles(binaries ...string) error {
 		}
 	}
 	return nil
+}
+
+func lookupPath(binary string) (string, error) {
+	paths := []string{
+		"/usr/bin",
+		"/usr/sbin",
+		"/bin",
+		"/sbin",
+		"/usr/local/bin",
+		"/usr/local/sbin",
+	}
+
+	for _, p := range paths {
+		f := filepath.Join(p, binary)
+		_, err := os.Stat(f)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return f, nil
+	}
+
+	return "", os.ErrNotExist
 }
 
 func findFwFile(fw string) (string, error) {
