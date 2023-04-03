@@ -1,5 +1,21 @@
 Booster - fast and secure initramfs generator
 
+Release 0.10 (2023, Mar 7)
+  * Fixes panic during LUKS volume unseal (#188)
+  * Brings support for camelia block cipher (#188)
+  * Adds support for loadable crypto modules (#47 #188)
+  * Adds support for twofish block cipher
+  * Fixes TPM device discovery race condition (#116)
+  * Allows force loading of extra modules via the kernel command-line (#186)
+  * Ignores /etc/default/zfs file if it does not exist (#181)
+  * Does not fail if system contains multiple kernel modules with the same name (#192)
+  * Normalizes kernel module aliase names and makes _ synonym of - character (#185)
+  * Adds scsi drivers to the list of the default modules (#196)
+  * Handles root on RAID0 btrfs partitions (#194)
+  * Handles systemd TPM2 + passphrase (#198)
+  * Adds 'usbhid' to the list of default modules (#206)
+  * Adds CentOS package support
+
 Release 0.9 (2022 Aug 24)
   * Load 'efivarfs' before mounting the filesystem (#149)
   * generator: add drivers/ata to the list of default modules (#149)
