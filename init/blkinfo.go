@@ -510,7 +510,7 @@ func probeSwap(f *os.File) *blkInfo {
 		swapMagicOffset = 4086
 		swapMagicLength = 10
 		swapUUIDOffset  = 1036
-		swapLabeOffset  = 1052
+		swapLabelOffset = 1052
 	)
 
 	magic := make([]byte, 10)
@@ -527,7 +527,7 @@ func probeSwap(f *os.File) *blkInfo {
 	}
 
 	label := make([]byte, 16)
-	if _, err := f.ReadAt(label, swapLabeOffset); err != nil {
+	if _, err := f.ReadAt(label, swapLabelOffset); err != nil {
 		return nil
 	}
 	label = bytes.TrimRight(label, "\x00")
