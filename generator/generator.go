@@ -330,7 +330,7 @@ func lookupPath(binary string) (string, error) {
 func findFwFile(fw string) (string, error) {
 	supportedFwExt := []string{
 		"",
-		".xz", // https://archlinux.org/news/linux-firmware-202201190c6a7b3-2-requires-kernel-53-and-package-splitting/
+		".xz", // since linux v5.3
 	}
 
 	fwBasePath := firmwareDir + fw
