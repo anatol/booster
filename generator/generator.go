@@ -331,6 +331,7 @@ func findFwFile(fw string) (string, error) {
 	supportedFwExt := []string{
 		"",
 		".xz", // since linux v5.3
+		".zst", // since linux v5.19
 	}
 
 	fwBasePath := firmwareDir + fw
