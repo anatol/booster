@@ -302,6 +302,7 @@ type Opts struct {
 	disk                 string
 	disks                []vmtest.QemuDisk
 	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
 	mountTimeout         int // in seconds
 	extraFiles           string
@@ -317,9 +318,13 @@ type Opts struct {
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
+	require.False(t, opts.asIso && opts.containsESP)
 
 	disks := opts.disks
-	if opts.disk != "" {
+	var isoFile string
+	if strings.HasSuffix(opts.disk, ".iso") {
+		isoFile = opts.disk
+	} else if opts.disk != "" {
 		disks = append(disks, vmtest.QemuDisk{Path: opts.disk, Format: "raw"})
 	}
 	for _, d := range disks {
@@ -377,6 +382,22 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 
 		disks = append(disks, vmtest.QemuDisk{Path: output, Format: "raw"})
 	}
+	if opts.asIso {
+		params = append(params, "-bios", "/usr/share/ovmf/x64/OVMF.fd")
+
+		// ESP partition contains initramfs and cannot be statically built
+		// we built the image at runtime
+		isoFile = workDir + "/disk.iso"
+
+		env := []string{
+			"OUTPUT=" + isoFile,
+			"KERNEL_IMAGE=" + vmlinuzPath,
+			"KERNEL_OPTIONS=" + strings.Join(kernelArgs, " "),
+			"INITRAMFS_IMAGE=" + initRamfs,
+		}
+		env = append(env, opts.scriptEnvvars...)
+		require.NoError(t, shell("generators/iso.sh", env...))
+	}
 
 	options := vmtest.QemuOptions{
 		Params:          params,
@@ -384,6 +405,9 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 		Disks:           disks,
 		Verbose:         testing.Verbose(),
 		Timeout:         40 * time.Second,
+	}
+	if isoFile != "" {
+		options.CdRom = isoFile
 	}
 
 	if !opts.containsESP {
