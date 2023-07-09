@@ -33,7 +33,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 
 	type probeFn func(f *os.File) *blkInfo
 	// FAT signature is similar to MBR + some restrictions. Check fat before mbr.
-	probes := []probeFn{probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap}
+	probes := []probeFn{probeIso9660, probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap}
 	for _, fn := range probes {
 		blk := fn(r)
 		if blk == nil {
@@ -533,4 +533,21 @@ func probeSwap(f *os.File) *blkInfo {
 	label = bytes.TrimRight(label, "\x00")
 
 	return &blkInfo{format: "swap", isFs: true, uuid: uuid, label: string(label)}
+}
+
+func probeIso9660(f *os.File) *blkInfo {
+	// https://wiki.osdev.org/ISO_9660
+	const (
+		volumeDescriptorOffset = 16 * 2048
+	)
+	magic := make([]byte, 6)
+	if _, err := f.ReadAt(magic, volumeDescriptorOffset); err != nil {
+		return nil
+	}
+	// bootable volume has magic[0] == 0
+	if string(magic[1:]) != "CD001" {
+		return nil
+	}
+
+	return &blkInfo{format: "iso9660", isFs: true}
 }

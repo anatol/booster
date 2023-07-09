@@ -237,3 +237,17 @@ func TestLoadExtraModules(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("booster: loading module xfs"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
+
+func TestISO(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		asIso:            true,
+		modules:          "iso9660",
+		modulesForceLoad: "iso9660",
+		kernelArgs:       []string{"root=/dev/sr0", "ro"},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("booster: mounting /dev/sr0->/booster.root, fs=iso9660, flags=0x1, options="))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}

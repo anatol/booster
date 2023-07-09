@@ -165,44 +165,9 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	}
 
 	if isDevice {
-		blk.wwid, err = wwid(devpath)
+		err := setupDiskSymlinks(devpath, blk, err)
 		if err != nil {
-			return fmt.Errorf("%s: %v", devpath, err)
-		}
-		for _, wwid := range blk.wwid {
-			if err := diskSymlink("id", devpath, wwid); err != nil {
-				return err
-			}
-
-			if blk.format == "gpt" {
-				for _, p := range blk.data.(gptData).partitions {
-					num := p.num
-					partPath := calculateDevPath(devpath, num)
-					name := fmt.Sprintf("%s-part%d", wwid, num+1) // devname partitions start with "1"
-					if err := diskSymlink("id", partPath, name); err != nil {
-						return err
-					}
-				}
-			}
-		}
-
-		blk.hwPath, err = hwPath(devpath)
-		if err != nil {
-			return fmt.Errorf("%s: %v", devpath, err)
-		}
-		if err := diskSymlink("path", devpath, blk.hwPath); err != nil {
-			return err
-		}
-
-		if blk.format == "gpt" {
-			for _, p := range blk.data.(gptData).partitions {
-				num := p.num
-				partPath := calculateDevPath(devpath, num)
-				name := fmt.Sprintf("%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
-				if err := diskSymlink("path", partPath, name); err != nil {
-					return err
-				}
-			}
+			info("setupDiskSymlinks: %v", err)
 		}
 	}
 
@@ -238,6 +203,49 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		return mountRootFs(devpath, blk.format)
 	}
 
+	return nil
+}
+
+func setupDiskSymlinks(devpath string, blk *blkInfo, err error) error {
+	blk.wwid, err = wwid(devpath)
+	if err != nil {
+		return fmt.Errorf("%s: %v", devpath, err)
+	}
+	for _, wwid := range blk.wwid {
+		if err := diskSymlink("id", devpath, wwid); err != nil {
+			continue
+		}
+
+		if blk.format == "gpt" {
+			for _, p := range blk.data.(gptData).partitions {
+				num := p.num
+				partPath := calculateDevPath(devpath, num)
+				name := fmt.Sprintf("%s-part%d", wwid, num+1) // devname partitions start with "1"
+				if err := diskSymlink("id", partPath, name); err != nil {
+					continue
+				}
+			}
+		}
+	}
+
+	blk.hwPath, err = hwPath(devpath)
+	if err != nil {
+		return fmt.Errorf("%s: %v", devpath, err)
+	}
+	if err := diskSymlink("path", devpath, blk.hwPath); err != nil {
+		return err
+	}
+
+	if blk.format == "gpt" {
+		for _, p := range blk.data.(gptData).partitions {
+			num := p.num
+			partPath := calculateDevPath(devpath, num)
+			name := fmt.Sprintf("%s-part%d", blk.hwPath, num+1) // devname partitions start with "1"
+			if err := diskSymlink("path", partPath, name); err != nil {
+				continue
+			}
+		}
+	}
 	return nil
 }
 
@@ -366,7 +374,17 @@ func fsck(dev string) error {
 }
 
 func mountRootFs(dev, fstype string) error {
-	wg := loadModules(fstype)
+	// some fs have module names that differs from the fs name itself
+	fstypeModules := map[string]string{
+		"iso9660": "isofs",
+	}
+	fsmodule, ok := fstypeModules[fstype]
+	if !ok {
+		// fallback to module name that matches the fs name
+		fsmodule = fstype
+	}
+
+	wg := loadModules(fsmodule)
 	wg.Wait()
 
 	if fstype == "btrfs" {

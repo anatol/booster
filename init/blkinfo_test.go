@@ -36,7 +36,9 @@ func checkFs(t *testing.T, name, fstype, uuidStr, label string, size int64, scri
 	require.NoError(t, err)
 	require.Equal(t, fstype, info.format)
 	var uuid UUID
-	if fstype == "mbr" || fstype == "fat" || fstype == "mdraid" {
+	if fstype == "iso9660" {
+		uuid = nil
+	} else if fstype == "mbr" || fstype == "fat" || fstype == "mdraid" {
 		uuid, err = hex.DecodeString(uuidStr)
 	} else if fstype == "lvm" {
 		uuid = []byte(strings.ReplaceAll(uuidStr, "-", ""))
@@ -136,4 +138,8 @@ trap 'sudo mdadm --stop /dev/md/BlkInfoTest; sudo losetup -d $lodev' EXIT
 lodev=$(sudo losetup -f --show $OUTPUT)
 sudo mdadm --create --force --verbose --level=0 --raid-devices=1 --uuid=9ee4ce4c:c179141f:33b05b33:980ece9a /dev/md/BlkInfoTest $lodev`
 	checkFs(t, "mdraid", "mdraid", "9ee4ce4cc179141f33b05b33980ece9a", "", 10, createMdraid, mdraidData{levelRaid0})
+}
+
+func TestBlkIso9660(t *testing.T) {
+	checkFs(t, "iso9660", "iso9660", "", "", 10, "mkisofs -o $OUTPUT /dev/null", nil)
 }
