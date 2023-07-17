@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,11 +261,11 @@ func checkFileExistence(t *testing.T, file string) {
 func checkFilesEqual(t *testing.T, files ...string) {
 	require.Greater(t, len(files), 2)
 
-	b1, err := ioutil.ReadFile(files[0])
+	b1, err := os.ReadFile(files[0])
 	require.NoError(t, err)
 
 	for _, f := range files[1:] {
-		b, err := ioutil.ReadFile(f)
+		b, err := os.ReadFile(f)
 		require.NoError(t, err)
 		require.Equal(t, b1, b)
 	}
