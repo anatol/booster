@@ -33,7 +33,7 @@ func readBlkInfo(path string) (*blkInfo, error) {
 
 	type probeFn func(f *os.File) *blkInfo
 	// FAT signature is similar to MBR + some restrictions. Check fat before mbr.
-	probes := []probeFn{probeIso9660, probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap}
+	probes := []probeFn{probeIso9660, probeGpt, probeFat, probeMbr, probeLuks, probeExt4, probeBtrfs, probeXfs, probeF2fs, probeLvmPv, probeMdraid, probeSwap, probeErofs}
 	for _, fn := range probes {
 		blk := fn(r)
 		if blk == nil {
@@ -550,4 +550,31 @@ func probeIso9660(f *os.File) *blkInfo {
 	}
 
 	return &blkInfo{format: "iso9660", isFs: true}
+}
+
+func probeErofs(f *os.File) *blkInfo {
+	const (
+		superblockOffset = 1024
+		superblockSize   = 128
+		superblockMagic  = 0xE0F5E1E2
+
+		uuidOffset  = 48
+		uuidSize    = 16
+		labelOffset = 64
+		labelSize   = 16
+	)
+
+	superblock := make([]byte, superblockSize)
+	if _, err := f.ReadAt(superblock, superblockOffset); err != nil {
+		return nil
+	}
+	if binary.LittleEndian.Uint32(superblock[0:4]) != superblockMagic {
+		return nil
+	}
+	// TODO: check crc
+
+	uuid := superblock[uuidOffset : uuidOffset+uuidSize]
+	label := string(bytes.TrimRight(superblock[labelOffset:labelOffset+labelSize], "\x00"))
+
+	return &blkInfo{format: "erofs", isFs: true, uuid: uuid, label: label}
 }

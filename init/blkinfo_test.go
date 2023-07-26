@@ -143,3 +143,7 @@ sudo mdadm --create --force --verbose --level=0 --raid-devices=1 --uuid=9ee4ce4c
 func TestBlkIso9660(t *testing.T) {
 	checkFs(t, "iso9660", "iso9660", "", "", 10, "mkisofs -o $OUTPUT /dev/null", nil)
 }
+
+func TestErofs(t *testing.T) {
+	checkFs(t, "erofs", "erofs", "54a271bc-f529-4e2b-ae47-bebf088db7f9", "erofslabel", 10, "mkfs.erofs -L $LABEL -U$UUID $OUTPUT ../generator", nil)
+}
