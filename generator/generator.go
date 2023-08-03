@@ -206,6 +206,18 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
+	// force load usbhid and hid_sensor_hub modules when unlocking encrypted LUKS2 volumes with fido2 tokens/devices
+	if conf.extraFiles != nil {
+		for _, file := range conf.extraFiles {
+			if file == "fido2-assert" {
+				conf.modulesForceLoad = append(conf.modulesForceLoad, "usbhid")
+				conf.modulesForceLoad = append(conf.modulesForceLoad, "hid_sensor_hub")
+
+				break
+			}
+		}
+	}
+
 	if err := kmod.resolveDependencies(); err != nil {
 		return err
 	}
