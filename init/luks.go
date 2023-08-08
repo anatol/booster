@@ -90,6 +90,9 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+	usbHidDriverWg.Wait()
+	hidGenericWg.Wait()
+
 	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
 	if err != nil {
 		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
