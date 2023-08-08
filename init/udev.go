@@ -115,6 +115,10 @@ func handleUdevEvent(ev netlink.UEvent) {
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
+		// bind actions associated with the hid-generic driver have an alias
+		if ev.Env["DRIVER"] == "hid-generic" && ev.Action == "bind" {
+			go handleHidGenericUevent(ev)
+		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
@@ -126,10 +130,6 @@ func handleUdevEvent(ev netlink.UEvent) {
 	} else if ev.Env["SUBSYSTEM"] == "drivers" && ev.Action == "add" && ev.KObj == "/bus/usb/drivers/usbhid" {
 		go handleHidUevent(ev)
 	} 
-
-	if ev.Env["DRIVER"] == "hid-generic" && ev.Action == "bind" {
-		go handleHidGenericUevent(ev)
-	}
 }
 
 func handleHidGenericUevent(ev netlink.UEvent) {
