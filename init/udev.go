@@ -116,7 +116,7 @@ func handleUdevEvent(ev netlink.UEvent) {
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
 		// bind actions associated with the hid-generic driver have an alias
-		if ev.Env["DRIVER"] == "hid-generic" && ev.Action == "bind" {
+		if ev.Env["DRIVER"] == "usbhid" && ev.Action == "bind" {
 			go handleHidGenericUevent(ev)
 		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
