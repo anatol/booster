@@ -65,16 +65,21 @@ func validDmEvent(ev netlink.UEvent) bool {
 var (
 	udevQuitLoop chan struct{}
 	udevConn     *netlink.UEventConn
-
-	tpmReady sync.Once
 	// Wait() will return after the TPM is ready.
 	// Only works after we start listening for udev events.
-	tpmReadyWg sync.WaitGroup
+	tpmReady       sync.Once
+	usbHidDriver   sync.Once
+	hidGeneric     sync.Once
+	tpmReadyWg     sync.WaitGroup
+	usbHidDriverWg sync.WaitGroup
+	hidGenericWg   sync.WaitGroup
 )
 
 func udevListener() error {
 	// Initialize tpmReadyWg
 	tpmReadyWg.Add(1)
+	usbHidDriverWg.Add(1)
+	hidGenericWg.Add(1)
 
 	udevConn = new(netlink.UEventConn)
 	if err := udevConn.Connect(netlink.KernelEvent); err != nil {
@@ -118,7 +123,23 @@ func handleUdevEvent(ev netlink.UEvent) {
 		go func() { hidrawDevices <- ev.Env["DEVNAME"] }()
 	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
 		go handleTpmReadyUevent(ev)
+	} else if ev.Env["SUBSYSTEM"] == "drivers" && ev.Action == "add" && ev.KObj == "/bus/usb/drivers/usbhid" {
+		go handleHidUevent(ev)
+	} 
+
+	if ev.Env["DRIVER"] == "hid-generic" && ev.Action == "bind" {
+		go handleHidGenericUevent(ev)
 	}
+}
+
+func handleHidGenericUevent(ev netlink.UEvent) {
+	info(ev.Env["DRIVER"] + " uevent: device: %s", ev.Env["DEVPATH"])
+	hidGeneric.Do(hidGenericWg.Done)
+}
+
+func handleHidUevent(ev netlink.UEvent) {
+	info(ev.Env["SUBSYSTEM"] + " uevent: drivers loaded: %s", ev.Env["DEVPATH"])
+	usbHidDriver.Do(usbHidDriverWg.Done)
 }
 
 func handleTpmReadyUevent(ev netlink.UEvent) {
