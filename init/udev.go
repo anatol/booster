@@ -112,7 +112,7 @@ func handleUdevEvent(ev netlink.UEvent) {
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
-		// bind actions associated with the hid-generic driver have an alias
+		// bind actions associated with the usbhid driver have an alias
 		if ev.Env["DRIVER"] == "usbhid" && ev.Action == "bind" {
 			go handleUsbHidUevent(ev)
 		}
