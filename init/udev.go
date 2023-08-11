@@ -128,7 +128,9 @@ func handleUdevEvent(ev netlink.UEvent) {
 }
 
 func handleUsbHidUevent(ev netlink.UEvent) {
-	info(ev.Env["DRIVER"]+" uevent: device: %s", ev.Env["DEVPATH"])
+	// `PRODUCT` is associated with the usb device, and can be used to id the fido2 token
+	// it's the concat of `idVendor`, `idProduct`, and `bcdDevice` when a kernel usb event occurs
+	info(ev.Env["DRIVER"]+" uevent: product: %s", ev.Env["PRODUCT"])
 	usbhid.Do(usbhidWg.Done)
 }
 
