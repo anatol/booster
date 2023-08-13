@@ -26,5 +26,5 @@ for kernel in "${kernels[@]}"; do
   fi
   read -r pkgbase < "${kernel}/pkgbase"
 
-  rm /boot/booster-${pkgbase}.img
+  rm -f /boot/booster-${pkgbase}.img
 done
