@@ -65,16 +65,18 @@ func validDmEvent(ev netlink.UEvent) bool {
 var (
 	udevQuitLoop chan struct{}
 	udevConn     *netlink.UEventConn
-
-	tpmReady sync.Once
 	// Wait() will return after the TPM is ready.
 	// Only works after we start listening for udev events.
+	tpmReady   sync.Once
+	usbhid     sync.Once
 	tpmReadyWg sync.WaitGroup
+	usbhidWg   sync.WaitGroup
 )
 
 func udevListener() error {
 	// Initialize tpmReadyWg
 	tpmReadyWg.Add(1)
+	usbhidWg.Add(1)
 
 	udevConn = new(netlink.UEventConn)
 	if err := udevConn.Connect(netlink.KernelEvent); err != nil {
@@ -110,6 +112,10 @@ func handleUdevEvent(ev netlink.UEvent) {
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
+		// bind actions associated with the usbhid driver have an alias
+		if ev.Env["DRIVER"] == "usbhid" && ev.Action == "bind" {
+			go handleUsbHidUevent(ev)
+		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
@@ -119,6 +125,13 @@ func handleUdevEvent(ev netlink.UEvent) {
 	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
 		go handleTpmReadyUevent(ev)
 	}
+}
+
+func handleUsbHidUevent(ev netlink.UEvent) {
+	// `PRODUCT` is associated with the usb device, and can be used to id the fido2 token
+	// it's the concat of `idVendor`, `idProduct`, and `bcdDevice` when a kernel usb event occurs
+	info(ev.Env["DRIVER"]+" uevent: product: %s", ev.Env["PRODUCT"])
+	usbhid.Do(usbhidWg.Done)
 }
 
 func handleTpmReadyUevent(ev netlink.UEvent) {
