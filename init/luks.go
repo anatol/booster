@@ -90,20 +90,16 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-	usbhidWg.Wait()
-
-	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
+	dev := NewFido2Device("/dev/" + devName)
+	isFido2, err := dev.IsFido2()
 	if err != nil {
-		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
+		return nil, fmt.Errorf("HID %s does not support FIDO: "+err.Error(), devName)
 	}
-
-	// TODO: find better way to identify devices that support FIDO2
-	if !strings.Contains(string(ueventContent), "FIDO") {
-		return nil, fmt.Errorf("HID %s does not support FIDO", devName)
+	if !isFido2 {
+		return nil, fmt.Errorf("HID %s does not support FIDO, continuing", devName)
 	}
 
 	info("HID %s supports FIDO, trying it to recover the password", devName)
-
 	var challenge strings.Builder
 	const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
 	challenge.WriteString(zeroString)                                 // client data, an empty string
@@ -127,6 +123,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		args = append(args, "-t", "pin=true")
 	}
 
+	info("running fido2-assert tool for %s", devName)
 	cmd := exec.Command("fido2-assert", args...)
 	pipeOut, err := cmd.StdoutPipe()
 	if err != nil {
@@ -204,18 +201,6 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	if node.RelyingParty == "" {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
-
-	dir, err := os.ReadDir("/sys/class/hidraw/")
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		for _, d := range dir {
-			// run it in a separate goroutine to avoid blocking on channel
-			hidrawDevices <- d.Name()
-		}
-	}()
 
 	seenHidrawDevices := make(set)
 
