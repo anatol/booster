@@ -68,7 +68,6 @@ var (
 	// Wait() will return after the TPM is ready.
 	// Only works after we start listening for udev events.
 	tpmReady   sync.Once
-	usbhid     sync.Once
 	tpmReadyWg sync.WaitGroup
 	usbhidWg   sync.WaitGroup
 )
@@ -107,31 +106,44 @@ exit:
 	return nil
 }
 
+var seenHidrawDevices = make(chan string, 10)
+
 func handleUdevEvent(ev netlink.UEvent) {
 	debug("udev event %+v", ev)
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
-		// bind actions associated with the usbhid driver have an alias
-		if ev.Env["DRIVER"] == "usbhid" && ev.Action == "bind" {
-			go handleUsbHidUevent(ev)
-		}
+		go handleUsbBindUevent(ev)
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
 		go func() { check(handleNetworkUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "hidraw" && ev.Action == "add" {
-		go func() { hidrawDevices <- ev.Env["DEVNAME"] }()
+		// add it to a channel to be filtered after it has been added
+		go func() {
+			// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0/0003:1050:0402.0005/hidraw/hidraw1
+			seenHidrawDevices <- ev.Env["DEVPATH"]
+		}()
 	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
 		go handleTpmReadyUevent(ev)
 	}
 }
 
-func handleUsbHidUevent(ev netlink.UEvent) {
-	// `PRODUCT` is associated with the usb device, and can be used to id the fido2 token
-	// it's the concat of `idVendor`, `idProduct`, and `bcdDevice` when a kernel usb event occurs
-	info(ev.Env["DRIVER"]+" uevent: product: %s", ev.Env["PRODUCT"])
-	usbhid.Do(usbhidWg.Done)
+// filters hidraw devices by device path that were previously added
+// we only care about fido2 hidraw devices, which depend on the usbhid driver
+func handleUsbBindUevent(ev netlink.UEvent) {
+	if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
+		for dev := range seenHidrawDevices {
+			// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0
+			if strings.Contains(dev, ev.Env["DEVPATH"]) {
+				// get the hidraw
+				idx := strings.LastIndex(dev, "/")
+				if idx != -1 {
+					hidrawDevices <- dev[idx+1:]
+				}
+			}
+		}
+	}
 }
 
 func handleTpmReadyUevent(ev netlink.UEvent) {
