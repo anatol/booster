@@ -142,7 +142,7 @@ func NewFido2Device(path string) *Device {
 func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 	dev := C.fido_dev_new()
 	if cErr := C.fido_dev_open(dev, C.CString(d.path)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to open hidraw device: " + errFromCode(cErr).Error())
+		return nil, fmt.Errorf("failed to open hidraw device: %w", errFromCode(cErr))
 	}
 	d.dev = dev
 	return dev, nil
