@@ -131,6 +131,7 @@ func handleUdevEvent(ev netlink.UEvent) {
 // we only care about fido2 hidraw devices, which depend on the usbhid driver
 func handleUsbBindUevent(ev netlink.UEvent) {
 	if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
+		defer close(hidrawDevices)
 		for dev := range seenHidrawDevices {
 			// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0
 			if strings.Contains(dev, ev.Env["DEVPATH"]) {
