@@ -91,6 +91,7 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
 	dev := NewFido2Device("/dev/" + devName)
+
 	isFido2, err := dev.IsFido2()
 	if err != nil {
 		return nil, fmt.Errorf("HID %s does not support FIDO: "+err.Error(), devName)
@@ -100,6 +101,36 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	}
 
 	info("HID %s supports FIDO, trying it to recover the password", devName)
+
+	// client data hash
+	cdh := make([]byte, 32)
+
+	cred, credDecErr := base64.StdEncoding.DecodeString(credential)
+	if credDecErr != nil {
+		return nil, fmt.Errorf("failed when decoding credential id")
+	}
+	hmacSalt, hmacSaltDecErr := base64.StdEncoding.DecodeString(salt)
+	if hmacSaltDecErr != nil {
+		return nil, fmt.Errorf("failed when decoding hmac salt")
+	}
+
+	// TODO: handle the case with pins
+	assert, err := dev.AssertFido2Device(relyingParty, cdh, [][]byte{cred}, "", &AssertionOpts{
+		Extensions: []Extension{HMACSecretExtension},
+		HMACSalt:   hmacSalt,
+		UV: Default,
+		UP: Default,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if assert.HMACSecret != nil {
+		// just print the hash for comparison
+		sum := sha256.Sum256(assert.HMACSecret)
+		info("used libfido2 when retrieving hmac secret for %s", devName)
+		info("sha256: %x", sum)
+	}
+
 	var challenge strings.Builder
 	const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
 	challenge.WriteString(zeroString)                                 // client data, an empty string
@@ -178,6 +209,10 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		msg = bytes.TrimRight(msg, "\n")
 		return nil, fmt.Errorf("%s", string(msg))
 	}
+
+	info("used fido2-assert to retrieve hmac secret for %s", devName)
+	sum := sha256.Sum256(lines[4])
+	info("sha256: %x", sum)
 
 	// hmac is the 5th line in the output
 	return lines[4], nil
