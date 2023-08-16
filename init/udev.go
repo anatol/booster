@@ -111,7 +111,9 @@ func handleUdevEvent(ev netlink.UEvent) {
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
-		go handleUsbBindUevent(ev)
+		if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
+			go handleUsbBindUevent(ev)
+		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
@@ -130,16 +132,14 @@ func handleUdevEvent(ev netlink.UEvent) {
 // filters hidraw devices by device path that were previously added
 // we only care about fido2 hidraw devices, which depend on the usbhid driver
 func handleUsbBindUevent(ev netlink.UEvent) {
-	if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
-		defer close(hidrawDevices)
-		for dev := range seenHidrawDevices {
-			// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0
-			if strings.Contains(dev, ev.Env["DEVPATH"]) {
-				// get the hidraw
-				idx := strings.LastIndex(dev, "/")
-				if idx != -1 {
-					hidrawDevices <- dev[idx+1:]
-				}
+	defer close(hidrawDevices)
+	for dev := range seenHidrawDevices {
+		// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0
+		if strings.Contains(dev, ev.Env["DEVPATH"]) {
+			// get the hidraw
+			idx := strings.LastIndex(dev, "/")
+			if idx != -1 {
+				hidrawDevices <- dev[idx+1:]
 			}
 		}
 	}
