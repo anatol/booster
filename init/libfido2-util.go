@@ -11,6 +11,18 @@ import "C"
 import (
 	"fmt"
 	"sync"
+	"unsafe"
+)
+
+const (
+	Default OptionValue = ""
+	True    OptionValue = "true"
+	False   OptionValue = "false"
+)
+
+const (
+	HMACSecretExtension  Extension = "hmac-secret"
+	CredProtectExtension Extension = "credProtect"
 )
 
 const (
@@ -126,6 +138,29 @@ func errFromCode(code C.int) error {
 	}
 }
 
+type OptionValue string
+
+type Extension string
+
+// FIDO2 assertions options that should be in the LUKS header because of systemd-cryptenroll
+type AssertionOpts struct {
+	Extensions []Extension
+	UV         OptionValue
+	UP         OptionValue
+	HMACSalt   []byte
+}
+
+type User struct {
+	ID          []byte
+	Name        string
+	DisplayName string
+	Icon        string
+}
+
+type Assertion struct {
+	HMACSecret []byte
+}
+
 // FIDO2 Device
 type Device struct {
 	path string
@@ -167,4 +202,129 @@ func (d *Device) IsFido2() (bool, error) {
 	defer d.closeFido2Device(dev)
 	isFido2 := bool(C.fido_dev_is_fido2(dev))
 	return isFido2, nil
+}
+
+func getCOpt(o OptionValue) (C.fido_opt_t, error) {
+	switch o {
+	case Default:
+		return C.FIDO_OPT_OMIT, nil
+	case True:
+		return C.FIDO_OPT_TRUE, nil
+	case False:
+		return C.FIDO_OPT_FALSE, nil
+	default:
+		return C.FIDO_OPT_OMIT, fmt.Errorf("invalid credential protection")
+	}
+}
+
+func getCLen(b []byte) C.size_t {
+	return C.size_t(len(b))
+}
+
+func getCBytes(b []byte) *C.uchar {
+	return (*C.uchar)(unsafe.Pointer(&b[0]))
+}
+
+func getExtensionsInt(extensions []Extension) int {
+	exts := 0
+	for _, extension := range extensions {
+		switch extension {
+		case HMACSecretExtension:
+			exts |= int(C.FIDO_EXT_HMAC_SECRET)
+		case CredProtectExtension:
+			exts |= int(C.FIDO_EXT_CRED_PROTECT)
+		}
+	}
+	return exts
+}
+
+// expects the FIDO2 pin
+// nil means a pin is not required
+func getCStringOrNil(s string) *C.char {
+	if s == "" {
+		return nil
+	}
+	return C.CString(s)
+}
+
+func (d *Device) AssertFido2Device(
+	rpID string,
+	clientDataHash []byte,
+	credentialIDs [][]byte,
+	pin string,
+	opts *AssertionOpts) (*Assertion, error) {
+
+	dev, err := d.openFido2Device()
+	if err != nil {
+		return nil, err
+	}
+	defer d.closeFido2Device(dev)
+
+	if opts == nil {
+		opts = &AssertionOpts{}
+	}
+	if rpID == "" {
+		return nil, fmt.Errorf("no relying party id specified")
+	}
+
+	cAssert := C.fido_assert_new()
+	defer C.fido_assert_free(&cAssert)
+
+	// relying party
+	if cErr := C.fido_assert_set_rp(cAssert, C.CString(rpID)); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to set up assertion relying party id: %w", errFromCode(cErr))
+	}
+	// client data hash
+	if cErr := C.fido_assert_set_clientdata_hash(cAssert, getCBytes(clientDataHash), getCLen(clientDataHash)); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to set client data hash: %w", errFromCode(cErr))
+	}
+	// credential id
+	for _, credentialID := range credentialIDs {
+		if cErr := C.fido_assert_allow_cred(cAssert, getCBytes(credentialID), getCLen(credentialID)); cErr != C.FIDO_OK {
+			return nil, fmt.Errorf("failed to set allowed credentials: %w", errFromCode(cErr))
+		}
+	}
+	// extension
+	if exts := getExtensionsInt(opts.Extensions); exts > 0 {
+		if cErr := C.fido_assert_set_extensions(cAssert, C.int(exts)); cErr != C.FIDO_OK {
+			return nil, fmt.Errorf("failed to set extensions: %w", errFromCode(cErr))
+		}
+	}
+	// options
+	cUV, err := getCOpt(opts.UV)
+	if err != nil {
+		return nil, err
+	}
+	if cErr := C.fido_assert_set_uv(cAssert, cUV); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to set UV option: %w", errFromCode(cErr))
+	}
+	cUP, err := getCOpt(opts.UP)
+	if err != nil {
+		return nil, err
+	}
+	if cErr := C.fido_assert_set_up(cAssert, cUP); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to set UP option: %w", errFromCode(cErr))
+	}
+	// hmac
+	if opts.HMACSalt != nil {
+		if cErr := C.fido_assert_set_hmac_salt(cAssert, getCBytes(opts.HMACSalt), getCLen(opts.HMACSalt)); cErr != C.FIDO_OK {
+			return nil, fmt.Errorf("failed to set hmac salt: %w", errFromCode(cErr))
+		}
+	}
+
+	// assert
+	if cErr := C.fido_dev_get_assert(dev, cAssert, getCStringOrNil(pin)); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to get assertion: %w", errFromCode(cErr))
+	}
+
+	cIdx := C.size_t(0)
+
+	cHMACLen := C.fido_assert_hmac_secret_len(cAssert, cIdx)
+	cHMACPtr := C.fido_assert_hmac_secret_ptr(cAssert, cIdx)
+	hmacSecret := C.GoBytes(unsafe.Pointer(cHMACPtr), C.int(cHMACLen))
+
+	assertion := &Assertion{
+		HMACSecret: hmacSecret,
+	}
+	return assertion, nil
 }
