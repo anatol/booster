@@ -69,6 +69,7 @@ var (
 	// Only works after we start listening for udev events.
 	tpmReady   sync.Once
 	tpmReadyWg sync.WaitGroup
+	hidrawWg   sync.WaitGroup
 )
 
 func udevListener() error {
@@ -105,6 +106,7 @@ exit:
 }
 
 var seenHidrawDevices = make(chan string, 10)
+var hidrawDevicesBound = make(chan bool)
 
 func handleUdevEvent(ev netlink.UEvent) {
 	debug("udev event %+v", ev)
@@ -112,6 +114,8 @@ func handleUdevEvent(ev netlink.UEvent) {
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
 		if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
+			hidrawWg.Wait()
+			hidrawDevicesBound <- true
 			go handleUsbBindUevent(ev)
 		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
@@ -119,10 +123,15 @@ func handleUdevEvent(ev netlink.UEvent) {
 	} else if ev.Env["SUBSYSTEM"] == "net" {
 		go func() { check(handleNetworkUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "hidraw" && ev.Action == "add" {
+		hidrawWg.Add(1)
 		// add it to a channel to be filtered after it has been added
 		go func() {
 			// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0/0003:1050:0402.0005/hidraw/hidraw1
 			seenHidrawDevices <- ev.Env["DEVPATH"]
+			hidrawWg.Done()
+			if isBound := <-hidrawDevicesBound; isBound {
+				close(seenHidrawDevices)
+			}
 		}()
 	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
 		go handleTpmReadyUevent(ev)
