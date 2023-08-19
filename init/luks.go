@@ -116,6 +116,9 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 
 	assertOpts := &AssertionOpts{
 		HMACSalt: hmacSalt,
+		// systemd-cryptenroll default option values
+		UP: True,
+		UV: False,
 	}
 
 	if userPresenceRequired {
