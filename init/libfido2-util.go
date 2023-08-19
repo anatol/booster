@@ -20,120 +20,62 @@ const (
 	False   OptionValue = "false"
 )
 
-const (
-	// ErrInvalidArgument if arguments are invalid.
-	ErrInvalidArgument = "invalid argument"
-	// ErrUserPresenceRequired is user presence required.
-	ErrUserPresenceRequired = "user presence required"
-	// ErrTX if there was an error transmitting.
-	ErrTX = "tx error"
-	// ErrRX if there was an error receiving.
-	ErrRX = "rx error"
-	// ErrNotAllowed if not allowed.
-	ErrNotAllowed = "not allowed"
-	// ErrActionTimeout if action timed out.
-	ErrActionTimeout = "action timed out"
-	// ErrPinNotSet if PIN is not set and is required for command.
-	ErrPinNotSet = "pin not set"
-	// ErrInvalidCommand if command is not supported.
-	ErrInvalidCommand = "invalid command"
-	// ErrInvalidLength if invalid length.
-	ErrInvalidLength = "invalid length"
-	// ErrInvalidCredential if credential is invalid.
-	ErrInvalidCredential = "invalid credential"
-	// ErrUnsupportedOption if option is unsupported.
-	ErrUnsupportedOption = "unsupported option"
-	// ErrPinInvalid if pin is wrong.
-	ErrPinInvalid = "pin invalid"
-	// ErrRXNotCBOR rx not CBOR.
-	ErrRXNotCBOR = "rx not CBOR"
-	// ErrPinPolicyViolation if PIN policy violation.
-	ErrPinPolicyViolation = "pin policy violation"
-	// ErrInternal internal error.
-	ErrInternal = "internal error"
-	// ErrNoCredentials if no credentials.
-	ErrNoCredentials = "no credentials"
-	// ErrPinAuthBlocked if too many PIN failures.
-	ErrPinAuthBlocked = "pin auth blocked"
-	// ErrPinRequired if PIN is required.
-	ErrPinRequired = "pin required"
-	// ErrMissingParameter if missing parameter.
-	ErrMissingParameter = "missing parameter"
-	// ErrUPRequired if user presence is required.
-	ErrUPRequired = "up required"
-	// ErrRXInvalidCBOR if receiving invalid CBOR.
-	ErrRXInvalidCBOR = "rx invalid cbor"
-	// ErrOperationDenied if operation denied.
-	ErrOperationDenied = "operation denied"
-	// ErrNotFIDO2 if device is not a FIDO2 device.
-	ErrNotFIDO2 = "not a FIDO2 device"
-	// ErrKeepaliveCancel if action was cancelled.
-	ErrKeepaliveCancel = "keep alive cancel"
-	// ErrInvalidOption if option is invalid.
-	ErrInvalidOption = "invalid option"
-	// ErrOther if other error?
-	ErrOther = "other error"
-)
-
-// function is called when setting inputs during fido2 assertion
-// returns error messages associated with the status codes returned from C
+// map is used during errors when setting inputs during fido2 assertion
+// returns errors associated with the status codes returned from C
 // these errors were documented by go-libfido2, but not all of them were
-// see https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
-func errFromCode(code C.int) error {
-	switch code {
-	case C.FIDO_ERR_TX: // -1
-		return fmt.Errorf(ErrTX)
-	case C.FIDO_ERR_RX: // -2
-		return fmt.Errorf(ErrRX)
-	case C.FIDO_ERR_INVALID_ARGUMENT: // -7
-		return fmt.Errorf(ErrInvalidArgument)
-	case C.FIDO_ERR_USER_PRESENCE_REQUIRED: // -8
-		return fmt.Errorf(ErrUserPresenceRequired)
-	case C.FIDO_ERR_INVALID_COMMAND: // 0x01
-		return fmt.Errorf(ErrInvalidCommand)
-	case C.FIDO_ERR_INVALID_LENGTH: // 0x03
-		return fmt.Errorf(ErrInvalidLength)
-	case C.FIDO_ERR_MISSING_PARAMETER:
-		return fmt.Errorf(ErrMissingParameter) // 0x14)
-	case C.FIDO_ERR_NOT_ALLOWED:
-		return fmt.Errorf(ErrNotAllowed)
-	case C.FIDO_ERR_ACTION_TIMEOUT:
-		return fmt.Errorf(ErrActionTimeout)
-	case C.FIDO_ERR_PIN_NOT_SET:
-		return fmt.Errorf(ErrPinNotSet)
-	case C.FIDO_ERR_INVALID_CREDENTIAL:
-		return fmt.Errorf(ErrInvalidCredential)
-	case C.FIDO_ERR_UNSUPPORTED_OPTION:
-		return fmt.Errorf(ErrUnsupportedOption)
-	case C.FIDO_ERR_PIN_INVALID:
-		return fmt.Errorf(ErrPinInvalid)
-	case C.FIDO_ERR_RX_NOT_CBOR:
-		return fmt.Errorf(ErrRXNotCBOR)
-	case C.FIDO_ERR_INTERNAL:
-		return fmt.Errorf(ErrInternal)
-	case C.FIDO_ERR_PIN_POLICY_VIOLATION:
-		return fmt.Errorf(ErrPinPolicyViolation)
-	case C.FIDO_ERR_NO_CREDENTIALS:
-		return fmt.Errorf(ErrNoCredentials)
-	case C.FIDO_ERR_PIN_AUTH_BLOCKED:
-		return fmt.Errorf(ErrPinAuthBlocked)
-	case C.FIDO_ERR_PIN_REQUIRED:
-		return fmt.Errorf(ErrPinRequired)
-	case C.FIDO_ERR_UP_REQUIRED:
-		return fmt.Errorf(ErrUPRequired)
-	case C.FIDO_ERR_RX_INVALID_CBOR:
-		return fmt.Errorf(ErrRXInvalidCBOR)
-	case C.FIDO_ERR_OPERATION_DENIED:
-		return fmt.Errorf(ErrOperationDenied)
-	case C.FIDO_ERR_KEEPALIVE_CANCEL:
-		return fmt.Errorf(ErrKeepaliveCancel)
-	case C.FIDO_ERR_INVALID_OPTION:
-		return fmt.Errorf(ErrInvalidOption)
-	case C.FIDO_ERR_ERR_OTHER:
-		return fmt.Errorf(ErrOther)
-	default:
-		return fmt.Errorf("libfido2 error %d", code)
-	}
+// see link for full list
+// - https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
+var libfido2Errors = map[C.int]error{
+	// if there was an error transmitting.
+	C.FIDO_ERR_TX: fmt.Errorf("tx error"),
+	// if there was an error receiving.
+	C.FIDO_ERR_RX: fmt.Errorf("rx error"),
+	// if arguments are invalid.
+	C.FIDO_ERR_INVALID_ARGUMENT: fmt.Errorf("invalid argument"), // -7
+	// if user presence required.
+	C.FIDO_ERR_USER_PRESENCE_REQUIRED: fmt.Errorf("user presence required"), // -8
+	// if command is not supported.
+	C.FIDO_ERR_INVALID_COMMAND: fmt.Errorf("invalid command"), // 0x01
+	// if invalid length.
+	// can happen if hmac or credential id are not base64 decoded
+	C.FIDO_ERR_INVALID_LENGTH: fmt.Errorf("invalid length"), // 0x03
+	// if missing parameter.
+	C.FIDO_ERR_MISSING_PARAMETER: fmt.Errorf("missing parameter"), // 0x14)
+	// if not allowed.
+	C.FIDO_ERR_NOT_ALLOWED: fmt.Errorf("not allowed"),
+	// if action timed out.
+	C.FIDO_ERR_ACTION_TIMEOUT: fmt.Errorf("action timed out"),
+	// if PIN is not set and is required for command.
+	C.FIDO_ERR_PIN_NOT_SET: fmt.Errorf("pin not set"),
+	// if credential is invalid.
+	C.FIDO_ERR_INVALID_CREDENTIAL: fmt.Errorf("invalid credential"),
+	// if option is unsupported.
+	C.FIDO_ERR_UNSUPPORTED_OPTION: fmt.Errorf("unsupported option"),
+	// if pin is wrong.
+	C.FIDO_ERR_PIN_INVALID: fmt.Errorf("pin invalid"),
+	// rx not CBOR.
+	C.FIDO_ERR_RX_NOT_CBOR: fmt.Errorf("rx not CBOR"),
+	// internal error.
+	C.FIDO_ERR_INTERNAL: fmt.Errorf("internal error"),
+	// if PIN policy violation.
+	C.FIDO_ERR_PIN_POLICY_VIOLATION: fmt.Errorf("pin policy violation"),
+	// if no credentials.
+	C.FIDO_ERR_NO_CREDENTIALS: fmt.Errorf("no credentials"),
+	// if too many PIN failures.
+	C.FIDO_ERR_PIN_AUTH_BLOCKED: fmt.Errorf("pin auth blocked"),
+	// if PIN is required.
+	C.FIDO_ERR_PIN_REQUIRED: fmt.Errorf("pin required"),
+	// if user presence is required.
+	C.FIDO_ERR_UP_REQUIRED: fmt.Errorf("up required"),
+	// if receiving invalid CBOR.
+	C.FIDO_ERR_RX_INVALID_CBOR: fmt.Errorf("rx invalid cbor"),
+	// if operation denied.
+	C.FIDO_ERR_OPERATION_DENIED: fmt.Errorf("operation denied"),
+	// if action was cancelled.
+	C.FIDO_ERR_KEEPALIVE_CANCEL: fmt.Errorf("keep alive cancel"),
+	// if option is invalid.
+	C.FIDO_ERR_INVALID_OPTION: fmt.Errorf("invalid option"),
+	C.FIDO_ERR_ERR_OTHER:      fmt.Errorf("other error"),
 }
 
 type OptionValue string
@@ -178,7 +120,7 @@ func NewFido2Device(path string) *Device {
 func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 	dev := C.fido_dev_new()
 	if cErr := C.fido_dev_open(dev, C.CString(d.path)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to open hidraw device: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to open hidraw device: %w", libfido2Errors[cErr])
 	}
 	d.dev = dev
 
@@ -190,7 +132,7 @@ func (d *Device) closeFido2Device(dev *C.fido_dev_t) {
 	d.dev = nil
 	d.Unlock()
 	if cErr := C.fido_dev_close(dev); cErr != C.FIDO_OK {
-		info("failed to close hidraw device: ", errFromCode(cErr).Error())
+		info("failed to close hidraw device: %w", libfido2Errors[cErr])
 	}
 	C.fido_dev_free(&dev)
 }
@@ -216,6 +158,7 @@ func getCOpt(o OptionValue) (C.fido_opt_t, error) {
 	case False:
 		return C.FIDO_OPT_FALSE, nil
 	default:
+		// custom error
 		return C.FIDO_OPT_OMIT, fmt.Errorf("invalid credential protection")
 	}
 }
@@ -265,24 +208,24 @@ func (d *Device) AssertFido2Device(
 
 	// set the relying party
 	if cErr := C.fido_assert_set_rp(cAssert, C.CString(rpID)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set up assertion relying party id: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set up assertion relying party id: %w", libfido2Errors[cErr])
 	}
 
 	// set the client data hash
 	if cErr := C.fido_assert_set_clientdata_hash(cAssert, getCBytes(clientDataHash), getCLen(clientDataHash)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set client data hash: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set client data hash: %w", libfido2Errors[cErr])
 	}
 
 	// set the credential id
 	if cErr := C.fido_assert_allow_cred(cAssert, getCBytes(credentialID), getCLen(credentialID)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set allowed credentials: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set allowed credentials: %w", libfido2Errors[cErr])
 	}
 
 	// set the extension
 	ext := 0
 	ext |= int(C.FIDO_EXT_HMAC_SECRET)
 	if cErr := C.fido_assert_set_extensions(cAssert, C.int(ext)); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set extensions: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set extensions: %w", libfido2Errors[cErr])
 	}
 
 	// set the options
@@ -291,20 +234,20 @@ func (d *Device) AssertFido2Device(
 		return nil, err
 	}
 	if cErr := C.fido_assert_set_uv(cAssert, cUV); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set UV option: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set UV option: %w", libfido2Errors[cErr])
 	}
 	cUP, err := getCOpt(opts.UP)
 	if err != nil {
 		return nil, err
 	}
 	if cErr := C.fido_assert_set_up(cAssert, cUP); cErr != C.FIDO_OK {
-		return nil, fmt.Errorf("failed to set UP option: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to set UP option: %w", libfido2Errors[cErr])
 	}
 
 	// set the hmac salt
 	if opts.HMACSalt != nil {
 		if cErr := C.fido_assert_set_hmac_salt(cAssert, getCBytes(opts.HMACSalt), getCLen(opts.HMACSalt)); cErr != C.FIDO_OK {
-			return nil, fmt.Errorf("failed to set hmac salt: %w", errFromCode(cErr))
+			return nil, fmt.Errorf("failed to set hmac salt: %w", libfido2Errors[cErr])
 		}
 	}
 
@@ -312,7 +255,7 @@ func (d *Device) AssertFido2Device(
 	if cErr := C.fido_dev_get_assert(dev, cAssert, getCStringOrNil(pin)); cErr != C.FIDO_OK {
 		// cancels all pending requests for the device
 		C.fido_dev_cancel(dev)
-		return nil, fmt.Errorf("failed to get assertion: %w", errFromCode(cErr))
+		return nil, fmt.Errorf("failed to get assertion: %w", libfido2Errors[cErr])
 	}
 
 	cIdx := C.size_t(0)
