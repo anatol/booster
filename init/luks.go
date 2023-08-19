@@ -124,7 +124,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 
 	pin := ""
 	// UV implies pin
-	if userVerificationRequired || pinRequired {
+	if pinRequired {
 		assertOpts.UV = True
 		prompt := "Enter PIN for " + devName + ":"
 		p, err := readPassword(prompt, "")
