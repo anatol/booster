@@ -21,7 +21,6 @@ const (
 )
 
 const (
-	CredProtectExtension Extension = "credProtect"
 	// ErrInvalidArgument if arguments are invalid.
 	ErrInvalidArgument = "invalid argument"
 	// ErrUserPresenceRequired is user presence required.
