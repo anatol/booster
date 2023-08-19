@@ -105,12 +105,12 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	// client data hash
 	cdh := make([]byte, 32)
 
-	cred, credDecErr := base64.StdEncoding.DecodeString(credential)
-	if credDecErr != nil {
+	cred, err := base64.StdEncoding.DecodeString(credential)
+	if err != nil {
 		return nil, fmt.Errorf("failed when decoding credential id")
 	}
-	hmacSalt, hmacSaltDecErr := base64.StdEncoding.DecodeString(salt)
-	if hmacSaltDecErr != nil {
+	hmacSalt, err := base64.StdEncoding.DecodeString(salt)
+	if err != nil {
 		return nil, fmt.Errorf("failed when decoding hmac salt")
 	}
 
