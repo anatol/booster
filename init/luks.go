@@ -104,7 +104,6 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 
 	// client data hash
 	cdh := make([]byte, 32)
-
 	cred, err := base64.StdEncoding.DecodeString(credential)
 	if err != nil {
 		return nil, fmt.Errorf("failed when decoding credential id")
@@ -128,6 +127,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if userVerificationRequired {
 		assertOpts.UV = True
 	}
+
 	pin := ""
 	if pinRequired {
 		prompt := "Enter PIN for " + devName + ":"
@@ -144,9 +144,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		return nil, err
 	}
 
-	hmacSecret := []byte(base64.StdEncoding.EncodeToString(assert.HMACSecret))
-
-	return hmacSecret, nil
+	return []byte(base64.StdEncoding.EncodeToString(assert.HMACSecret)), nil
 }
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
