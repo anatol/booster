@@ -24,7 +24,6 @@ const (
 	HMACSecretExtension  Extension = "hmac-secret"
 	CredProtectExtension Extension = "credProtect"
 )
-
 const (
 	// ErrInvalidArgument if arguments are invalid.
 	ErrInvalidArgument = "invalid argument"
@@ -153,11 +152,6 @@ type AssertionOpts struct {
 	HMACSalt   []byte
 }
 
-type User struct {
-	ID          []byte
-	Name        string
-	DisplayName string
-	Icon        string
 }
 
 type Assertion struct {
