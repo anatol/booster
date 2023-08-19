@@ -90,6 +90,7 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+	Fido2Init()
 	dev := NewFido2Device("/dev/" + devName)
 
 	isFido2, err := dev.IsFido2()

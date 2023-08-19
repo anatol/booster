@@ -168,6 +168,18 @@ type Device struct {
 	sync.Mutex
 }
 
+/*
+	initiliaze the library
+
+The fido_init() function initialises the libfido2 library. Its invocation must precede that of any other libfido2 function in the context of the executing thread.
+If FIDO_DEBUG is set in flags, then debug output will be emitted by libfido2 on stderr. Alternatively, the FIDO_DEBUG environment variable may be set.
+If FIDO_DISABLE_U2F_FALLBACK is set in flags, then libfido2 will not fallback to U2F in fido_dev_open(3) if a device claims to support FIDO2 but fails to respond to a CTAP 2.0 greeting.
+
+- https://developers.yubico.com/libfido2/Manuals/fido_init.html
+*/
+func Fido2Init() {
+	C.fido_init(0) // initiliaze the library without debugging
+}
 func NewFido2Device(path string) *Device {
 	return &Device{
 		path: fmt.Sprintf("%s", path),
