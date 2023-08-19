@@ -195,7 +195,6 @@ func (d *Device) closeFido2Device(dev *C.fido_dev_t) {
 	C.fido_dev_free(&dev)
 }
 
-// simply checks for fido2 by opening and closing the device
 func (d *Device) IsFido2() (bool, error) {
 	dev, err := d.openFido2Device()
 	if err != nil {
