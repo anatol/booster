@@ -138,10 +138,8 @@ func errFromCode(code C.int) error {
 
 type OptionValue string
 
-
 // fido2 assertions options that should be in the LUKS header because of systemd-cryptenroll
 type AssertionOpts struct {
-
 	UV       OptionValue
 	UP       OptionValue
 	HMACSalt []byte
@@ -170,6 +168,7 @@ If FIDO_DISABLE_U2F_FALLBACK is set in flags, then libfido2 will not fallback to
 func Fido2Init() {
 	C.fido_init(0) // initiliaze the library without debugging
 }
+
 func NewFido2Device(path string) *Device {
 	return &Device{
 		path: path,
@@ -182,6 +181,7 @@ func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 		return nil, fmt.Errorf("failed to open hidraw device: %w", errFromCode(cErr))
 	}
 	d.dev = dev
+
 	return dev, nil
 }
 
@@ -203,6 +203,7 @@ func (d *Device) IsFido2() (bool, error) {
 	}
 	defer d.closeFido2Device(dev)
 	isFido2 := bool(C.fido_dev_is_fido2(dev))
+
 	return isFido2, nil
 }
 
@@ -228,13 +229,13 @@ func getCBytes(b []byte) *C.uchar {
 	return (*C.uchar)(unsafe.Pointer(&b[0]))
 }
 
-
 // expects the fido2 pin
 // nil means a pin is not required
 func getCStringOrNil(s string) *C.char {
 	if s == "" {
 		return nil
 	}
+
 	return C.CString(s)
 }
 
@@ -247,7 +248,6 @@ func (d *Device) AssertFido2Device(
 	credentialID []byte,
 	pin string,
 	opts *AssertionOpts) (*Assertion, error) {
-
 	dev, err := d.openFido2Device()
 	if err != nil {
 		return nil, err
@@ -273,16 +273,19 @@ func (d *Device) AssertFido2Device(
 	if cErr := C.fido_assert_set_clientdata_hash(cAssert, getCBytes(clientDataHash), getCLen(clientDataHash)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set client data hash: %w", errFromCode(cErr))
 	}
+
 	// set the credential id
 	if cErr := C.fido_assert_allow_cred(cAssert, getCBytes(credentialID), getCLen(credentialID)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set allowed credentials: %w", errFromCode(cErr))
 	}
+
 	// set the extension
 	ext := 0
 	ext |= int(C.FIDO_EXT_HMAC_SECRET)
 	if cErr := C.fido_assert_set_extensions(cAssert, C.int(ext)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set extensions: %w", errFromCode(cErr))
 	}
+
 	// set the options
 	cUV, err := getCOpt(opts.UV)
 	if err != nil {
@@ -298,6 +301,7 @@ func (d *Device) AssertFido2Device(
 	if cErr := C.fido_assert_set_up(cAssert, cUP); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set UP option: %w", errFromCode(cErr))
 	}
+
 	// set the hmac salt
 	if opts.HMACSalt != nil {
 		if cErr := C.fido_assert_set_hmac_salt(cAssert, getCBytes(opts.HMACSalt), getCLen(opts.HMACSalt)); cErr != C.FIDO_OK {
@@ -323,5 +327,6 @@ func (d *Device) AssertFido2Device(
 	assertion := &Assertion{
 		HMACSecret: hmacSecret,
 	}
+
 	return assertion, nil
 }
