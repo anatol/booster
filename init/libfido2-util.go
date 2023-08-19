@@ -172,7 +172,7 @@ func Fido2Init() {
 }
 func NewFido2Device(path string) *Device {
 	return &Device{
-		path: fmt.Sprintf("%s", path),
+		path: path,
 	}
 }
 
