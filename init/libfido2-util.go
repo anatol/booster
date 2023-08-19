@@ -21,9 +21,7 @@ const (
 )
 
 const (
-	HMACSecretExtension  Extension = "hmac-secret"
 	CredProtectExtension Extension = "credProtect"
-)
 const (
 	// ErrInvalidArgument if arguments are invalid.
 	ErrInvalidArgument = "invalid argument"
@@ -142,16 +140,13 @@ func errFromCode(code C.int) error {
 
 type OptionValue string
 
-type Extension string
 
 // fido2 assertions options that should be in the LUKS header because of systemd-cryptenroll
 type AssertionOpts struct {
-	Extensions []Extension
-	UV         OptionValue
-	UP         OptionValue
-	HMACSalt   []byte
-}
 
+	UV       OptionValue
+	UP       OptionValue
+	HMACSalt []byte
 }
 
 type Assertion struct {
@@ -235,18 +230,6 @@ func getCBytes(b []byte) *C.uchar {
 	return (*C.uchar)(unsafe.Pointer(&b[0]))
 }
 
-func getExtensionsInt(extensions []Extension) int {
-	exts := 0
-	for _, extension := range extensions {
-		switch extension {
-		case HMACSecretExtension:
-			exts |= int(C.FIDO_EXT_HMAC_SECRET)
-		case CredProtectExtension:
-			exts |= int(C.FIDO_EXT_CRED_PROTECT)
-		}
-	}
-	return exts
-}
 
 // expects the fido2 pin
 // nil means a pin is not required
@@ -298,11 +281,11 @@ func (d *Device) AssertFido2Device(
 		}
 	// set the credential id
 	}
-	if exts := getExtensionsInt(opts.Extensions); exts > 0 {
-		if cErr := C.fido_assert_set_extensions(cAssert, C.int(exts)); cErr != C.FIDO_OK {
-			return nil, fmt.Errorf("failed to set extensions: %w", errFromCode(cErr))
-		}
 	// set the extension
+	ext := 0
+	ext |= int(C.FIDO_EXT_HMAC_SECRET)
+	if cErr := C.fido_assert_set_extensions(cAssert, C.int(ext)); cErr != C.FIDO_OK {
+		return nil, fmt.Errorf("failed to set extensions: %w", errFromCode(cErr))
 	}
 	// set the options
 	cUV, err := getCOpt(opts.UV)
