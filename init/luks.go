@@ -141,9 +141,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		return nil, err
 	}
 
-	hmacSecret := []byte(base64.StdEncoding.EncodeToString(assert.HMACSecret))
-
-	return hmacSecret, nil
+	return []byte(base64.StdEncoding.EncodeToString(assert.HMACSecret)), nil
 }
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
