@@ -89,7 +89,9 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-	p, err := plugin.Open("libfido2_plugin.so")
+	// path relative to the init
+	path := "usr/lib/booster/plugins.so"
+	p, err := plugin.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open libfido2 plugin: %s", err)
 	}
