@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"plugin"
 	"regexp"
 	"strings"
 	"time"
@@ -88,43 +89,31 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-	Fido2Init()
-
-	dev := NewFido2Device("/dev/" + devName)
-
-	isFido2, err := dev.IsFido2()
+	p, err := plugin.Open("libfido2_plugin.so")
 	if err != nil {
-		return nil, fmt.Errorf("HID %s does not support FIDO: "+err.Error(), devName)
-	}
-	if !isFido2 {
-		return nil, fmt.Errorf("HID %s does not support FIDO, continuing", devName)
+		return nil, fmt.Errorf("failed to open libfido2 plugin: %s", err)
 	}
 
-	info("HID %s supports FIDO, trying it to recover the password", devName)
+	fido2HMACSym, err := p.Lookup("GetFido2HMACSecret")
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup function in plugin: %s", err)
+	}
 
 	// client data hash
 	cdh := make([]byte, 32)
 
+	// credential id
 	cred, err := base64.StdEncoding.DecodeString(credential)
 	if err != nil {
 		return nil, fmt.Errorf("failed when decoding credential id")
 	}
+
+	// hmac salt
 	hmacSalt, err := base64.StdEncoding.DecodeString(salt)
 	if err != nil {
 		return nil, fmt.Errorf("failed when decoding hmac salt")
 	}
 
-	assertOpts := &AssertionOpts{
-		HMACSalt: hmacSalt,
-	}
-
-	if userPresenceRequired {
-		assertOpts.UP = True
-	}
-
-	if userVerificationRequired {
-		assertOpts.UV = True
-	}
 	pin := ""
 	if pinRequired {
 		prompt := "Enter PIN for " + devName + ":"
@@ -135,13 +124,18 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		pin = string(p)
 	}
 
-	assert, err := dev.AssertFido2Device(relyingParty, cdh, cred, pin, assertOpts)
+	hmacSecret, err := fido2HMACSym.(func(devName string,
+		rpID string,
+		clientDataHash []byte,
+		credentialID []byte,
+		pin string,
+		hmacSalt []byte, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error))(devName, relyingParty, cdh, cred, pin, hmacSalt, userPresenceRequired, userVerificationRequired)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(base64.StdEncoding.EncodeToString(assert.HMACSecret)), nil
+	return []byte(base64.StdEncoding.EncodeToString(hmacSecret)), nil
 }
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
