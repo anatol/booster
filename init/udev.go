@@ -104,31 +104,50 @@ exit:
 	return nil
 }
 
+var seenHidrawDevices = make(chan string, 10)
+
 func handleUdevEvent(ev netlink.UEvent) {
 	debug("udev event %+v", ev)
 
 	if modalias, ok := ev.Env["MODALIAS"]; ok {
 		go func() { check(loadModalias(normalizeModuleName(modalias))) }()
-		// bind actions associated with the usbhid driver have an alias
-		if ev.Env["DRIVER"] == "usbhid" && ev.Action == "bind" {
-			go handleUsbHidUevent(ev)
+		if ev.Env["SUBSYSTEM"] == "usb" && ev.Action == "bind" && ev.Env["DRIVER"] == "usbhid" {
+			go handleUsbBindUevent(ev)
 		}
 	} else if ev.Env["SUBSYSTEM"] == "block" {
 		go func() { check(handleBlockDeviceUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "net" {
 		go func() { check(handleNetworkUevent(ev)) }()
 	} else if ev.Env["SUBSYSTEM"] == "hidraw" && ev.Action == "add" {
-		go func() { hidrawDevices <- ev.Env["DEVNAME"] }()
+		// add the hidraw device path to a channel to be filtered
+		// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0/0003:1050:0402.0005/hidraw/hidraw1
+		go func() {
+			select {
+			case seenHidrawDevices <- ev.Env["DEVPATH"]:
+			default:
+				return
+			}
+		}()
 	} else if ev.Env["SUBSYSTEM"] == "tpmrm" && ev.Action == "add" {
 		go handleTpmReadyUevent(ev)
 	}
 }
 
-func handleUsbHidUevent(ev netlink.UEvent) {
-	// `PRODUCT` is associated with the usb device, and can be used to id the fido2 token
-	// it's the concat of `idVendor`, `idProduct`, and `bcdDevice` when a kernel usb event occurs
-	info(ev.Env["DRIVER"]+" uevent: product: %s", ev.Env["PRODUCT"])
-	usbhid.Do(usbhidWg.Done)
+// filters hidraw devices by device path that depend on the usbhid driver then sends them to a global channel
+func handleUsbBindUevent(ev netlink.UEvent) {
+	for dev := range seenHidrawDevices {
+		// /devices/pci0000:00/0000:00:08.1/0000:03:00.3/usb1/1-1/1-1:1.0
+		if strings.Contains(dev, ev.Env["DEVPATH"]) {
+			idx := strings.LastIndex(dev, "/")
+			if idx != -1 {
+				select {
+				case hidrawDevices <- dev[idx+1:]:
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
 func handleTpmReadyUevent(ev netlink.UEvent) {

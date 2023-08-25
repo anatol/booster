@@ -90,7 +90,6 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-
 	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
 	if err != nil {
 		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
@@ -203,18 +202,6 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	if node.RelyingParty == "" {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
-
-	dir, err := os.ReadDir("/sys/class/hidraw/")
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		for _, d := range dir {
-			// run it in a separate goroutine to avoid blocking on channel
-			hidrawDevices <- d.Name()
-		}
-	}()
 
 	seenHidrawDevices := make(set)
 
