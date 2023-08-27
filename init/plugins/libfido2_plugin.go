@@ -22,7 +22,7 @@ const (
 
 type OptionValue string
 
-// fido2 assertions options that should be in the LUKS header because of systemd-cryptenroll
+// UV/UP correspond to metadata that should be in the LUKS header because of systemd-cryptenroll
 type AssertionOpts struct {
 	UV       OptionValue
 	UP       OptionValue
@@ -33,15 +33,12 @@ type Assertion struct {
 	HMACSecret []byte
 }
 
-// fido2 Device
 type Device struct {
 	path string
 	dev  *C.fido_dev_t
 	sync.Mutex
 }
 
-// map is used during errors when setting inputs during fido2 assertion
-// returns errors associated with the status codes returned from C
 // these errors were documented by go-libfido2, but not all of them were
 // see link for full list
 // - https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
@@ -111,7 +108,6 @@ func init() {
 	C.fido_init(0) // initiliaze the library without debugging
 }
 
-// Public
 func newFido2Device(path string) *Device {
 	return &Device{
 		path: path,
@@ -149,7 +145,7 @@ func (d *Device) isFido2() (bool, error) {
 	return isFido2, nil
 }
 
-// retrieves the c value associated with the fido2 assertion option
+// retrieves the internal C value associated with the FIDO2 assertion option
 func getCOpt(o OptionValue) (C.fido_opt_t, error) {
 	switch o {
 	case Default:
@@ -172,7 +168,7 @@ func getCBytes(b []byte) *C.uchar {
 	return (*C.uchar)(unsafe.Pointer(&b[0]))
 }
 
-// expects the fido2 pin
+// expects the FIDO2 pin
 // nil means a pin is not required
 func getCStringOrNil(s string) *C.char {
 	if s == "" {
@@ -182,7 +178,7 @@ func getCStringOrNil(s string) *C.char {
 	return C.CString(s)
 }
 
-// asserts the fido2 token then returns the hmac secret if successful
+// asserts the FIDO2 token then returns the HMAC secret if successful
 // see the libfido2 manual for more information about various functions used
 // - https://developers.yubico.com/libfido2/Manuals/
 func (d *Device) assertFido2Device(
@@ -207,29 +203,29 @@ func (d *Device) assertFido2Device(
 	cAssert := C.fido_assert_new()
 	defer C.fido_assert_free(&cAssert)
 
-	// set the relying party
+	// relying party
 	if cErr := C.fido_assert_set_rp(cAssert, C.CString(rpID)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set up assertion relying party id: %w", libfido2Errors[cErr])
 	}
 
-	// set the client data hash
+	// client data hash
 	if cErr := C.fido_assert_set_clientdata_hash(cAssert, getCBytes(clientDataHash), getCLen(clientDataHash)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set client data hash: %w", libfido2Errors[cErr])
 	}
 
-	// set the credential id
+	// credential id
 	if cErr := C.fido_assert_allow_cred(cAssert, getCBytes(credentialID), getCLen(credentialID)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set allowed credentials: %w", libfido2Errors[cErr])
 	}
 
-	// set the extension
+	// extension
 	ext := 0
 	ext |= int(C.FIDO_EXT_HMAC_SECRET)
 	if cErr := C.fido_assert_set_extensions(cAssert, C.int(ext)); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set extensions: %w", libfido2Errors[cErr])
 	}
 
-	// set the options
+	// options
 	cUV, err := getCOpt(opts.UV)
 	if err != nil {
 		return nil, err
@@ -245,7 +241,7 @@ func (d *Device) assertFido2Device(
 		return nil, fmt.Errorf("failed to set UP option: %w", libfido2Errors[cErr])
 	}
 
-	// set the hmac salt
+	// hmac salt
 	if opts.HMACSalt != nil {
 		if cErr := C.fido_assert_set_hmac_salt(cAssert, getCBytes(opts.HMACSalt), getCLen(opts.HMACSalt)); cErr != C.FIDO_OK {
 			return nil, fmt.Errorf("failed to set hmac salt: %w", libfido2Errors[cErr])
@@ -262,14 +258,9 @@ func (d *Device) assertFido2Device(
 	cIdx := C.size_t(0)
 
 	// extract the hmac secret
-	// - https://developers.yubico.com/libfido2/Manuals/fido_assert_largeblob_key_ptr.html
 	cHMACLen := C.fido_assert_hmac_secret_len(cAssert, cIdx)
 	cHMACPtr := C.fido_assert_hmac_secret_ptr(cAssert, cIdx)
 	hmacSecret := C.GoBytes(unsafe.Pointer(cHMACPtr), C.int(cHMACLen))
-
-	/* assertion := &Assertion{
-		HMACSecret: hmacSecret,
-	} */
 
 	assertion := &Assertion{HMACSecret: hmacSecret}
 
@@ -292,7 +283,6 @@ func GetFido2HMACSecret(devName string,
 		return nil, fmt.Errorf("HID %s does not support FIDO, continuing", devName)
 	}
 
-	/* set the options */
 	assertOpts := &AssertionOpts{
 		HMACSalt: hmacSalt, UP: Default, UV: Default}
 
