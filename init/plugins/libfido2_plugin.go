@@ -282,7 +282,6 @@ func GetFido2HMACSecret(devName string,
 	credentialID []byte,
 	pin string,
 	hmacSalt []byte, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-	C.fido_init(0) 
 	dev := newFido2Device("/dev/" + devName)
 
 	isFido2, err := dev.isFido2()
