@@ -95,7 +95,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		return nil, fmt.Errorf("failed to open libfido2 plugin: %s", err)
 	}
 
-	fido2HMACSym, err := p.Lookup("GetFido2HMACSecret")
+	sym, err := p.Lookup("GetFido2HMACSecret")
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup function in plugin: %s", err)
 	}
@@ -125,7 +125,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		pin = string(p)
 	}
 
-	hmacSecret, err := fido2HMACSym.(func(devName string,
+	hmacSecret, err := sym.(func(devName string,
 		rpID string,
 		clientDataHash []byte,
 		credentialID []byte,
