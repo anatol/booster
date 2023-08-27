@@ -283,8 +283,8 @@ func GetFido2HMACSecret(devName string,
 	pin string,
 	hmacSalt []byte, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
 	C.fido_init(0) 
+	dev := newFido2Device("/dev/" + devName)
 
-	dev := newFido2Device(devName)
 	isFido2, err := dev.isFido2()
 	if err != nil {
 		return nil, fmt.Errorf("HID %s does not support FIDO: "+err.Error(), devName)
