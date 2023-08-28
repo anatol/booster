@@ -2,7 +2,7 @@ package tests
 
 import (
 	"os"
-	"regexp"
+	"plugin"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,29 +19,44 @@ func TestSystemdFido2(t *testing.T) {
 	for _, y := range yubikeys {
 		params = append(params, y.toQemuParams()...)
 	}
-	vm, err := buildVmInstance(t, Opts{
+
+	opts := Opts{
 		disk:       "assets/systemd-fido2.img",
 		kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
 		params:     params,
-		extraFiles: "fido2-assert",
-	})
+		extraFiles: "/usr/lib/booster/libfido2_plugin.so",
+	}
+
+	vm, err := buildVmInstance(t, opts)
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	pin := "1111"
-	// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
-	re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
-	require.NoError(t, err)
-	for {
-		matches, err := vm.ConsoleExpectRE(re)
-		require.NoError(t, err)
+	require.Empty(t, opts.extraFiles)
+	require.Contains(t, opts.extraFiles, "/usr/lib/booster/libfido2_plugin.so")
 
-		if matches[0] == "Hello, booster!" {
-			break
-		} else {
-			require.NoError(t, vm.ConsoleWrite(pin+"\n"))
-		}
-	}
+	path := "/usr/lib/booster/libfido2_plugin.so"
+	p, err := plugin.Open(path)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, p)
+
+	sym, err := p.Lookup("GetFido2HMACSecret")
+
+	require.NoError(t, err)
+	require.NotEmpty(t, sym)
+
+	hmacSecret, err := sym.(func(
+		devName string,
+		rpID string,
+		clientDataHash []byte,
+		credentialID []byte,
+		pin string,
+		hmacSalt []byte,
+		userPresenceRequired bool,
+		userVerificationRequired bool) ([]byte, error))("hidraw1", "io.systemd.cryptsetup", make([]byte, 32), make([]byte, 32), "", make([]byte, 32), true, false)
+
+	require.Error(t, err)
+	require.Empty(t, hmacSecret)
 }
 
 func TestSystemdTPM2(t *testing.T) {
