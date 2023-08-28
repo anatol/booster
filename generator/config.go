@@ -27,11 +27,12 @@ type UserConfig struct {
 	Universal            bool   `yaml:",omitempty"`
 	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
 	ModulesForceLoad     string `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
-	Compression          string `yaml:",omitempty"`                   // output file compression
-	MountTimeout         string `yaml:"mount_timeout,omitempty"`      // timeout for waiting for the rootfs mounted
-	ExtraFiles           string `yaml:"extra_files,omitempty"`        // comma-separated list of files to add to image
-	StripBinaries        bool   `yaml:"strip,omitempty"`              // if strip symbols from the binaries, shared libraries and kernel modules
-	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`           // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
+	AppendAllModAliases  bool   `yaml:"append_all_modaliases,omitempty"`
+	Compression          string `yaml:",omitempty"`              // output file compression
+	MountTimeout         string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
+	ExtraFiles           string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
+	StripBinaries        bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
+	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
 	EnableLVM            bool   `yaml:"enable_lvm"`
 	EnableMdraid         bool   `yaml:"enable_mdraid"`
 	MdraidConfigPath     string `yaml:"mdraid_config_path"`
@@ -142,6 +143,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readDeviceAliases = readDeviceAliases
 	conf.readHostModules = readHostModules
 	conf.readModprobeOptions = readModprobeOptions
+	conf.appendAllModAliases = u.AppendAllModAliases
 	conf.stripBinaries = u.StripBinaries || opts.BuildCommand.Strip
 	conf.enableLVM = u.EnableLVM
 	conf.enableMdraid = u.EnableMdraid

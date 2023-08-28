@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,9 @@ var (
 	loadingModules   = make(map[string][]*sync.WaitGroup)
 	loadingModulesWg sync.WaitGroup // total number of modules being loaded
 	modulesMutex     sync.Mutex
+
+	missingModules      = make(map[string]bool) // set of modules that kernel wanted to load via aliases but they were missing in the image
+	missingModulesMutex sync.Mutex
 )
 
 type alias struct{ pattern, module string } // module alias info
@@ -66,6 +70,11 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 		depsWg.Wait()
 		if err := finitModule(mod); err != nil {
 			info("finit(%v): %v", mod, err)
+			if errors.Is(err, os.ErrNotExist) {
+				missingModulesMutex.Lock()
+				missingModules[mod] = true
+				missingModulesMutex.Unlock()
+			}
 		}
 
 		modulesMutex.Lock()

@@ -21,6 +21,7 @@ type generatorConfig struct {
 	universal               bool
 	modules                 []string // extra modules to add
 	modulesForceLoad        []string // extra modules to load at the boot time
+	appendAllModAliases     bool
 	compression             string
 	timeout                 time.Duration
 	extraFiles              []string
@@ -214,10 +215,15 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	// collect aliases for required modules only
-	aliases, err := kmod.filterAliasesForRequiredModules(conf)
-	if err != nil {
-		return err
+	var aliases []alias
+	if conf.appendAllModAliases {
+		aliases = kmod.aliases
+	} else {
+		// collect aliases for required modules only
+		aliases, err = kmod.filterAliasesForRequiredModules(conf)
+		if err != nil {
+			return err
+		}
 	}
 	if err := img.appendAliasesFile(aliases); err != nil {
 		return err

@@ -47,6 +47,8 @@ var (
 	rootRo, rootRw bool
 
 	zfsDataset string
+
+	errRootMountTimeout = fmt.Errorf("Timeout waiting for root filesystem")
 )
 
 type set map[string]bool
@@ -858,7 +860,7 @@ func boost() error {
 		// TODO: cancellable, timeout context?
 		timeout := waitTimeout(&rootMounted, time.Duration(config.MountTimeout)*time.Second)
 		if timeout {
-			return fmt.Errorf("Timeout waiting for root filesystem")
+			return errRootMountTimeout
 		}
 	} else {
 		// wait for mount forever
@@ -991,6 +993,22 @@ func reboot() {
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
 }
 
+func printMissingModules() {
+	missingModulesMutex.Lock()
+	defer missingModulesMutex.Unlock()
+
+	if len(missingModules) == 0 {
+		return
+	}
+
+	mods := make([]string, 0, len(missingModules))
+	for k := range missingModules {
+		mods = append(mods, k)
+	}
+
+	warning("Following modules were requested by kernel but not present in the image: [%s]. Please check the list and see if any of the modules required to detect your root filesystem.", strings.Join(mods, " "))
+}
+
 func main() {
 	readStartTime()
 
@@ -1002,6 +1020,10 @@ func main() {
 	if err := boost(); err != nil {
 		// if it does then it indicates some problem
 		severe("%v", err)
+		if errors.Is(err, errRootMountTimeout) {
+			// if we fail to detect the root filesystem maybe we are missing some kernel modules needed for storage devices?
+			printMissingModules()
+		}
 	}
 	emergencyShell()
 

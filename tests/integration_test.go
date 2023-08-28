@@ -159,6 +159,20 @@ func TestMountTimeout(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
 }
 
+func TestMountTimeoutWithAllModaliases(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		kernelArgs:          []string{"root=/dev/sda"},
+		modules:             "-*",
+		mountTimeout:        1,
+		appendAllModAliases: true,
+	})
+	require.NoError(t, err)
+	defer vm.Kill()
+
+	require.NoError(t, vm.ConsoleExpect("Timeout waiting for root filesystem"))
+	require.NoError(t, vm.ConsoleExpect("Following modules were requested by kernel but not present in the image: ["))
+}
+
 func TestFsck(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		compression: "none",

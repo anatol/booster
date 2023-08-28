@@ -52,6 +52,8 @@ Booster advantages:
 
  * `modules_force_load` list of module names that are forcibly loaded during the boot process before switching into user-space. Any module in this list automatically added to the image so there is no need to duplicate it at `modules` property.
 
+ * `append_all_modaliases` is a boolean flag that instructs booster to add all hosts's module aliases to the booster image. This flag is useful for debugging boot timeout issues when some important modules are missed from the image. Setting the flag to `true` will help to print module names for aliases that were requested by kernel but missed in the image.
+
  * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
 
  * `mount_timeout` timeout for waiting for the root filesystem to appear. The field format is a decimal number and then unit number. Valid units are "s", "m", "h". If no value specified then default timeout (3 minutes) is used. To disable the timeout completely specify "0s".
@@ -204,6 +206,8 @@ Regenerate the initramfs and reboot. Once inside busybox, get the logs and send 
 
 The logs will be in `/srv/atftp` on the server.
 
+### Boot timeout
+If you got `booster: Timeout waiting for root filesystem` error please add `append_all_modaliases` config flag and rebuild the image. With this flag you'll get a list of modules that were requested by the kernel but absent in the booster image. Some of these modules might be required to boot your system.
 
 ## EXAMPLES
 Create an initramfs file specific for the current kernel/host. The output file is booster.img:

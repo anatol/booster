@@ -236,6 +236,7 @@ type GeneratorConfig struct {
 	ModulesForceLoad     string         `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
 	Compression          string         `yaml:",omitempty"`
 	MountTimeout         string         `yaml:"mount_timeout,omitempty"`
+	AppendAllModAliases  bool           `yaml:"append_all_modaliases,omitempty"`
 	ExtraFiles           string         `yaml:"extra_files,omitempty"`
 	StripBinaries        bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool           `yaml:"vconsole,omitempty"`
@@ -265,6 +266,7 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.Universal = true
 	conf.Compression = opts.compression
 	conf.MountTimeout = strconv.Itoa(opts.mountTimeout) + "s"
+	conf.AppendAllModAliases = opts.appendAllModAliases
 	conf.ExtraFiles = opts.extraFiles
 	conf.StripBinaries = opts.stripBinaries
 	conf.EnableVirtualConsole = opts.enableVirtualConsole
@@ -305,6 +307,7 @@ type Opts struct {
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
 	mountTimeout         int // in seconds
+	appendAllModAliases  bool
 	extraFiles           string
 	stripBinaries        bool
 	enableVirtualConsole bool
