@@ -22,11 +22,11 @@ const (
 
 type OptionValue string
 
-// UV/UP correspond to metadata that should be in the LUKS header because of systemd-cryptenroll
+// fields correspond to metadata that should be in the LUKS header because of systemd-cryptenroll
 type AssertionOpts struct {
-	UV       OptionValue
-	UP       OptionValue
-	HMACSalt []byte
+	UV       OptionValue // "fido2-uv-required"
+	UP       OptionValue // "fido2-up-required"
+	HMACSalt []byte      // "fido2-salt"
 }
 
 type Assertion struct {
