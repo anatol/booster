@@ -92,12 +92,12 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	path := "usr/lib/booster/libfido2_plugin.so"
 	p, err := plugin.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open libfido2 plugin: %s", err)
+		return nil, fmt.Errorf("failed to open "+path+": %s", err)
 	}
 
 	sym, err := p.Lookup("GetFido2HMACSecret")
 	if err != nil {
-		return nil, fmt.Errorf("failed to lookup function in plugin: %s", err)
+		return nil, fmt.Errorf("failed to lookup symbol in "+path+": %s", err)
 	}
 
 	// client data hash
