@@ -11,6 +11,7 @@ require (
 	github.com/anatol/tang.go v0.0.0-20220716012326-2fda8b4503da
 	github.com/anatol/vmtest v0.0.0-20230711210602-87511df0d4bc
 	github.com/cavaliergopher/cpio v1.0.1
+	github.com/freddierice/go-losetup/v2 v2.0.1
 	github.com/google/go-tpm v0.9.0
 	github.com/google/renameio/v2 v2.0.0
 	github.com/insomniacslk/dhcp v0.0.0-20230612134759-b20c9ba983df

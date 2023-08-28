@@ -142,6 +142,7 @@ Device reference has one of the following values:
 
  * `/dev/XXX` path to specific device file, it can be either a path to real device/partition like `/dev/sda1`, `/dev/nvme0n1` or path to dm-mapper virtual device like
    `/dev/mapper/root` or `/dev/vg_mesos/lv_mesos_containers`.
+ * If the path does not start with `/dev/` and represents a regular file then booster will assume it is an image file of the root filesystem (e.g. erofs inside of an ISO). Booster will try to setup a loopback device and then mount it as a root filesystem.
  * `UUID=$UUID` or `/dev/disk/by-uuid/$UUID` references device by its filesystem/LUKS UUID. See notes about UUID formatting rules below.
  * `LABEL=$LABEL` or `/dev/disk/by-label/$LABEL` references device by its filesystem/LUKS label.
  * `PARTUUID=$UUID` or `/dev/disk/by-partuuid/$UUID` references device by GPT partition UUID.

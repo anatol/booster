@@ -62,11 +62,6 @@ func shell(script string, env ...string) error {
 	return sh.Run()
 }
 
-func fileExists(file string) bool {
-	_, err := os.Stat(file)
-	return err == nil
-}
-
 func TestBlkInfoFAT(t *testing.T) {
 	checkFs(t, "fat", "fat", "2a341c62", "FATLBL", 10, "mkfs.vfat -F32 -n $LABEL -i $UUID $OUTPUT", nil)
 }

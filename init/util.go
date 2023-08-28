@@ -174,3 +174,8 @@ func unwrapExitError(err error) error {
 	}
 	return err
 }
+
+func fileExists(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
+}

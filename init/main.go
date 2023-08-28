@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/freddierice/go-losetup/v2"
 	"github.com/yookoala/realpath"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
@@ -853,6 +854,23 @@ func boost() error {
 	if config.EnableZfs {
 		if err := mountZfsRoot(); err != nil {
 			return err
+		}
+	}
+
+	if cmdRoot.format == refPath {
+		rootFS := cmdRoot.data.(string)
+		if !strings.HasPrefix(rootFS, "/dev/") && fileExists(rootFS) {
+			// there is a special case when a root filesystem is a filesystem image rather than a device (e.g. in case of erofs inside of an ISO)
+			// so if it is just a regular file then we create a loopback device for it and then try to mount
+			dev, err := losetup.Attach(rootFS, 0, rootRw)
+			if err != nil {
+				return err
+			}
+			cmdRoot.data = dev.Path()
+
+			if err := addBlockDevice(dev.Path(), true, nil); err != nil {
+				return err
+			}
 		}
 	}
 
