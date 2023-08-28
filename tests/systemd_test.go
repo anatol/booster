@@ -31,7 +31,7 @@ func TestSystemdFido2(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	require.Empty(t, opts.extraFiles)
+	require.NotEmpty(t, opts.extraFiles)
 	require.Contains(t, opts.extraFiles, "/usr/lib/booster/libfido2_plugin.so")
 
 	path := "/usr/lib/booster/libfido2_plugin.so"
