@@ -3,7 +3,6 @@ package main
 /*
 #cgo CFLAGS: -I/usr/include/
 #cgo LDFLAGS: -lfido2
-#include <stdio.h>
 #include <stdlib.h>
 #include <fido.h>
 */
