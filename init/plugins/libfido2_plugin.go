@@ -267,12 +267,15 @@ func (d *Device) assertFido2Device(
 	return assertion, nil
 }
 
-func GetFido2HMACSecret(devName string,
+func GetFido2HMACSecret(
+	devName string,
 	rpID string,
 	clientDataHash []byte,
 	credentialID []byte,
 	pin string,
-	hmacSalt []byte, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+	hmacSalt []byte,
+	userPresenceRequired bool,
+	userVerificationRequired bool) ([]byte, error) {
 	dev := newFido2Device("/dev/" + devName)
 
 	isFido2, err := dev.isFido2()
@@ -284,7 +287,10 @@ func GetFido2HMACSecret(devName string,
 	}
 
 	assertOpts := &AssertionOpts{
-		HMACSalt: hmacSalt, UP: Default, UV: Default}
+		HMACSalt: hmacSalt,
+		UP:       Default,
+		UV:       Default,
+	}
 
 	if userPresenceRequired {
 		assertOpts.UP = True
@@ -295,7 +301,6 @@ func GetFido2HMACSecret(devName string,
 	}
 
 	assert, err := dev.assertFido2Device(rpID, clientDataHash, credentialID, pin, assertOpts)
-
 	if err != nil {
 		return nil, err
 	}
