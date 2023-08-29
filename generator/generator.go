@@ -87,7 +87,7 @@ var defaultModulesList = []string{
 	"nvme", "usb_storage", "uas",
 	"efivarfs",
 	"virtio_pci", "virtio_blk", "virtio_scsi", "virtio_crypto",
-	"mptspi",
+	"mptspi", "vmd",
 }
 
 func generateInitRamfs(conf *generatorConfig) error {
