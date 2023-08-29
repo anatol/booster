@@ -191,10 +191,11 @@ If you have a problem with booster boot tool you can enable debug mode to get mo
 information about what is going on. Just add `booster.log=debug,console` kernel parameter and booster
 provide additional logs.
 
+### Use TFTP to download logs for unbootable device
 In case of a boot failure, when the devices are missing, logs can still be retrieved from busybox using the network.
 First, set up a tftp server (port 69) on another machine/VM. For example on Archlinux, `pacman -S atftp; systemctl start atftpd`.
 Then, edit `/etc/booster.yaml` and add [network support](#config-file) and busybox (`extra_files: busybox`).
-Regenerate the initramfs and reboot. Once inside busybox, get  the logs and send them to the tftp server:
+Regenerate the initramfs and reboot. Once inside busybox, get the logs and send them to the tftp server:
 
     $ dmesg >boot.log
     $ lsmod >mods.log
