@@ -89,7 +89,9 @@ func newFido2Device(path string) *Device {
 
 func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 	dev := C.fido_dev_new()
-	if cErr := C.fido_dev_open(dev, C.CString(d.path)); cErr != C.FIDO_OK {
+	cPath := C.CString(d.path)
+	defer C.free(unsafe.Pointer(cPath))
+	if cErr := C.fido_dev_open(dev, cPath); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to open hidraw device: %w", libfido2Errors[cErr])
 	}
 	d.dev = dev
@@ -141,16 +143,6 @@ func getCBytes(b []byte) *C.uchar {
 	return (*C.uchar)(unsafe.Pointer(&b[0]))
 }
 
-// expects the FIDO2 pin
-// nil means a pin is not required
-func getCStringOrNil(s string) *C.char {
-	if s == "" {
-		return nil
-	}
-
-	return C.CString(s)
-}
-
 // asserts the FIDO2 token then returns the HMAC secret if successful
 // see the libfido2 manual for more information about various functions used
 // - https://developers.yubico.com/libfido2/Manuals/
@@ -177,7 +169,9 @@ func (d *Device) assertFido2Device(
 	defer C.fido_assert_free(&cAssert)
 
 	// relying party
-	if cErr := C.fido_assert_set_rp(cAssert, C.CString(rpID)); cErr != C.FIDO_OK {
+	cRelyingParty := C.CString(rpID)
+	defer C.free(unsafe.Pointer(cRelyingParty))
+	if cErr := C.fido_assert_set_rp(cAssert, cRelyingParty); cErr != C.FIDO_OK {
 		return nil, fmt.Errorf("failed to set up assertion relying party id: %w", libfido2Errors[cErr])
 	}
 
@@ -221,8 +215,15 @@ func (d *Device) assertFido2Device(
 		}
 	}
 
+	// pin
+	var cPin *C.char = nil
+	if pin != "" {
+		cPin = C.CString(pin)
+		defer C.free(unsafe.Pointer(cPin))
+	}
+
 	// assert the device
-	if cErr := C.fido_dev_get_assert(dev, cAssert, getCStringOrNil(pin)); cErr != C.FIDO_OK {
+	if cErr := C.fido_dev_get_assert(dev, cAssert, cPin); cErr != C.FIDO_OK {
 		// cancels all pending requests for the device
 		C.fido_dev_cancel(dev)
 		return nil, fmt.Errorf("failed to get assertion: %w", libfido2Errors[cErr])
