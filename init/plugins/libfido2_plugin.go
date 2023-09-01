@@ -216,6 +216,7 @@ func (d *Device) assertFido2Device(
 	}
 
 	// pin
+	// nil means a pin is not required
 	var cPin *C.char = nil
 	if pin != "" {
 		cPin = C.CString(pin)
