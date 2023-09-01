@@ -41,56 +41,31 @@ type Device struct {
 // see link for full list
 // - https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
 var libfido2Errors = map[C.int]error{
-	// if there was an error transmitting.
-	C.FIDO_ERR_TX: fmt.Errorf("tx error"),
-	// if there was an error receiving.
-	C.FIDO_ERR_RX: fmt.Errorf("rx error"),
-	// if arguments are invalid.
-	C.FIDO_ERR_INVALID_ARGUMENT: fmt.Errorf("invalid argument"), // -7
-	// if user presence required.
-	C.FIDO_ERR_USER_PRESENCE_REQUIRED: fmt.Errorf("user presence required"), // -8
-	// if command is not supported.
-	C.FIDO_ERR_INVALID_COMMAND: fmt.Errorf("invalid command"), // 0x01
-	// if invalid length.
-	// can happen if hmac or credential id are not base64 decoded
-	C.FIDO_ERR_INVALID_LENGTH: fmt.Errorf("invalid length"), // 0x03
-	// if missing parameter.
-	C.FIDO_ERR_MISSING_PARAMETER: fmt.Errorf("missing parameter"), // 0x14)
-	// if not allowed.
-	C.FIDO_ERR_NOT_ALLOWED: fmt.Errorf("not allowed"),
-	// if action timed out.
-	C.FIDO_ERR_ACTION_TIMEOUT: fmt.Errorf("action timed out"),
-	// if PIN is not set and is required for command.
-	C.FIDO_ERR_PIN_NOT_SET: fmt.Errorf("pin not set"),
-	// if credential is invalid.
-	C.FIDO_ERR_INVALID_CREDENTIAL: fmt.Errorf("invalid credential"),
-	// if option is unsupported.
-	C.FIDO_ERR_UNSUPPORTED_OPTION: fmt.Errorf("unsupported option"),
-	// if pin is wrong.
-	C.FIDO_ERR_PIN_INVALID: fmt.Errorf("pin invalid"),
-	// rx not CBOR.
-	C.FIDO_ERR_RX_NOT_CBOR: fmt.Errorf("rx not CBOR"),
-	// internal error.
-	C.FIDO_ERR_INTERNAL: fmt.Errorf("internal error"),
-	// if PIN policy violation.
-	C.FIDO_ERR_PIN_POLICY_VIOLATION: fmt.Errorf("pin policy violation"),
-	// if no credentials.
-	C.FIDO_ERR_NO_CREDENTIALS: fmt.Errorf("no credentials"),
-	// if too many PIN failures.
-	C.FIDO_ERR_PIN_AUTH_BLOCKED: fmt.Errorf("pin auth blocked"),
-	// if PIN is required.
-	C.FIDO_ERR_PIN_REQUIRED: fmt.Errorf("pin required"),
-	// if user presence is required.
-	C.FIDO_ERR_UP_REQUIRED: fmt.Errorf("up required"),
-	// if receiving invalid CBOR.
-	C.FIDO_ERR_RX_INVALID_CBOR: fmt.Errorf("rx invalid cbor"),
-	// if operation denied.
-	C.FIDO_ERR_OPERATION_DENIED: fmt.Errorf("operation denied"),
-	// if action was cancelled.
-	C.FIDO_ERR_KEEPALIVE_CANCEL: fmt.Errorf("keep alive cancel"),
-	// if option is invalid.
-	C.FIDO_ERR_INVALID_OPTION: fmt.Errorf("invalid option"),
-	C.FIDO_ERR_ERR_OTHER:      fmt.Errorf("other error"),
+	C.FIDO_ERR_TX:                     fmt.Errorf("tx error"), // if there was an error transmitting.
+	C.FIDO_ERR_RX:                     fmt.Errorf("rx error"), // if there was an error receiving.
+	C.FIDO_ERR_INVALID_ARGUMENT:       fmt.Errorf("invalid argument"),
+	C.FIDO_ERR_USER_PRESENCE_REQUIRED: fmt.Errorf("user presence required"),
+	C.FIDO_ERR_INVALID_COMMAND:        fmt.Errorf("invalid command"),
+	C.FIDO_ERR_INVALID_LENGTH:         fmt.Errorf("invalid length"), // if the assertion parameters' length is incorrect
+	C.FIDO_ERR_MISSING_PARAMETER:      fmt.Errorf("missing parameter"),
+	C.FIDO_ERR_NOT_ALLOWED:            fmt.Errorf("not allowed"),
+	C.FIDO_ERR_ACTION_TIMEOUT:         fmt.Errorf("action timed out"),
+	C.FIDO_ERR_PIN_NOT_SET:            fmt.Errorf("pin not set"),
+	C.FIDO_ERR_INVALID_CREDENTIAL:     fmt.Errorf("invalid credential"),
+	C.FIDO_ERR_UNSUPPORTED_OPTION:     fmt.Errorf("unsupported option"),
+	C.FIDO_ERR_PIN_INVALID:            fmt.Errorf("pin invalid"),
+	C.FIDO_ERR_RX_NOT_CBOR:            fmt.Errorf("rx not CBOR"),
+	C.FIDO_ERR_INTERNAL:               fmt.Errorf("internal error"), // if the device name or path is incorrect
+	C.FIDO_ERR_PIN_POLICY_VIOLATION:   fmt.Errorf("pin policy violation"),
+	C.FIDO_ERR_NO_CREDENTIALS:         fmt.Errorf("no credentials"),
+	C.FIDO_ERR_PIN_AUTH_BLOCKED:       fmt.Errorf("pin auth blocked"), // if too many PIN failures.
+	C.FIDO_ERR_PIN_REQUIRED:           fmt.Errorf("pin required"),
+	C.FIDO_ERR_UP_REQUIRED:            fmt.Errorf("up required"),
+	C.FIDO_ERR_RX_INVALID_CBOR:        fmt.Errorf("rx invalid cbor"),
+	C.FIDO_ERR_OPERATION_DENIED:       fmt.Errorf("operation denied"),
+	C.FIDO_ERR_KEEPALIVE_CANCEL:       fmt.Errorf("keep alive cancel"),
+	C.FIDO_ERR_INVALID_OPTION:         fmt.Errorf("invalid option"),
+	C.FIDO_ERR_ERR_OTHER:              fmt.Errorf("other error"),
 }
 
 /*
