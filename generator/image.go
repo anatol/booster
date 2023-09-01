@@ -314,7 +314,7 @@ func elfSectionContent(s *elf.Section) (string, error) {
 	return string(b[:bytes.IndexByte(b, '\x00')]), nil
 }
 
-var elfLibDir = []string{"/usr/lib", "/lib", "/usr/lib64"}
+var elfLibDir = []string{"/usr/lib", "/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu"}
 
 // for a given library (e.g. libc.so.6) finds absolute path to the library file
 func elfPath(lib string) string {
