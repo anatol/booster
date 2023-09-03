@@ -117,13 +117,21 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 
 	pin := ""
 	if pinRequired {
-		prompt := "Enter PIN for " + devName + ":"
+		prompt := "Attempting to recover FIDO2 password...\nEnter PIN for /dev/" + devName + ":"
 		p, err := readPassword(prompt, "")
 		if err != nil {
 			return nil, err
 		}
 		pin = string(p)
 	}
+
+	// print messages from plugin
+	ch := make(chan string)
+	go func() {
+		for msg := range ch {
+			console("\n" + msg)
+		}
+	}()
 
 	hmacSecret, err := sym.(func(
 		devName string,
@@ -133,7 +141,8 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		pin string,
 		hmacSalt []byte,
 		userPresenceRequired bool,
-		userVerificationRequired bool) ([]byte, error))(devName, relyingParty, cdh, cred, pin, hmacSalt, userPresenceRequired, userVerificationRequired)
+		userVerificationRequired bool,
+		ch chan string) ([]byte, error))(devName, relyingParty, cdh, cred, pin, hmacSalt, userPresenceRequired, userVerificationRequired, ch)
 
 	if err != nil {
 		return nil, err
