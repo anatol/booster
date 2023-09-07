@@ -12,34 +12,50 @@ import (
 	"unsafe"
 )
 
+type OptionValue string
+
 const (
 	Default OptionValue = ""
 	True    OptionValue = "true"
 	False   OptionValue = "false"
 )
 
-type OptionValue string
+/*
+	Options that instruct a FIDO2 authenticator to perform additional actions when getting an assertion
 
-// fields correspond to metadata that should be in the LUKS header because of systemd-cryptenroll
+Fields correspond to metadata that should be in the LUKS2 header because of systemd-cryptenroll
+*/
 type AssertionOpts struct {
 	UV       OptionValue // "fido2-uv-required"
 	UP       OptionValue // "fido2-up-required"
 	HMACSalt []byte      // "fido2-salt"
 }
 
+/*
+	Represents the response returned from getting an FIDO2 assertion
+
+The response structure does not follow the FIDO2 spec as we're only returning one field, which is used to decrypt the root partition
+- https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#op-getassn-step-sign
+*/
 type Assertion struct {
 	HMACSecret []byte
 }
 
+/* Represents the FIDO2 device */
 type Device struct {
+	// System file path to the FIDO2 device
 	path string
-	dev  *C.fido_dev_t
+	// Pointer to the internal FIDO2 type
+	dev *C.fido_dev_t
 	sync.Mutex
 }
 
-// these errors were documented by go-libfido2, but not all of them were
-// see link for full list
-// - https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
+/*
+	Errors that can occur during the process of getting an assertion
+
+See the libfido2 header file for the list of status codes returned from the library
+- https://github.com/Yubico/libfido2/blob/main/src/fido/err.h
+*/
 var libfido2Errors = map[C.int]error{
 	C.FIDO_ERR_TX:                     fmt.Errorf("tx error"), // if there was an error transmitting.
 	C.FIDO_ERR_RX:                     fmt.Errorf("rx error"), // if there was an error receiving.
@@ -69,24 +85,32 @@ var libfido2Errors = map[C.int]error{
 }
 
 /*
-	initiliaze the library
+	Initiliaze the library before performing any FIDO2 operations
 
-The fido_init() function initialises the libfido2 library. Its invocation must precede that of any other libfido2 function in the context of the executing thread.
-If FIDO_DEBUG is set in flags, then debug output will be emitted by libfido2 on stderr. Alternatively, the FIDO_DEBUG environment variable may be set.
-If FIDO_DISABLE_U2F_FALLBACK is set in flags, then libfido2 will not fallback to U2F in fido_dev_open(3) if a device claims to support FIDO2 but fails to respond to a CTAP 2.0 greeting.
-
+This is required and depending on the flag passed the behavior can change
 - https://developers.yubico.com/libfido2/Manuals/fido_init.html
 */
 func init() {
 	C.fido_init(0) // initiliaze the library without debugging
 }
 
+/*
+	Return a FIDO2 device with a device path
+
+The path is expected to be prepended by /dev/ followed by a hidraw device
+*/
 func newFido2Device(path string) *Device {
 	return &Device{
 		path: path,
 	}
 }
 
+/*
+	Checks if the FIDO2 device can be opened and return a FIDO2 type if it can
+
+This can fail if the path to the device is incorrect, such as not prepending with /dev/
+- https://developers.yubico.com/libfido2/Manuals/fido_dev_open.html
+*/
 func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 	dev := C.fido_dev_new()
 	cPath := C.CString(d.path)
@@ -99,6 +123,12 @@ func (d *Device) openFido2Device() (*C.fido_dev_t, error) {
 	return dev, nil
 }
 
+/*
+	Check if the FIDO2 device can be closed
+
+Expected to be called after a FIDO2 device has been successfully opened
+- https://developers.yubico.com/libfido2/Manuals/fido_dev_close.html
+*/
 func (d *Device) closeFido2Device(dev *C.fido_dev_t) {
 	d.Lock()
 	d.dev = nil
@@ -109,6 +139,11 @@ func (d *Device) closeFido2Device(dev *C.fido_dev_t) {
 	C.fido_dev_free(&dev)
 }
 
+/*
+	Check if the device is FIDO2
+
+- https://developers.yubico.com/libfido2/Manuals/fido_dev_is_fido2.html
+*/
 func (d *Device) isFido2() (bool, error) {
 	dev, err := d.openFido2Device()
 	if err != nil {
@@ -120,7 +155,7 @@ func (d *Device) isFido2() (bool, error) {
 	return isFido2, nil
 }
 
-// retrieves the internal C value associated with the FIDO2 assertion option
+/* Retrieve the internal C value associated with the FIDO2 assertion option */
 func getCOpt(o OptionValue) (C.fido_opt_t, error) {
 	switch o {
 	case Default:
@@ -143,9 +178,6 @@ func getCBytes(b []byte) *C.uchar {
 	return (*C.uchar)(unsafe.Pointer(&b[0]))
 }
 
-// asserts the FIDO2 token then returns the HMAC secret if successful
-// see the libfido2 manual for more information about various functions used
-// - https://developers.yubico.com/libfido2/Manuals/
 func (d *Device) assertFido2Device(
 	rpID string,
 	clientDataHash []byte,
@@ -165,6 +197,10 @@ func (d *Device) assertFido2Device(
 		return nil, fmt.Errorf("no relying party id specified")
 	}
 
+	/*
+		See libfido2 manual for details about various functions used below
+		- https://developers.yubico.com/libfido2/Manuals/
+	*/
 	cAssert := C.fido_assert_new()
 	defer C.fido_assert_free(&cAssert)
 
@@ -223,7 +259,7 @@ func (d *Device) assertFido2Device(
 		defer C.free(unsafe.Pointer(cPin))
 	}
 
-	// assert the device
+	// assert the device and print messages to console
 	ch <- "Please confirm user presence or verify " + d.path + ":"
 	if cErr := C.fido_dev_get_assert(dev, cAssert, cPin); cErr != C.FIDO_OK {
 		ch <- "Failed to get assertion for " + d.path
@@ -236,7 +272,7 @@ func (d *Device) assertFido2Device(
 		ch <- "User presence confirmed"
 	}
 	if opts.UV == True {
-		ch <- "User verification confirmed"
+		ch <- "User verification successful"
 	}
 
 	cIdx := C.size_t(0)
@@ -249,15 +285,22 @@ func (d *Device) assertFido2Device(
 	return &Assertion{HMACSecret: hmacSecret}, nil
 }
 
+/*
+	Get an assertion from the FIDO2 authenticator then return the HMAC secret if successful. Assumes systemd-cryptenroll was used on the encrypted block device.
+
+Credential id and salt are expected to be base64 decoded
+See the spec for details about the transaction between the platform and the authenticator when retrieving the HMAC secret
+- https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#sctn-hmac-secret-extension
+*/
 func GetFido2HMACSecret(
 	devName string,
-	rpID string,
+	rpID string, // io.systemd.cryptsetup
 	clientDataHash []byte,
-	credentialID []byte,
+	credentialID []byte, // "fido2-credential"
 	pin string,
-	hmacSalt []byte,
-	userPresenceRequired bool,
-	userVerificationRequired bool,
+	hmacSalt []byte, // "fido2-salt"
+	userPresenceRequired bool, // "fido2-up-required"
+	userVerificationRequired bool, // "fido2-uv-required"
 	ch chan string) ([]byte, error) {
 	defer close(ch)
 
@@ -280,7 +323,6 @@ func GetFido2HMACSecret(
 	if userPresenceRequired {
 		assertOpts.UP = True
 	}
-
 	if userVerificationRequired {
 		assertOpts.UV = True
 	}
