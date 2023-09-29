@@ -13,13 +13,11 @@ for kernel in "${kernels[@]}"; do
   fi
   read -r pkgbase < "${kernel}/pkgbase"
 
-  # build and install the image and kernel at one boot path
+  # build and install the image and kernel at all boot paths
   for path in "${boot_paths[@]}"; do
     if [ -d "${path}" ] && [ -w "${path}" ]; then
       booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$path"/booster-"${pkgbase}".img &
       install -Dm644 "${kernel}/vmlinuz" "${path}/vmlinuz-${pkgbase}"
-
-      break
     fi
   done
 done
