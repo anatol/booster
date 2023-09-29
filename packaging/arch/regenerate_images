@@ -3,6 +3,9 @@
 # find out all installed kernels
 mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
 
+# paths to boot partition for the initramfs image and kernel
+boot_paths=("/efi" "/boot")
+
 for kernel in "${kernels[@]}"; do
   if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
     # if pkgbase does not belong to any package then skip this kernel
@@ -10,8 +13,15 @@ for kernel in "${kernels[@]}"; do
   fi
   read -r pkgbase < "${kernel}/pkgbase"
 
-  booster build --force --kernel-version ${kernel##/usr/lib/modules/} /boot/booster-${pkgbase}.img &
-  install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+  # build and install the image and kernel at one boot path
+  for path in "${boot_paths[@]}"; do
+    if [ -d "${path}" ] && [ -w "${path}" ]; then
+      booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$path"/booster-"${pkgbase}".img &
+      install -Dm644 "${kernel}/vmlinuz" "${path}/vmlinuz-${pkgbase}"
+
+      break
+    fi
+  done
 done
 
 wait
