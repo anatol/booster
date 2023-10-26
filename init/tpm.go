@@ -58,7 +58,7 @@ func tpmAwaitReady() bool {
 	return !timedOut
 }
 
-func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte) ([]byte, error) {
+func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte, srk []byte) ([]byte, error) {
 	tpmAwaitReady()
 
 	dev, err := openTPM()
@@ -82,11 +82,21 @@ func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyH
 		RSAParameters: defaultRSAParams,
 	}
 
-	srkHandle, _, err := tpm2.CreatePrimary(dev, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", srkTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("clevis.go/tpm2: can't create primary key: %v", err)
+	var srkHandle tpmutil.Handle
+	if srk != nil {
+		// TODO: run equivalent of TSS code:
+		// c = sym_Esys_TR_Deserialize(
+		//+                                c->esys_context,
+		//+                                srk_buf,
+		//+                                srk_buf_size,
+		//+                                &primary->esys_handle);
+	} else {
+		srkHandle, _, err = tpm2.CreatePrimary(dev, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", srkTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("clevis.go/tpm2: can't create primary key: %v", err)
+		}
+		defer tpm2.FlushContext(dev, srkHandle)
 	}
-	defer tpm2.FlushContext(dev, srkHandle)
 
 	objectHandle, _, err := tpm2.Load(dev, srkHandle, "", public, private)
 	if err != nil {
