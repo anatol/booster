@@ -1,0 +1,43 @@
+#!/bin/bash -e
+
+# create a basic universal kernel image (UKI) via ukify
+# by default the UKI is installed at /boot/Linux/EFI/
+create_uki() {
+  local tmpdir
+  local microcodes
+  local kernel="$1"
+  tmpdir=$(mktemp -d)
+  microcodes=$(ls /boot/*-ucode.img)
+  cd "$tmpdir"
+
+  booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "/boot/booster-${pkgbase}.img"
+  ukify --initrd="${microcodes}[0]" --initrd="/boot/booster-${pkgbase}.img" --linux="$kernel" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
+  install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+}
+
+
+main() {
+  # check if the systemd-ukify package is installed via pacman
+  package=$(pacman -Qq "systemd-ukify")
+  if ! [ "$package" == "systemd-ukify" ]; then
+    echo "$package"
+    exit 1
+  fi
+
+  # find out all installed kernels
+  mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
+
+  for kernel in "${kernels[@]}"; do
+    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+      # if pkgbase does not belong to any package then skip this kernel
+      continue
+    fi
+    read -r pkgbase < "${kernel}/pkgbase"
+
+    create_uki "/boot/vmlinuz-${pkgbase}" &
+  done
+
+  wait
+}
+
+main
