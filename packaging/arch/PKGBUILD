@@ -14,6 +14,7 @@ optdepends=(
   'busybox: to enable emergency shell at the boot time'
   'yubikey-personalization: for clevis Yubikey challenge-response support'
   'libfido2: for systemd-enroll with FIDO2'
+  'systemd-ukify: for generating UKIs'
 )
 backup=(etc/booster.yaml)
 provides=(booster initramfs)
