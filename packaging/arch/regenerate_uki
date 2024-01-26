@@ -7,10 +7,12 @@ create_uki() {
   local kernel="$1"
   local pkgbase="$2"
   local initrd="/boot/booster-${pkgbase}.img"
+  local osrel="/etc/os-release"
+  local splash="/usr/share/systemd/bootctl/splash-arch.bmp"
   microcodes=$(find /boot -name '*-ucode.img' -type f -printf "%f ")
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$initrd"
-  ukify --initrd="${microcodes}${initrd}" --linux="$kernel" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
+  ukify --initrd="${microcodes}${initrd}" --linux="$kernel" --os-release="@$osrel" --splash="$splash" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
   install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 }
 
