@@ -5,6 +5,7 @@
 create_uki() {
   local microcodes
   local kernel="$1"
+  local pkgbase="$2"
   microcodes=$(find /boot -name '*-ucode.img' -type f -printf "%f ")
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "/boot/booster-${pkgbase}.img"
@@ -31,7 +32,7 @@ main() {
     fi
     read -r pkgbase < "${kernel}/pkgbase"
 
-    create_uki "/boot/vmlinuz-${pkgbase}" &
+    create_uki "/boot/vmlinuz-${pkgbase}" "$pkgbase" &
   done
 
   wait
