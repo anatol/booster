@@ -148,7 +148,7 @@ func TestRemoteUnlock(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Kill()
 
-	require.NoError(t, vm.ConsoleExpect("link becomes ready")) // wait for the network
+	require.NoError(t, vm.ConsoleExpect("NIC Link is Up")) // wait for the network
 	time.Sleep(time.Second)
 
 	// unlock remotely
