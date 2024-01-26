@@ -39,6 +39,6 @@ modulesdir="${mount}/lib/modules"
 kernelver=$(find "${modulesdir}" -maxdepth 1 -type d ! -name "modules" -print0 | xargs -0 stat -c "%Y|%n" | sort -r | cut -d "|" -f 2 | xargs basename)
 printf '%s' "${kernelver}" > assets/alpinelinux/vmlinuz-version
 sudo cp -r "${modulesdir}/${kernelver}" assets/alpinelinux/modules
-sudo mv "${mount}/boot/config-virt" assets/alpinelinux/config
+sudo mv "${mount}/boot/config-${kernelver}" assets/alpinelinux/config
 sudo mv "${mount}/boot/vmlinuz-virt" assets/alpinelinux/vmlinuz
 sudo chown -R "$USER" assets/alpinelinux
