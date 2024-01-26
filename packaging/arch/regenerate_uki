@@ -5,7 +5,7 @@
 create_uki() {
   local microcodes
   local kernel="$1"
-  microcodes=$(ls /boot/*-ucode.img)
+  microcodes=$(find /boot -name '*-ucode.img' -type f -printf "%f ")
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "/boot/booster-${pkgbase}.img"
   ukify --initrd="${microcodes}[0]" --initrd="/boot/booster-${pkgbase}.img" --linux="$kernel" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
