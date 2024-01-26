@@ -3,12 +3,9 @@
 # create a basic universal kernel image (UKI) via ukify
 # by default the UKI is installed at /boot/Linux/EFI/
 create_uki() {
-  local tmpdir
   local microcodes
   local kernel="$1"
-  tmpdir=$(mktemp -d)
   microcodes=$(ls /boot/*-ucode.img)
-  cd "$tmpdir"
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "/boot/booster-${pkgbase}.img"
   ukify --initrd="${microcodes}[0]" --initrd="/boot/booster-${pkgbase}.img" --linux="$kernel" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
