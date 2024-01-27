@@ -188,6 +188,16 @@ At the final step booster computes dependency graphs between modules and all req
 For example if a user manually added `ext4` and kernel build system says `ext` module requires `mbcache` and `jbd2` then both
 `mbcache` and `jbd2` automatically added to the image.
 
+## Universal Kernel Image
+A [Universal Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary the bundles various boot components (e.g. kernel, initrd, and an UEFI boot stub) as a single executable.
+This allows for booting directly through the firmware (UEFI) as well as authenticating all of the boot components at once for Secure Boot.
+
+To generate UKIs in Booster, please install the systemd UKI generator (systemd-ukify) from your distribution's package manager and use `/usr/lib/booster/regenerate_uki`.
+It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager, then passes the result to systemd's UKI generator (ukify) as input.
+The script only passes a subset of boot components, namely the system's microcode(s), initrd, os-release file, boot splash image and kernel. Kernel command-line entries of the UKI are inherited from `/etc/booster.yaml`. 
+
+Please note that to boot the UKI by default, it may be necessary to configure your system's boot loader configuration file(s) accordingly.
+
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
 information about what is going on. Just add `booster.log=debug,console` kernel parameter and booster
@@ -239,6 +249,10 @@ So /boot/loader/entries/booster.conf should looks like this:
     linux /vmlinuz-linux
     initrd /booster-linux.img
     options root=UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470 rw rootflags=relatime,autodefrag,compress=zstd:2,space_cache,subvol=root
+
+Create a Unified Kernel Image and write the result to /boot/EFI/Linux:
+
+    $ /usr/lib/booster/regenerate_uki build /boot/EFI/Linux
 
 ## COPYRIGHT
 Booster is Copyright (C) 2020 Anatol Pomazau <http://github.com/anatol>

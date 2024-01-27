@@ -1,0 +1,76 @@
+#!/bin/bash -e
+
+# create a basic universal kernel image (UKI) via ukify
+# by default, the output is written to the current working directory unless specified by the user
+create_uki() {
+  local microcodes
+  local kernel="$1"
+  local pkgbase="$2"
+  local esp="$3"
+  local initrd="/boot/booster-${pkgbase}.img"
+  local osrel="/etc/os-release"
+  local splash="/usr/share/systemd/bootctl/splash-arch.bmp"
+
+  # find all microcodes and delete the trailing white space
+  microcodes=$(find /boot -name '*-ucode.img' -type f -printf "/boot/%f " | tr -d ' ')
+
+  booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$initrd"
+  ukify --initrd="$microcodes" --initrd="$initrd" --linux="${kernel}/vmlinuz" --os-release="@${osrel}" --splash="$splash" --output="${esp}/booster-${pkgbase}.efi" build
+  install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+}
+
+usage() {
+    echo "Usage: regenerate_uki build [path]"
+    echo "See booster(1) for more info and examples."
+}
+
+main() {
+  local esp
+  local package
+  esp=$(pwd)
+
+  if ! [ "$1" == "build" ]; then
+    usage
+    exit 1
+  fi
+
+  if [ -n "$2" ]; then
+    esp="$2"
+  fi
+
+  if ! [ -d "$esp" ]; then
+    usage
+    echo "Path to ESP does not exist or is not a directory: ${esp}"    
+    exit 1
+  fi
+
+  # check if the systemd-ukify package is installed via pacman
+  package=$(pacman -Qq "systemd-ukify")
+  if ! [ "$package" == "systemd-ukify" ]; then
+    echo "$package"
+    exit 1
+  fi
+
+  # check for root
+  if ! [ "$EUID" -eq 0 ]; then
+    echo "regenerate_uki must be run as root."
+    exit 1
+  fi
+
+  # find out all installed kernels
+  mapfile -d '' kernels < <(find /usr/lib/modules -maxdepth 1 -type d ! -name "modules" -print0)
+
+  for kernel in "${kernels[@]}"; do
+    if ! pacman -Qqo "${kernel}/pkgbase" > /dev/null 2>&1; then
+      # if pkgbase does not belong to any package then skip this kernel
+      continue
+    fi
+    read -r pkgbase < "${kernel}/pkgbase"
+
+    create_uki "$kernel" "$pkgbase" "$esp" &
+  done
+
+  wait
+}
+
+main "$@"
