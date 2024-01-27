@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-# create a basic universal kernel image (UKI) via ukify
+# create a unified kernel image (UKI) via ukify
 # by default, the output is written to the current working directory unless specified by the user
 create_uki() {
   local microcodes
