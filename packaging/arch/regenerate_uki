@@ -9,7 +9,9 @@ create_uki() {
   local initrd="/boot/booster-${pkgbase}.img"
   local osrel="/etc/os-release"
   local splash="/usr/share/systemd/bootctl/splash-arch.bmp"
-  microcodes=$(find /boot -name '*-ucode.img' -type f -printf "%f ")
+
+  # find all microcodes and delete the trailing white space
+  microcodes=$(find /boot -name '*-ucode.img' -type f -printf "/boot/%f " | tr -d ' ')
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$initrd"
   ukify --initrd="${microcodes}${initrd}" --linux="$kernel" --os-release="@$osrel" --splash="$splash" --output="/boot/Linux/EFI/booster-${pkgbase}.efi" build
