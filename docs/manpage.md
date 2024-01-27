@@ -250,6 +250,10 @@ So /boot/loader/entries/booster.conf should looks like this:
     initrd /booster-linux.img
     options root=UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470 rw rootflags=relatime,autodefrag,compress=zstd:2,space_cache,subvol=root
 
+Create a Unified Kernel Image and write the result to /boot/EFI/Linux:
+
+    $ /usr/lib/booster/regenerate_uki build /boot/EFI/Linux
+
 ## COPYRIGHT
 Booster is Copyright (C) 2020 Anatol Pomazau <http://github.com/anatol>
 
