@@ -188,8 +188,8 @@ At the final step booster computes dependency graphs between modules and all req
 For example if a user manually added `ext4` and kernel build system says `ext` module requires `mbcache` and `jbd2` then both
 `mbcache` and `jbd2` automatically added to the image.
 
-## Universal Kernel Image
-A [Universal Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary the bundles various boot components (e.g. kernel, initrd, and an UEFI boot stub) as a single executable.
+## Unified Kernel Image
+A [Unified Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary that bundles various boot components (e.g. kernel, initrd, and an UEFI boot stub) as a single executable.
 This allows for booting directly through the firmware (UEFI) as well as authenticating all of the boot components at once for Secure Boot.
 
 To generate UKIs in Booster, please install the systemd UKI generator (systemd-ukify) from your distribution's package manager and use `/usr/lib/booster/regenerate_uki`.
