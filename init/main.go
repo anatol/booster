@@ -911,17 +911,9 @@ func mountZfsRoot() error {
 				return unwrapExitError(err)
 			}
 			if keyStatus == "unavailable" {
-				keyLocation, err := getZfsPropertyValue("keylocation", encryptionRoot)
+				err := loadZfsKey(encryptionRoot)
 				if err != nil {
 					return unwrapExitError(err)
-				}
-				if keyLocation == "prompt" {
-					err := loadZfsKey(encryptionRoot)
-					if err != nil {
-						return unwrapExitError(err)
-					}
-				} else {
-					warning("unable to load key for ZFS dataset %s", encryptionRoot)
 				}
 			}
 		}
