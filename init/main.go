@@ -901,12 +901,26 @@ func mountZfsRoot() error {
 	flags, options := mountFlags()
 	options = strings.Join([]string{"zfsutil", options}, ",")
 	for _, ds := range strings.Split(strings.TrimSpace(string(datasets)), "\n") {
-		val, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", ds).Output()
+		encryptionRoot, err := getZfsPropertyValue("encryptionroot", ds)
 		if err != nil {
 			return unwrapExitError(err)
 		}
-
-		mt := strings.TrimSpace(string(val))
+		if encryptionRoot != "-" {
+			keyStatus, err := getZfsPropertyValue("keystatus", encryptionRoot)
+			if err != nil {
+				return unwrapExitError(err)
+			}
+			if keyStatus == "unavailable" {
+				err := loadZfsKey(encryptionRoot)
+				if err != nil {
+					return unwrapExitError(err)
+				}
+			}
+		}
+		mt, err := getZfsPropertyValue("mountpoint", ds)
+		if err != nil {
+			return unwrapExitError(err)
+		}
 		switch mt {
 		case "none":
 			continue
@@ -922,6 +936,32 @@ func mountZfsRoot() error {
 	rootMounted.Done()
 
 	return nil
+}
+
+func getZfsPropertyValue(property, dataset string) (string, error) {
+	val, err := exec.Command("zfs", "get", "-H", "-o", "value", property, dataset).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(val)), err
+}
+
+func loadZfsKey(encryptionRoot string) error {
+	for {
+		zfsLoadKey := exec.Command("zfs", "load-key", encryptionRoot)
+		zfsLoadKey.Stdin = os.Stdin
+		zfsLoadKey.Stdout = os.Stdout
+		zfsLoadKey.Stderr = os.Stderr
+		err := zfsLoadKey.Run()
+		if err != nil {
+			warning("running `zfs load-key`: %v", err)
+			if _, ok := err.(*exec.ExitError); ok {
+				continue
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 var config InitConfig

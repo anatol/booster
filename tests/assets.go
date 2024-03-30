@@ -40,6 +40,7 @@ var assetGenerators = map[string]assetGenerator{
 	"systemd-recovery.img":      {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
 	"swap.raw":                  {"swap.sh", nil},
 	"zfs.img":                   {"zfs.sh", nil},
+	"zfs_encrypted.img":         {"zfs.sh", []string{"ZFS_PASSPHRASE=encrypted"}},
 
 	// non-images
 	"tpm2/tpm2-00.permall.pristine": {"swtpm.sh", nil},
