@@ -60,6 +60,7 @@ package() {
   install -Dp -m644 docs/manpage.1 "$pkgdir/usr/share/man/man1/booster.1"
   install -Dp -m755 init/init "$pkgdir/usr/lib/booster/init"
   install -Dp -m755 packaging/arch/regenerate_images "$pkgdir/usr/lib/booster/regenerate_images"
+  install -Dp -m755 packaging/arch/regenerate_images "$pkgdir/usr/lib/booster/regenerate_uki"
 
   install -Dp -m644 packaging/arch/90-booster-install.hook "$pkgdir/usr/share/libalpm/hooks/90-booster-install.hook"
   install -Dp -m755 packaging/arch/booster-install "$pkgdir/usr/share/libalpm/scripts/booster-install"
