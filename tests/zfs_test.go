@@ -21,11 +21,10 @@ func TestZfs(t *testing.T) {
 
 func TestUnlockEncryptedZfs(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
-		enableZfs:     true,
-		zfsCachePath:  "assets/zfs/zpool.cache",
-		disk:          "assets/zfs_encrypted.img",
-		kernelVersion: "6.6.28-1-lts",
-		kernelArgs:    []string{"zfs=testpool/root"},
+		enableZfs:    true,
+		zfsCachePath: "assets/zfs/zpool.cache",
+		disk:         "assets/zfs_encrypted.img",
+		kernelArgs:   []string{"zfs=testpool/root"},
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
