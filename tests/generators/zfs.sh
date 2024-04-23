@@ -12,7 +12,7 @@ quit() {
 
 truncate --size 100M "${OUTPUT}"
 lodev=$(sudo losetup -f -P --show "${OUTPUT}")
-sudo gdisk "${lodev}" <<< "o
+sudo gdisk "${lodev}" <<<"o
 y
 n
 
@@ -32,7 +32,11 @@ y
 dir=$(mktemp -d)
 sleep 2 # wait till udev creates /dev/disk/by-partuuid/ link
 sudo modprobe zfs
-sudo zpool create testpool /dev/disk/by-partuuid/308eb65b-292a-49ca-9cf1-f739b338a77e
+if [ "${ZFS_PASSPHRASE}" != "" ]; then
+  echo -e "${ZFS_PASSPHRASE}\n${ZFS_PASSPHRASE}" | sudo zpool create -O encryption=on -O keylocation=prompt -O keyformat=passphrase testpool /dev/disk/by-partuuid/308eb65b-292a-49ca-9cf1-f739b338a77e
+else
+  sudo zpool create testpool /dev/disk/by-partuuid/308eb65b-292a-49ca-9cf1-f739b338a77e
+fi
 sudo zfs create -o mountpoint=/ testpool/root
 sudo mount -t zfs -o zfsutil testpool/root "${dir}"
 sudo chown "${USER}" "${dir}"
