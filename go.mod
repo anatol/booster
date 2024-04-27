@@ -13,36 +13,35 @@ require (
 	github.com/cavaliergopher/cpio v1.0.1
 	github.com/google/go-tpm v0.9.0
 	github.com/google/renameio/v2 v2.0.0
-	github.com/insomniacslk/dhcp v0.0.0-20231206064809-8c70d406f6d2
+	github.com/insomniacslk/dhcp v0.0.0-20240419123447-f1cffa2c0c49
 	github.com/jessevdk/go-flags v1.5.0
-	github.com/klauspost/compress v1.17.5
-	github.com/stretchr/testify v1.8.4
-	github.com/ulikunitz/xz v0.5.11
+	github.com/klauspost/compress v1.17.8
+	github.com/stretchr/testify v1.9.0
+	github.com/ulikunitz/xz v0.5.12
 	github.com/vishvananda/netlink v1.1.0
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.18.0
-	golang.org/x/sys v0.16.0
+	golang.org/x/crypto v0.22.0
+	golang.org/x/sys v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
 	github.com/dgryski/go-camellia v0.0.0-20191119043421-69a8a13fb23d // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/josharian/native v1.1.0 // indirect
 	github.com/jzelinskie/whirlpool v0.0.0-20201016144138-0675e54bb004 // indirect
 	github.com/lestrrat-go/backoff/v2 v2.0.8 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.2 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
 	github.com/lestrrat-go/iter v1.0.2 // indirect
-	github.com/lestrrat-go/jwx v1.2.28 // indirect
+	github.com/lestrrat-go/jwx v1.2.29 // indirect
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/u-root/uio v0.0.0-20240118234441-a3c409a6018e // indirect
+	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
-	golang.org/x/net v0.20.0 // indirect
+	golang.org/x/net v0.24.0 // indirect
 )
