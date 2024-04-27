@@ -20,8 +20,8 @@ create_uki() {
 }
 
 usage() {
-    echo "Usage: regenerate_uki build [path]"
-    echo "See booster(1) for more info and examples."
+  echo "Usage: regenerate_uki build [path]"
+  echo "See booster(1) for more info and examples."
 }
 
 main() {
@@ -40,7 +40,7 @@ main() {
 
   if ! [ -d "$esp" ]; then
     usage
-    echo "Path to ESP does not exist or is not a directory: ${esp}"    
+    echo "Path to ESP does not exist or is not a directory: ${esp}"
     exit 1
   fi
 
