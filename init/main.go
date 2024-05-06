@@ -943,7 +943,7 @@ func getZfsPropertyValue(property, dataset string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(val)), err
+	return strings.TrimSpace(string(val)), nil
 }
 
 func loadZfsKey(encryptionRoot string) error {
