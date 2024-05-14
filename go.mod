@@ -6,7 +6,7 @@ require (
 	github.com/anatol/clevis.go v0.0.0-20230629234939-684702e18e07
 	github.com/anatol/devmapper.go v0.0.0-20230829043248-59ac2b9706ba
 	github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f
-	github.com/anatol/luks.go v0.0.0-20230423170605-fb3724ed7db7
+	github.com/anatol/luks.go v0.0.0-20240507052915-92f8bb765f98
 	github.com/anatol/smart.go v0.0.0-20230705044831-c3b27137baa3
 	github.com/anatol/tang.go v0.0.0-20230725175645-dcc6e9494f14
 	github.com/anatol/vmtest v0.0.0-20230711210602-87511df0d4bc
@@ -21,8 +21,8 @@ require (
 	github.com/vishvananda/netlink v1.1.0
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.22.0
-	golang.org/x/sys v0.19.0
+	golang.org/x/crypto v0.23.0
+	golang.org/x/sys v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -43,5 +43,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
-	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/net v0.25.0 // indirect
 )
