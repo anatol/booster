@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,7 +12,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
+	"plugin"
 	"regexp"
 	"strings"
 	"time"
@@ -90,100 +89,66 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 }
 
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
-	usbhidWg.Wait()
-
-	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
+	path := "usr/lib/booster/libfido2_plugin.so"
+	p, err := plugin.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
+		return nil, fmt.Errorf("failed to open "+path+": %s", err)
 	}
 
-	// TODO: find better way to identify devices that support FIDO2
-	if !strings.Contains(string(ueventContent), "FIDO") {
-		return nil, fmt.Errorf("HID %s does not support FIDO", devName)
+	sym, err := p.Lookup("GetFido2HMACSecret")
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup symbol in "+path+": %s", err)
 	}
 
-	info("HID %s supports FIDO, trying it to recover the password", devName)
+	// client data hash
+	cdh := make([]byte, 32)
 
-	var challenge strings.Builder
-	const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
-	challenge.WriteString(zeroString)                                 // client data, an empty string
-	challenge.WriteRune('\n')
-	challenge.WriteString(relyingParty)
-	challenge.WriteRune('\n')
-	challenge.WriteString(credential)
-	challenge.WriteRune('\n')
-	challenge.WriteString(salt)
-	challenge.WriteRune('\n')
+	// credential id
+	cred, err := base64.StdEncoding.DecodeString(credential)
+	if err != nil {
+		return nil, fmt.Errorf("failed when decoding credential id")
+	}
 
-	device := "/dev/" + devName
-	args := []string{"-G", "-h", device}
-	if userPresenceRequired {
-		args = append(args, "-t", "up=true")
+	// hmac salt
+	hmacSalt, err := base64.StdEncoding.DecodeString(salt)
+	if err != nil {
+		return nil, fmt.Errorf("failed when decoding hmac salt")
 	}
-	if userVerificationRequired {
-		args = append(args, "-t", "uv=true")
-	}
+
+	pin := ""
 	if pinRequired {
-		args = append(args, "-t", "pin=true")
-	}
-
-	cmd := exec.Command("fido2-assert", args...)
-	pipeOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	pipeErr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-	pipeIn, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	if _, err := pipeIn.Write([]byte(challenge.String())); err != nil {
-		return nil, err
-	}
-
-	if pinRequired {
-		// wait till the command requests the pin
-		buff := make([]byte, 500)
-		if _, err := pipeErr.Read(buff); err != nil {
+		prompt := "Attempting to recover FIDO2 password...\nEnter PIN for /dev/" + devName + ":"
+		p, err := readPassword(prompt, "")
+		if err != nil {
 			return nil, err
 		}
-		// Dealing with Yubikey using command-line tools is getting out of control
-		// TODO: find a way to do the same using libfido2
-		prompt := "Enter PIN for " + device + ":"
-		if strings.HasPrefix(string(buff), prompt) {
-			// fido2-assert tool requests for PIN
-			pin, err := readPassword(prompt, "")
-			if err != nil {
-				return nil, err
-			}
-			pin = append(pin, '\n')
-			if _, err := pipeIn.Write(pin); err != nil {
-				return nil, err
-			}
-		}
+		pin = string(p)
 	}
 
-	content, err := io.ReadAll(pipeOut)
+	// print messages from plugin
+	ch := make(chan string)
+	go func() {
+		for msg := range ch {
+			console("\n" + msg)
+		}
+	}()
+
+	hmacSecret, err := sym.(func(
+		devName string,
+		rpID string,
+		clientDataHash []byte,
+		credentialID []byte,
+		pin string,
+		hmacSalt []byte,
+		userPresenceRequired bool,
+		userVerificationRequired bool,
+		ch chan string) ([]byte, error))(devName, relyingParty, cdh, cred, pin, hmacSalt, userPresenceRequired, userVerificationRequired, ch)
+
 	if err != nil {
 		return nil, err
 	}
-	lines := bytes.Split(content, []byte{'\n'})
-	if len(lines) < 5 {
-		msg, _ := io.ReadAll(pipeErr)
-		msg = bytes.TrimRight(msg, "\n")
-		return nil, fmt.Errorf("%s", string(msg))
-	}
 
-	// hmac is the 5th line in the output
-	return lines[4], nil
+	return []byte(base64.StdEncoding.EncodeToString(hmacSecret)), nil
 }
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
@@ -204,18 +169,6 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	if node.RelyingParty == "" {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
-
-	dir, err := os.ReadDir("/sys/class/hidraw/")
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		for _, d := range dir {
-			// run it in a separate goroutine to avoid blocking on channel
-			hidrawDevices <- d.Name()
-		}
-	}()
 
 	seenHidrawDevices := make(set)
 
