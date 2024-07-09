@@ -89,17 +89,43 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 	}
 }
 
+func isHidRawFido2(devName string) (bool, error) {
+	descriptor, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/report_descriptor")
+	if err != nil {
+		return false, fmt.Errorf("unable to read HID descriptor for %s", devName)
+	}
+	lenDescriptor := len(descriptor)
+	for id := 0; id < lenDescriptor; id++ {
+		itemPrefix := descriptor[id]
+		itemSize := itemPrefix & 0b11
+		// References:
+		// - libfido2 checks Usage Page against 0xd0f1 (FIDO Alliance):
+		//     https://github.com/Yubico/libfido2/blob/03c18d396eb209a42bbf62f5f4415203cba2fc50/src/hid_hidapi.c#L146
+		// - HID specification 6.2.2.7 Global Item, Usage Page prefix format is 0000 01 nn, nn = length
+		//     https://www.usb.org/sites/default/files/hid1_11.pdf
+		if itemPrefix&0b11111100 == 0b00000100 &&
+			itemSize == 2 &&
+			id+2 < lenDescriptor &&
+			descriptor[id+1] == 0xd0 && //
+			descriptor[id+2] == 0xf1 {
+			return true, nil
+		}
+		id += int(itemSize)
+	}
+
+	return false, nil
+}
+
 func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
 	usbhidWg.Wait()
 
-	ueventContent, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/uevent")
+	isFido2, err := isHidRawFido2(devName)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read uevent file for %s", devName)
+		return nil, fmt.Errorf("unable to check whether %s is a FIDO2 device", devName)
 	}
 
-	// TODO: find better way to identify devices that support FIDO2
-	if !strings.Contains(string(ueventContent), "FIDO") {
-		return nil, fmt.Errorf("HID %s does not support FIDO", devName)
+	if !isFido2 {
+		return nil, fmt.Errorf("HID %s is not a FIDO2 device", devName)
 	}
 
 	info("HID %s supports FIDO, trying it to recover the password", devName)
