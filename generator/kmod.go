@@ -734,6 +734,11 @@ func readCompiledInComponents(kernelVersion string) (set, error) {
 		debug("reading %s", f.Name())
 		defer f.Close()
 		r = f
+	} else if f, err := os.Open("/lib/modules/" + kernelVersion + "/config"); err == nil {
+		// Gentoo dist-kernel specific config path.
+		debug("reading %s", f.Name())
+		defer f.Close()
+		r = f
 	} else if f, err := os.Open("/proc/config"); err == nil {
 		debug("reading %s", f.Name())
 		defer f.Close()
