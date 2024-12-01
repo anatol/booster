@@ -368,7 +368,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	}
 
 	if opts.containsESP {
-		params = append(params, "-bios", "/usr/share/ovmf/x64/OVMF.fd")
+		params = append(params, "-bios", "/usr/share/edk2/x64/OVMF.4m.fd")
 
 		// ESP partition contains initramfs and cannot be statically built
 		// we built the image at runtime
@@ -386,7 +386,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 		disks = append(disks, vmtest.QemuDisk{Path: output, Format: "raw"})
 	}
 	if opts.asIso {
-		params = append(params, "-bios", "/usr/share/ovmf/x64/OVMF.fd")
+		params = append(params, "-bios", "/usr/share/edk2/x64/OVMF.4m.fd")
 
 		// ESP partition contains initramfs and cannot be statically built
 		// we built the image at runtime
