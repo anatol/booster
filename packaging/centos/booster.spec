@@ -66,6 +66,7 @@ touch $RPM_BUILD_ROOT/etc/booster.yaml
 %{__install} -Dp -m755 packaging/centos/booster-remove "$RPM_BUILD_ROOT/usr/share/yum-plugins/post-actions/scripts/booster-remove"
 %{__install} -Dp -m755 packaging/centos/booster-install-pre.action "$RPM_BUILD_ROOT/etc/yum/pre-actions/booster-pre.action"
 %{__install} -Dp -m755 packaging/centos/booster-install-post.action "$RPM_BUILD_ROOT/etc/yum/post-actions/booster-post.action"
+%{__install} -Dp -m755 packaging/common/50-booster.install "$RPM_BUILD_ROOT/usr/lib/kernel/install.d/50-booster.install"
 
 %files
 /etc/booster.yaml
