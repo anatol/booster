@@ -27,6 +27,7 @@ func wwid(device string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer n.Close()
 
 		c, nss, err := n.Identify()
 		if err != nil {
@@ -56,6 +57,7 @@ func wwid(device string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer dev.Close()
 
 		switch dev.Type() {
 		case "sata":
