@@ -375,6 +375,20 @@ func fsck(dev string) error {
 	return nil
 }
 
+func mountRootFsChecked(dev, fstype string) error {
+	rootMountFlags, options := mountFlags()
+	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
+	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
+		// Note that this mounting function might be called multiple times
+		// e.g. in case of multiple devices needed to assemble the root array, see https://github.com/anatol/booster/issues/194
+		// It will try to mount it until mount() is successful.
+		return err
+	}
+
+	rootMounted.Done()
+	return nil
+}
+
 func mountRootFs(dev, fstype string) error {
 	// some fs have module names that differs from the fs name itself
 	fstypeModules := map[string]string{
@@ -404,17 +418,7 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := mountFlags()
-	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
-	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
-		// Note that this mounting function might be called multiple times
-		// e.g. in case of multiple devices needed to assemble the root array, see https://github.com/anatol/booster/issues/194
-		// It will try to mount it until mount() is successful.
-		return err
-	}
-
-	rootMounted.Done()
-	return nil
+	return mountRootFsChecked(dev, fstype)
 }
 
 // Wait until all devices of a multiple-device filesystem are scanned and registered within the kernel module
