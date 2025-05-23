@@ -987,6 +987,15 @@ func mountRemoteRoot() error {
 	rootMountingMutex.Lock()
 	defer rootMountingMutex.Unlock()
 
+	// hack: some "remote" fs becomes available so fast that udevQuitLoop wouldn't even be initialized here (mainly virtiofs)
+	// wait for udevQuitLoop to become ready so we don't break cleanup() in which udevQuitLoop needs to be closed
+	for {
+		if udevQuitLoop != nil {
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+
 	return mountRootFsChecked(cmdRoot.data.(string), rootFsType)
 }
 
