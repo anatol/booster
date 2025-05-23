@@ -853,6 +853,7 @@ func boost() error {
 
 	go func() { check(scanSysModaliases()) }()
 	go func() { check(scanSysBlock()) }()
+	go func() { check(mountRemoteRoot()) }()
 
 	if config.EnableZfs {
 		if err := mountZfsRoot(); err != nil {
@@ -966,6 +967,27 @@ func loadZfsKey(encryptionRoot string) error {
 		}
 		return nil
 	}
+}
+
+// While this looks generic but currently only virtiofs is supported
+func mountRemoteRoot() error {
+	if cmdRoot.format != refRemote {
+		// return early if root is non-remote
+		return nil
+	}
+
+	if rootFsType != "virtiofs" {
+		return fmt.Errorf("unsupported remote fs type %s, we should not be here", rootFsType)
+	}
+
+	// Arch Linux official kernels selects virtiofs as built-in, ALARM has it as module, load regardless just in case
+	virtiofsWg := loadModules("virtiofs")
+	virtiofsWg.Wait()
+
+	rootMountingMutex.Lock()
+	defer rootMountingMutex.Unlock()
+
+	return mountRootFsChecked(cmdRoot.data.(string), rootFsType)
 }
 
 var config InitConfig

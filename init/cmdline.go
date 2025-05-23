@@ -152,7 +152,9 @@ func getNextParam(params string, index int) (string, string, int) {
 func parseParams(params string) error {
 	var luksOptions []string
 
-	var key, value string
+	var key, value, rootValue string
+	var rootErr error
+
 	i := 0
 
 	for i < len(params) {
@@ -190,7 +192,9 @@ func parseParams(params string) error {
 			var err error
 			cmdRoot, err = parseDeviceRef(value)
 			if err != nil {
-				return fmt.Errorf("root=%s: %v", value, err)
+				// in case of failure, do not error out yet, save the root value for remote identifier logic later
+				rootValue = value
+				rootErr = err
 			}
 		case "rd.modules_force_load":
 			if value == "" {
@@ -282,6 +286,20 @@ func parseParams(params string) error {
 				mod, param := key[:dot], key[dot+1:]
 				mod = normalizeModuleName(mod)
 				moduleParams[mod] = append(moduleParams[mod], param+"="+value)
+			}
+		}
+	}
+
+	if cmdRoot == nil { // we haven't parsed root successfully yet, either with missing root=, or it was probably remote
+		if len(rootValue) == 0 { // missing root=, do not consider this an error, nop
+
+		} else if len(rootFsType) == 0 { // has root=, but missing rootfstype=, bail out with earlier rootErr
+			return fmt.Errorf("root=%s: %v", rootValue, rootErr)
+		} else { // has both root= and rootfstype=, definitely remote
+			var err error
+			cmdRoot, err = parseRemoteRef(rootValue, rootFsType)
+			if err != nil {
+				return fmt.Errorf("root(remote)=%s: %v", rootValue, err)
 			}
 		}
 	}
