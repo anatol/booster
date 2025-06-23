@@ -55,3 +55,12 @@ func ioctl(fd, cmd, ptr uintptr) error {
 	}
 	return nil
 }
+
+// ioctlCheckZero executes an ioctl command on the specified file descriptor, with a Boolean as result, true for success (==0), false for failure (!=0)
+func ioctlCheckZero(fd, cmd, ptr uintptr) (bool, error) {
+	ret, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, cmd, ptr)
+	if errno != 0 {
+		return false, fmt.Errorf("ioctl(0x%x): %v", cmd, errno)
+	}
+	return ret == 0, nil
+}
