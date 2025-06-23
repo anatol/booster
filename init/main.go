@@ -435,7 +435,29 @@ func waitForBtrfsDevicesReady(dev string) error {
 
 	var BTRFS_IOCTL_MAGIC uintptr = 0x94
 	BTRFS_IOC_DEVICES_READY := ior(BTRFS_IOCTL_MAGIC, 39, unsafe.Sizeof(btrfsIoctlVolArgs))
-	return ioctl(controlFile.Fd(), BTRFS_IOC_DEVICES_READY, uintptr(unsafe.Pointer(&btrfsIoctlVolArgs)))
+	waited := 0
+	for {
+		ready, err := ioctlCheckZero(controlFile.Fd(), BTRFS_IOC_DEVICES_READY, uintptr(unsafe.Pointer(&btrfsIoctlVolArgs)))
+		if err != nil {
+			return err
+		}
+		if ready {
+			if waited > 0 {
+				warning("Finished waiting for multi-device btrfs at %v to become fullly assembled", dev)
+			}
+			return nil
+		}
+		remainder := waited % 10
+		if remainder == 0 {
+			seconds := waited / 10
+			if seconds >= 600 {
+				return fmt.Errorf("Given up waiting for multi-device btrfs at %v to become fully assembled after 10 minutes", dev)
+			}
+			warning("Waiting for multi-device btrfs at %v to become fullly assembled, waited %v seconds", dev, seconds)
+		}
+		waited++
+		time.Sleep(time.Millisecond * 100)
+	}
 }
 
 func mountFlags() (uintptr, string) {
