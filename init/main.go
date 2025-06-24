@@ -452,18 +452,18 @@ func waitForBtrfsDevicesReady(dev string) error {
 		if err != nil {
 			return err
 		}
-		timeElasped := timeNow.Sub(timeStart)
+		timeElapsed := timeNow.Sub(timeStart)
 		if ready {
-			if timeElasped > time.Second {
+			if timeElapsed > time.Second {
 				info("Multi-device btrfs at %v became fully assembled", dev)
 			} else {
 				debug("Btrfs at %v is ready without wait, this should only happen for single-device btrfs or the last one in multi-device btrfs", dev)
 			}
 			return nil
-		} else if timeElasped < time.Second {
+		} else if timeElapsed < time.Second {
 			info("Start waiting for multi-device btrfs at %v to become fullly assembled, timeout 10 minutes", dev)
 		}
-		info("Waiting for multi-device btrfs at %v to become fullly assembled, waited %v", dev, timeElasped)
+		info("Waiting for multi-device btrfs at %v to become fullly assembled, waited %v", dev, timeElapsed)
 		time.Sleep(time.Second)
 		timeNow = time.Now()
 	}
