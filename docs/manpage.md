@@ -124,7 +124,9 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
  * `booster.log` configures booster init logging. It accepts a comma separated list of following values:
 
-   One of the level values (from more verbose to less verbose) - `debug`, `info`, `warning`, `error`. If the level is not specified then `info` used by default.
+   One of the level values (from more verbose to less verbose) - `debug`, `info`, `warning`, `error` or `null`.
+   The last level of `null` disables any logging, so *⚠️use it only if know what you are doing⚠️*.
+   If the level is not specified then `info` used by default.
 
    `console` - print booster init logs to console.
 
@@ -194,7 +196,7 @@ This allows for booting directly through the firmware (UEFI) as well as authenti
 
 To generate UKIs in Booster, please install the systemd UKI generator (systemd-ukify) from your distribution's package manager and use `/usr/lib/booster/regenerate_uki`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager, then passes the result to systemd's UKI generator (ukify) as input.
-The script only passes a subset of boot components, namely the system's microcode(s), initrd, os-release file, boot splash image and kernel. Kernel command-line entries of the UKI are inherited from `/etc/booster.yaml`. 
+The script only passes a subset of boot components, namely the system's microcode(s), initrd, os-release file, boot splash image and kernel. Kernel command-line entries of the UKI are inherited from `/etc/booster.yaml`.
 
 Please note that to boot the UKI by default, it may be necessary to configure your system's boot loader configuration file(s) accordingly.
 

@@ -10,7 +10,8 @@ import (
 
 const (
 	// TOTHINK rename to debug/info/warning
-	levelError = iota
+	noLogging = iota
+	levelError
 	levelWarning
 	levelInfo
 	levelDebug

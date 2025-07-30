@@ -176,6 +176,8 @@ func parseParams(params string) error {
 					verbosityLevel = levelError
 				case "console":
 					printToConsole = true
+				case "null":
+					verbosityLevel = noLogging
 				default:
 					warning("unknown booster.log key: %s", p)
 				}
