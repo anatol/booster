@@ -375,6 +375,20 @@ func fsck(dev string) error {
 	return nil
 }
 
+func mountRootFsChecked(dev, fstype string) error {
+	rootMountFlags, options := mountFlags()
+	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
+	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
+		// Note that this mounting function might be called multiple times
+		// e.g. in case of multiple devices needed to assemble the root array, see https://github.com/anatol/booster/issues/194
+		// It will try to mount it until mount() is successful.
+		return err
+	}
+
+	rootMounted.Done()
+	return nil
+}
+
 func mountRootFs(dev, fstype string) error {
 	// some fs have module names that differs from the fs name itself
 	fstypeModules := map[string]string{
@@ -404,17 +418,7 @@ func mountRootFs(dev, fstype string) error {
 		return err
 	}
 
-	rootMountFlags, options := mountFlags()
-	info("mounting %s->%s, fs=%s, flags=0x%x, options=%s", dev, newRoot, fstype, rootMountFlags, options)
-	if err := mount(dev, newRoot, fstype, rootMountFlags, options); err != nil {
-		// Note that this mounting function might be called multiple times
-		// e.g. in case of multiple devices needed to assemble the root array, see https://github.com/anatol/booster/issues/194
-		// It will try to mount it until mount() is successful.
-		return err
-	}
-
-	rootMounted.Done()
-	return nil
+	return mountRootFsChecked(dev, fstype)
 }
 
 // Wait until all devices of a multiple-device filesystem are scanned and registered within the kernel module
@@ -881,6 +885,7 @@ func boost() error {
 
 	go func() { check(scanSysModaliases()) }()
 	go func() { check(scanSysBlock()) }()
+	go func() { check(mountRemoteRoot()) }()
 
 	if config.EnableZfs {
 		if err := mountZfsRoot(); err != nil {
@@ -994,6 +999,36 @@ func loadZfsKey(encryptionRoot string) error {
 		}
 		return nil
 	}
+}
+
+// While this looks generic but currently only virtiofs is supported
+func mountRemoteRoot() error {
+	if cmdRoot.format != refRemote {
+		// return early if root is non-remote
+		return nil
+	}
+
+	if rootFsType != "virtiofs" {
+		return fmt.Errorf("unsupported remote fs type %s, we should not be here", rootFsType)
+	}
+
+	// Arch Linux official kernels selects virtiofs as built-in, ALARM has it as module, load regardless just in case
+	virtiofsWg := loadModules("virtiofs")
+	virtiofsWg.Wait()
+
+	rootMountingMutex.Lock()
+	defer rootMountingMutex.Unlock()
+
+	// hack: some "remote" fs becomes available so fast that udevQuitLoop wouldn't even be initialized here (mainly virtiofs)
+	// wait for udevQuitLoop to become ready so we don't break cleanup() in which udevQuitLoop needs to be closed
+	for {
+		if udevQuitLoop != nil {
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+
+	return mountRootFsChecked(cmdRoot.data.(string), rootFsType)
 }
 
 var config InitConfig
