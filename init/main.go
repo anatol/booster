@@ -698,6 +698,11 @@ func switchRoot() error {
 	}
 
 	initArgs := []string{initBinary}
+        // Kernel can pass their arguments to the init program that we should then forward to actual system init
+        if(len(os.Args) > 1) {
+                initArgs = append(initArgs, os.Args[1:]...)
+        }
+
 	isSystemdInit, err := isSystemd(initBinary)
 	if err != nil {
 		return err
