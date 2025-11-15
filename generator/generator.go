@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/cavaliergopher/cpio"
@@ -412,6 +414,15 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 }
 
 func (img *Image) appendAliasesFile(aliases []alias) error {
+	sortFn := func(a, b alias) int {
+		val := strings.Compare(a.pattern, b.pattern)
+		if val != 0 {
+			return val
+		}
+		return strings.Compare(a.module, b.module)
+	}
+	slices.SortStableFunc(aliases, sortFn)
+
 	var buff bytes.Buffer
 	for _, a := range aliases {
 		buff.WriteString(a.pattern)

@@ -328,9 +328,9 @@ func TestUniversalMode(t *testing.T) {
 	aliasesFile, err := os.ReadFile(opts.workDir + "/image.unpacked/usr/lib/modules/booster.alias")
 	require.NoError(t, err)
 
-	expectedAliases := `pci:v*d*sv*sd*bc0Csc03i30* cbc
+	expectedAliases := `cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
 cpu:type:x86,ven*fam*mod*:feature:*0099* virtio_scsi
-cpu:type:x86,ven*fam*mod*:feature:*0081* cbc
+pci:v*d*sv*sd*bc0Csc03i30* cbc
 `
 	require.Equal(t, expectedAliases, string(aliasesFile))
 
