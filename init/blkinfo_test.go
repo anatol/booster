@@ -28,7 +28,7 @@ func checkFs(t *testing.T, name, fstype, uuidStr, label string, size int64, scri
 
 		if err := shell(script); err != nil {
 			_ = os.Remove(asset)
-			require.NoError(t, err)
+			require.NoError(t, err, "shell: '%s'", script)
 		}
 	}
 

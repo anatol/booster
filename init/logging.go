@@ -82,11 +82,10 @@ func disableKmsgThrottling() error {
 // console prints message to console
 // but if we are compiling the binary with "tets" tag (e.g. for integration tests) then it prints message to kmsg to avoid
 // messing log output in qemu console
-func console(format string, v ...interface{}) {
+func console(msg string) {
 	if quirk.TestEnabled {
-		msg := fmt.Sprintf(format, v...)
 		_, _ = fmt.Fprint(devKmsg, "<", 2, ">booster: ", msg, "\n")
 	} else {
-		fmt.Printf(format, v...)
+		fmt.Print(msg)
 	}
 }
