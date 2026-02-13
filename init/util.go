@@ -149,7 +149,7 @@ func parseProperties(data string) map[string]string {
 func fromUnicode16(data []byte, by binary.ByteOrder) string {
 	n := len(data) / 2
 	runes := make([]uint16, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		r := by.Uint16(data[2*i:])
 		if r == 0 {
 			return string(utf16.Decode(runes[:i]))

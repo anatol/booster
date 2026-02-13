@@ -17,7 +17,7 @@ import (
 func runDhcp(ifname string) error {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		var err error
 		conversation, err = dhcp.Exchange(ifname)
 		if err == nil {

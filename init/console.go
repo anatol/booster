@@ -66,7 +66,7 @@ func loadKmap(fd uintptr, file string) error {
 			kbIndex uint8
 			kbValue uint16
 		}
-		for j := 0; j < NR_KEYS; j++ {
+		for j := range NR_KEYS {
 			var ke kbEntry
 
 			ke.kbTable = uint8(i)

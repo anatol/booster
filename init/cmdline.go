@@ -164,7 +164,7 @@ func parseParams(params string) error {
 			// probably trailing whitespace, just ignore it
 			warning("attempting to parse a parameter returned a blank key, cmdline may be malformed somewhere around %d", i)
 		case "booster.log":
-			for _, p := range strings.Split(value, ",") {
+			for p := range strings.SplitSeq(value, ",") {
 				switch p {
 				case "debug":
 					verbosityLevel = levelDebug
@@ -218,7 +218,7 @@ func parseParams(params string) error {
 		case "rw":
 			rootRw = true
 		case "rd.luks.options":
-			for _, o := range strings.Split(value, ",") {
+			for o := range strings.SplitSeq(value, ",") {
 				flag, ok := rdLuksOptions[o]
 				if !ok {
 					return fmt.Errorf("unknown value in rd.luks.options: %v", o)

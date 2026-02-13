@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,7 +28,7 @@ const (
 // This struct abstracts this information and provides a convenient matching functions.
 type deviceRef struct {
 	format refFormat
-	data   interface{}
+	data   any
 }
 
 type gptPartoffData struct {
@@ -47,13 +48,7 @@ func (blk *blkInfo) matchesRef(d *deviceRef) bool {
 		if path == blk.path {
 			return true
 		}
-		for _, sym := range blk.symlinks {
-			if path == sym {
-				return true
-			}
-		}
-
-		return false
+		return slices.Contains(blk.symlinks, path)
 	case refFsUUID:
 		return bytes.Equal(d.data.(UUID), blk.uuid)
 	case refFsLabel:
@@ -61,12 +56,7 @@ func (blk *blkInfo) matchesRef(d *deviceRef) bool {
 	case refHwPath:
 		return blk.hwPath != "" && d.data.(string) == blk.hwPath
 	case refWwID:
-		for _, id := range blk.wwid {
-			if d.data.(string) == id {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(blk.wwid, d.data.(string))
 	default:
 		return false
 	}
@@ -187,8 +177,8 @@ var rootAutodiscoveryGptTypes = map[string]string{
 }
 
 func parseDeviceRef(param string) (*deviceRef, error) {
-	if strings.HasPrefix(param, "UUID=") {
-		uuid := strings.TrimPrefix(param, "UUID=")
+	if after, ok := strings.CutPrefix(param, "UUID="); ok {
+		uuid := after
 
 		u, err := parseUUID(uuid)
 		if err != nil {
@@ -196,24 +186,24 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 		}
 		return &deviceRef{refFsUUID, u}, nil
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-uuid/") {
-		uuid := strings.TrimPrefix(param, "/dev/disk/by-uuid/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-uuid/"); ok {
+		uuid := after
 		u, err := parseUUID(uuid)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
 		return &deviceRef{refFsUUID, u}, nil
 	}
-	if strings.HasPrefix(param, "LABEL=") {
-		label := strings.TrimPrefix(param, "LABEL=")
+	if after, ok := strings.CutPrefix(param, "LABEL="); ok {
+		label := after
 		return &deviceRef{refFsLabel, label}, nil
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-label/") {
-		label := strings.TrimPrefix(param, "/dev/disk/by-label/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-label/"); ok {
+		label := after
 		return &deviceRef{refFsLabel, label}, nil
 	}
-	if strings.HasPrefix(param, "PARTUUID=") {
-		uuid := strings.TrimPrefix(param, "PARTUUID=")
+	if after, ok := strings.CutPrefix(param, "PARTUUID="); ok {
+		uuid := after
 
 		if idx := strings.Index(uuid, "/PARTNROFF="); idx != -1 {
 			param := uuid[idx+11:]
@@ -235,36 +225,36 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 			return &deviceRef{refGptUUID, u}, nil
 		}
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-partuuid/") {
-		uuid := strings.TrimPrefix(param, "/dev/disk/by-partuuid/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-partuuid/"); ok {
+		uuid := after
 		u, err := parseUUID(uuid)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse UUID parameter %s: %v", param, err)
 		}
 		return &deviceRef{refGptUUID, u}, nil
 	}
-	if strings.HasPrefix(param, "PARTLABEL=") {
-		label := strings.TrimPrefix(param, "PARTLABEL=")
+	if after, ok := strings.CutPrefix(param, "PARTLABEL="); ok {
+		label := after
 		return &deviceRef{refGptLabel, label}, nil
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-partlabel/") {
-		label := strings.TrimPrefix(param, "/dev/disk/by-partlabel/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-partlabel/"); ok {
+		label := after
 		return &deviceRef{refGptLabel, label}, nil
 	}
-	if strings.HasPrefix(param, "HWPATH=") {
-		path := strings.TrimPrefix(param, "HWPATH=")
+	if after, ok := strings.CutPrefix(param, "HWPATH="); ok {
+		path := after
 		return &deviceRef{refHwPath, path}, nil
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-path/") {
-		path := strings.TrimPrefix(param, "/dev/disk/by-path/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-path/"); ok {
+		path := after
 		return &deviceRef{refHwPath, path}, nil
 	}
-	if strings.HasPrefix(param, "WWID=") {
-		id := strings.TrimPrefix(param, "WWID=")
+	if after, ok := strings.CutPrefix(param, "WWID="); ok {
+		id := after
 		return &deviceRef{refWwID, id}, nil
 	}
-	if strings.HasPrefix(param, "/dev/disk/by-id/") {
-		id := strings.TrimPrefix(param, "/dev/disk/by-id/")
+	if after, ok := strings.CutPrefix(param, "/dev/disk/by-id/"); ok {
+		id := after
 		return &deviceRef{refWwID, id}, nil
 	}
 	if strings.HasPrefix(param, "/dev/") {

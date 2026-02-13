@@ -95,7 +95,6 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 	}
 
 	for _, module := range modules {
-		module := module
 
 		if _, ok := loadedModules[module]; ok {
 			continue // the module is already loaded

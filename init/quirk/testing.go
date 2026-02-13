@@ -1,5 +1,4 @@
 //go:build test
-// +build test
 
 // Package quirk reports if the Go race detector is enabled.
 package quirk

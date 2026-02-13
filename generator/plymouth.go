@@ -257,10 +257,10 @@ func parseThemeImageDir(plymouthFile string) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "ImageDir=") {
-			return strings.TrimPrefix(line, "ImageDir=")
+		if after, ok := strings.CutPrefix(line, "ImageDir="); ok {
+			return after
 		}
 	}
 	return ""
@@ -290,13 +290,13 @@ func parseThemeFonts(plymouthFile string) []string {
 	}
 	seen := make(set)
 	var families []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		var val string
-		if strings.HasPrefix(line, "Font=") {
-			val = strings.TrimPrefix(line, "Font=")
-		} else if strings.HasPrefix(line, "TitleFont=") {
-			val = strings.TrimPrefix(line, "TitleFont=")
+		if after, ok := strings.CutPrefix(line, "Font="); ok {
+			val = after
+		} else if after, ok := strings.CutPrefix(line, "TitleFont="); ok {
+			val = after
 		} else {
 			continue
 		}

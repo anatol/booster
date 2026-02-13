@@ -24,7 +24,7 @@ func detectYubikeys() ([]usbdev, error) {
 
 	yubikeys := make([]usbdev, 0)
 
-	for _, l := range strings.Split(string(out), "\n") {
+	for l := range strings.SplitSeq(string(out), "\n") {
 		if !strings.Contains(l, "Yubikey") {
 			continue
 		}

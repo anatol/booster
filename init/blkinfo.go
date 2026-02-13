@@ -16,9 +16,9 @@ type blkInfo struct {
 	isFs     bool     // specifies if the format a mountable filesystem
 	uuid     UUID
 	label    string
-	hwPath   string      // TODO: compute it lazy
-	wwid     []string    // TODO: compute it lazy
-	data     interface{} // type specific data
+	hwPath   string   // TODO: compute it lazy
+	wwid     []string // TODO: compute it lazy
+	data     any      // type specific data
 }
 
 var errUnknownBlockType = fmt.Errorf("cannot detect block device type")
@@ -113,7 +113,7 @@ func probeGpt(f *os.File) *blkInfo {
 	var parts []gptPart
 	buf := make([]byte, partSize)
 	zeroUUID := make([]byte, 16) // zero UUID used as a marker for unused partitions
-	for i := uint32(0); i < partNum; i++ {
+	for i := range partNum {
 		start := lbaOffset + uint64(i*partSize)
 		if _, err := f.ReadAt(buf, int64(start)); err != nil {
 			return nil

@@ -846,7 +846,7 @@ func readModuleFirmwareRequirements(ef *elf.File) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, s := range strings.Split(string(data), "\x00") {
+		for s := range strings.SplitSeq(string(data), "\x00") {
 			const prefix = "firmware="
 			if strings.HasPrefix(s, prefix) {
 				fw := s[len(prefix):]
@@ -897,13 +897,13 @@ func parseModprobe(content string, options map[string][]string) error {
 
 		line = line[len(prefix):]
 
-		sep := strings.IndexByte(line, ' ')
-		if sep == -1 {
+		before, after, ok := strings.Cut(line, " ")
+		if !ok {
 			return fmt.Errorf("invalid line: '%s'. It needs to be 'options modname params'", line)
 		}
 
-		modname := normalizeModuleName(line[:sep]) // currently it does not handle aliases, do we need it?
-		params := line[sep+1:]
+		modname := normalizeModuleName(before) // currently it does not handle aliases, do we need it?
+		params := after
 
 		options[modname] = append(options[modname], params)
 	}

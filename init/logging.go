@@ -24,7 +24,7 @@ var (
 	devKmsg *os.File
 )
 
-func printMessage(format string, requestedLevel, kernelLevel int, v ...interface{}) {
+func printMessage(format string, requestedLevel, kernelLevel int, v ...any) {
 	if verbosityLevel < requestedLevel {
 		return
 	}
@@ -47,20 +47,20 @@ func printMessage(format string, requestedLevel, kernelLevel int, v ...interface
 	}
 }
 
-func debug(format string, v ...interface{}) {
+func debug(format string, v ...any) {
 	printMessage(format, levelDebug, 7, v...)
 }
 
-func info(format string, v ...interface{}) {
+func info(format string, v ...any) {
 	printMessage(format, levelInfo, 6, v...)
 }
 
-func warning(format string, v ...interface{}) {
+func warning(format string, v ...any) {
 	printMessage(format, levelWarning, 4, v...)
 }
 
 // this is for critical error messages, call this function 'severe' to avoid name clashing with error class
-func severe(format string, v ...interface{}) {
+func severe(format string, v ...any) {
 	printMessage(format, levelError, 2, v...)
 }
 

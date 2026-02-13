@@ -52,13 +52,13 @@ var opts struct {
 
 type set map[string]bool
 
-func debug(format string, v ...interface{}) {
+func debug(format string, v ...any) {
 	if opts.Verbose {
 		fmt.Printf(format+"\n", v...)
 	}
 }
 
-func warning(format string, v ...interface{}) {
+func warning(format string, v ...any) {
 	fmt.Printf(format+"\n", v...)
 }
 

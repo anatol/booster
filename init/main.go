@@ -487,7 +487,7 @@ func mountFlags() (uintptr, string) {
 // for example 'noatime,user_xattr,nodev,nobarrier' becomes MS_NOATIME|MS_NODEV and 'user_xattr,nobarrier'
 func sunderMountFlags(options string, flags uintptr) (uintptr, string) {
 	var outOptions []string
-	for _, o := range strings.Split(options, ",") {
+	for o := range strings.SplitSeq(options, ",") {
 		switch o {
 		case "dirsync":
 			flags |= unix.MS_DIRSYNC
@@ -970,7 +970,7 @@ func mountZfsRoot() error {
 
 	flags, options := mountFlags()
 	options = strings.Join([]string{"zfsutil", options}, ",")
-	for _, ds := range strings.Split(strings.TrimSpace(string(datasets)), "\n") {
+	for ds := range strings.SplitSeq(strings.TrimSpace(string(datasets)), "\n") {
 		encryptionRoot, err := getZfsPropertyValue("encryptionroot", ds)
 		if err != nil {
 			return unwrapExitError(err)

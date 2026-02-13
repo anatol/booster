@@ -1,6 +1,6 @@
 module github.com/anatol/booster
 
-go 1.24.4
+go 1.26
 
 require (
 	github.com/anatol/clevis.go v0.0.0-20251105050026-c2c7ddab8f14
