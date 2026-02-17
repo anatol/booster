@@ -172,64 +172,21 @@ func TestPlymouthPkgConfig(t *testing.T) {
 	}
 }
 
-func TestFindFontFiles(t *testing.T) {
-	// Create a temp font directory structure
-	dir := t.TempDir()
+func TestFcMatch(t *testing.T) {
+	// fc-match may or may not be available; verify it doesn't panic
+	result := fcMatch("nonexistent_font_family_xyz")
+	t.Logf("fcMatch(nonexistent_font_family_xyz) = %q", result)
 
-	fonts := map[string]string{
-		"TTF/DejaVuSans.ttf":         "",
-		"TTF/DejaVuSans-Bold.ttf":    "",
-		"TTF/DejaVuSerif.ttf":        "",
-		"TTF/Inter-Regular.otf":      "",
-		"TTF/Inter-Bold.otf":         "",
-		"TTF/NotoSans-Regular.ttc":   "",
-		"TTF/Cantarell-Regular.otf":  "",
-		"TTF/Cantarell-Bold.otf":     "",
-		"truetype/ubuntu/Ubuntu.ttf": "",
-		"misc/README.txt":            "",
+	// Test with a common font pattern — should resolve on most systems
+	sans := fcMatch("Sans")
+	t.Logf("fcMatch(Sans) = %q", sans)
+	if sans != "" {
+		require.True(t, filepath.IsAbs(sans), "fc-match result should be an absolute path")
 	}
 
-	for path, content := range fonts {
-		full := filepath.Join(dir, path)
-		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
-		require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
+	mono := fcMatch("monospace")
+	t.Logf("fcMatch(monospace) = %q", mono)
+	if mono != "" {
+		require.True(t, filepath.IsAbs(mono), "fc-match result should be an absolute path")
 	}
-
-	dirs := []string{dir}
-
-	t.Run("exact match", func(t *testing.T) {
-		results := findFontFiles(dirs, "Inter")
-		require.Len(t, results, 2)
-	})
-
-	t.Run("match with hyphen normalization", func(t *testing.T) {
-		// "DejaVu Sans" normalized = "dejavusans", matches "DejaVuSans*.ttf"
-		results := findFontFiles(dirs, "DejaVu Sans")
-		require.Len(t, results, 2) // DejaVuSans.ttf + DejaVuSans-Bold.ttf
-	})
-
-	t.Run("no match", func(t *testing.T) {
-		results := findFontFiles(dirs, "Roboto")
-		require.Len(t, results, 0)
-	})
-
-	t.Run("match across subdirs", func(t *testing.T) {
-		results := findFontFiles(dirs, "Ubuntu")
-		require.Len(t, results, 1)
-	})
-
-	t.Run("does not match non-font files", func(t *testing.T) {
-		results := findFontFiles(dirs, "README")
-		require.Len(t, results, 0)
-	})
-
-	t.Run("cantarell with space normalization", func(t *testing.T) {
-		results := findFontFiles(dirs, "Cantarell")
-		require.Len(t, results, 2)
-	})
-
-	t.Run("empty dir list", func(t *testing.T) {
-		results := findFontFiles(nil, "Inter")
-		require.Len(t, results, 0)
-	})
 }

@@ -182,12 +182,18 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	if conf.enablePlymouth {
-		// DRM modules needed for plymouth graphical splash
+		// DRM modules needed for plymouth graphical splash.
+		// These may be built-in (e.g. CONFIG_DRM=y on CachyOS) so we
+		// only force-load the ones that exist as loadable modules.
 		drmModules := []string{"simpledrm", "drm", "drm_kms_helper"}
 		if err := kmod.activateModules(true, false, drmModules...); err != nil {
 			return err
 		}
-		conf.modulesForceLoad = append(conf.modulesForceLoad, drmModules...)
+		for _, m := range drmModules {
+			if kmod.requiredModules[m] {
+				conf.modulesForceLoad = append(conf.modulesForceLoad, m)
+			}
+		}
 
 		// Detect the actual GPU driver from sysfs so plymouth has a fully
 		// capable DRM device, not just simpledrm.
@@ -197,7 +203,17 @@ func generateInitRamfs(conf *generatorConfig) error {
 			if err := kmod.activateModules(false, false, gpuModules...); err != nil {
 				return err
 			}
-			conf.modulesForceLoad = append(conf.modulesForceLoad, gpuModules...)
+			// Only force-load modules that were actually found in the
+			// kernel's module tree. activateModules silently skips
+			// missing modules, so we check requiredModules to avoid
+			// adding nonexistent modules to the force-load list.
+			for _, m := range gpuModules {
+				if kmod.requiredModules[m] {
+					conf.modulesForceLoad = append(conf.modulesForceLoad, m)
+				} else {
+					debug("GPU module %s not found in kernel modules, not force-loading", m)
+				}
+			}
 		}
 	}
 
@@ -464,41 +480,46 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 		}
 	}
 
-	// Detect fonts required by the theme and add them
-	requiredFonts := parseThemeFonts(themePlymouthFile)
-	if len(requiredFonts) > 0 {
-		debug("plymouth theme requires fonts: %v", requiredFonts)
+	// Resolve and install fonts to Plymouth's hardcoded lookup paths.
+	// Plymouth's label-freetype plugin looks for fonts at fixed paths:
+	//   /usr/share/fonts/Plymouth.ttf              (regular)
+	//   /usr/share/fonts/Plymouth-bold.ttf         (bold)
+	//   /usr/share/fonts/Plymouth-monospace.ttf    (monospace)
+	//   /usr/share/fonts/Plymouth-monospace-bold.ttf (monospace bold)
+	// Following mkinitcpio's approach, we use fc-match to resolve the
+	// theme's font on the host and copy it to these fixed paths.
+	fontFamily := "Sans" // Plymouth's own default
+	themeFonts := parseThemeFonts(themePlymouthFile)
+	if len(themeFonts) > 0 {
+		fontFamily = themeFonts[0]
+		debug("plymouth theme font family: %s", fontFamily)
 	}
-	fontSearchDirs := []string{"/usr/share/fonts"}
-	for _, family := range requiredFonts {
-		found := findFontFiles(fontSearchDirs, family)
-		if len(found) == 0 {
-			warning("plymouth: font family %q required by theme but not found on host", family)
+
+	plymouthFonts := []struct {
+		pattern string
+		dest    string
+	}{
+		{fontFamily, "/usr/share/fonts/Plymouth.ttf"},
+		{fontFamily + ":style=Bold", "/usr/share/fonts/Plymouth-bold.ttf"},
+		{"monospace", "/usr/share/fonts/Plymouth-monospace.ttf"},
+		{"monospace:style=Bold", "/usr/share/fonts/Plymouth-monospace-bold.ttf"},
+	}
+
+	for _, pf := range plymouthFonts {
+		fontPath := fcMatch(pf.pattern)
+		if fontPath == "" {
+			debug("plymouth: fc-match could not resolve %q, skipping %s", pf.pattern, pf.dest)
 			continue
 		}
-		for _, f := range found {
-			if err := img.AppendFile(f); err != nil {
-				debug("failed to add font %s: %v", f, err)
-			}
+		content, err := os.ReadFile(fontPath)
+		if err != nil {
+			debug("plymouth: failed to read font %s: %v", fontPath, err)
+			continue
 		}
-	}
-
-	// Always include DejaVu Sans as a fallback font
-	fallbackFonts := []string{"/usr/share/fonts/TTF/DejaVuSans.ttf"}
-	for _, f := range fallbackFonts {
-		if _, err := os.Stat(f); err == nil {
-			if err := img.AppendFile(f); err != nil {
-				debug("failed to add fallback font %s: %v", f, err)
-			}
-		}
-	}
-
-	// Add fontconfig
-	for _, f := range []string{"/etc/fonts/fonts.conf"} {
-		if err := img.AppendFile(f); err != nil {
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("fontconfig %s: %v", f, err)
-			}
+		if err := img.AppendContent(pf.dest, 0o644, content); err != nil {
+			debug("plymouth: failed to add font %s: %v", pf.dest, err)
+		} else {
+			debug("plymouth: %s -> %s (from %q)", fontPath, pf.dest, pf.pattern)
 		}
 	}
 
@@ -566,6 +587,20 @@ func parseThemeImageDir(plymouthFile string) string {
 	return ""
 }
 
+// fcMatch resolves a fontconfig pattern to a font file path using fc-match.
+// Returns empty string if fc-match is unavailable or the pattern cannot be resolved.
+func fcMatch(pattern string) string {
+	out, err := exec.Command("fc-match", "-f", "%{file}", pattern).Output()
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" || !filepath.IsAbs(path) {
+		return ""
+	}
+	return path
+}
+
 // parseThemeFonts reads a .plymouth theme file and extracts font family names
 // from Font= and TitleFont= directives (Pango font descriptions).
 func parseThemeFonts(plymouthFile string) []string {
@@ -631,36 +666,11 @@ func extractFontFamily(pangoDesc string) string {
 	return strings.Join(parts, " ")
 }
 
-// findFontFiles searches dirs recursively for font files whose name
-// matches the given font family (case-insensitive, ignoring hyphens/spaces).
-func findFontFiles(dirs []string, family string) []string {
-	replacer := strings.NewReplacer(" ", "", "-", "")
-	// Normalize family for matching: lowercase, strip spaces/hyphens
-	normalizedFamily := strings.ToLower(replacer.Replace(family))
-
-	var results []string
-	for _, dir := range dirs {
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(info.Name()))
-			if ext != ".ttf" && ext != ".otf" && ext != ".ttc" {
-				return nil
-			}
-			base := strings.TrimSuffix(info.Name(), filepath.Ext(info.Name()))
-			normalizedBase := strings.ToLower(replacer.Replace(base))
-			if strings.HasPrefix(normalizedBase, normalizedFamily) {
-				results = append(results, path)
-			}
-			return nil
-		})
-	}
-	return results
-}
-
-// detectHostGPUModules reads /sys/class/drm/card*/device/driver to find
-// the kernel module(s) driving the host's GPU(s).
+// detectHostGPUModules reads /sys/class/drm/card*/device/driver/module
+// to find the kernel module(s) driving the host's GPU(s).
+// The "module" symlink only exists for loadable modules, so built-in
+// drivers (e.g. simpledrm compiled with CONFIG_DRM_SIMPLEDRM=y) are
+// automatically skipped since they don't need to be in the initramfs.
 func detectHostGPUModules() []string {
 	cards, _ := filepath.Glob("/sys/class/drm/card[0-9]*")
 	seen := make(set)
@@ -670,12 +680,17 @@ func detectHostGPUModules() []string {
 		if strings.Contains(filepath.Base(card), "-") {
 			continue
 		}
-		link, err := os.Readlink(filepath.Join(card, "device", "driver"))
+		// Read the module symlink which points to /sys/module/<name>.
+		// This gives us the actual kernel module name, avoiding the
+		// driver-name vs module-name mismatch (e.g. the simpledrm
+		// module registers as platform driver "simple-framebuffer").
+		modLink, err := os.Readlink(filepath.Join(card, "device", "driver", "module"))
 		if err != nil {
+			// No module link means the driver is built-in; skip it.
+			debug("drm %s: no module link (driver is built-in), skipping", filepath.Base(card))
 			continue
 		}
-		modName := filepath.Base(link)
-		modName = strings.ReplaceAll(modName, "-", "_")
+		modName := filepath.Base(modLink)
 		if seen[modName] {
 			continue
 		}
