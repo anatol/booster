@@ -342,21 +342,37 @@ func (img *Image) appendExtraFiles(binaries ...string) error {
 func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	debug("adding plymouth support to the image")
 
+	// Detect Plymouth paths via pkg-config, falling back to common defaults
+	pluginDir := plymouthPkgConfig("pluginsdir")
+	if pluginDir == "" {
+		pluginDir = "/usr/lib/plymouth"
+	}
+	themesDir := plymouthPkgConfig("themesdir")
+	if themesDir == "" {
+		themesDir = "/usr/share/plymouth/themes"
+	}
+	confDir := plymouthPkgConfig("confdir")
+	if confDir == "" {
+		confDir = "/etc/plymouth"
+	}
+	policyDir := plymouthPkgConfig("policydir")
+	if policyDir == "" {
+		policyDir = "/usr/share/plymouth"
+	}
+	debug("plymouth paths: plugins=%s themes=%s conf=%s policy=%s", pluginDir, themesDir, confDir, policyDir)
+
 	// Add plymouth binaries (appendExtraFiles auto-resolves ELF deps)
 	if err := img.appendExtraFiles("plymouth", "plymouthd"); err != nil {
 		return fmt.Errorf("plymouth binaries: %v", err)
 	}
 
 	// Add plymouthd-fd-escrow helper
-	fdEscrow := "/usr/lib/plymouth/plymouthd-fd-escrow"
+	fdEscrow := filepath.Join(pluginDir, "plymouthd-fd-escrow")
 	if _, err := os.Stat(fdEscrow); err == nil {
 		if err := img.AppendFile(fdEscrow); err != nil {
 			return fmt.Errorf("plymouth fd-escrow: %v", err)
 		}
 	}
-
-	// Detect plugin path
-	pluginDir := "/usr/lib/plymouth"
 
 	// Add all .so plugins
 	entries, err := os.ReadDir(pluginDir)
@@ -379,8 +395,8 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 
 	// Add plymouth config files
 	for _, f := range []string{
-		"/etc/plymouth/plymouthd.conf",
-		"/usr/share/plymouth/plymouthd.defaults",
+		filepath.Join(confDir, "plymouthd.conf"),
+		filepath.Join(policyDir, "plymouthd.defaults"),
 	} {
 		if err := img.AppendFile(f); err != nil {
 			if os.IsNotExist(err) {
@@ -402,7 +418,6 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	defaultTheme := detectPlymouthTheme()
 	debug("plymouth default theme: %s", defaultTheme)
 
-	themesDir := "/usr/share/plymouth/themes"
 	// Add the default theme + fallback themes
 	for _, theme := range []string{defaultTheme, "details", "text"} {
 		themeDir := filepath.Join(themesDir, theme)
@@ -412,6 +427,23 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 			}
 		} else {
 			debug("plymouth theme %s not found, skipping", theme)
+		}
+	}
+
+	// Bundle ImageDir target if the default theme references images from another directory
+	themePlymouthFile := filepath.Join(themesDir, defaultTheme, defaultTheme+".plymouth")
+	if imageDir := parseThemeImageDir(themePlymouthFile); imageDir != "" {
+		themeOwnDir := filepath.Join(themesDir, defaultTheme)
+		// Clean both paths so trailing slashes or double slashes don't cause false mismatches
+		if filepath.Clean(imageDir) != filepath.Clean(themeOwnDir) {
+			debug("plymouth theme %s references images from %s", defaultTheme, imageDir)
+			if _, err := os.Stat(imageDir); err == nil {
+				if err := img.AppendFile(imageDir); err != nil {
+					return fmt.Errorf("plymouth theme image dir %s: %v", imageDir, err)
+				}
+			} else {
+				debug("plymouth ImageDir %s not found, skipping", imageDir)
+			}
 		}
 	}
 
@@ -433,7 +465,6 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	}
 
 	// Detect fonts required by the theme and add them
-	themePlymouthFile := filepath.Join(themesDir, defaultTheme, defaultTheme+".plymouth")
 	requiredFonts := parseThemeFonts(themePlymouthFile)
 	if len(requiredFonts) > 0 {
 		debug("plymouth theme requires fonts: %v", requiredFonts)
@@ -507,6 +538,32 @@ func detectPlymouthTheme() string {
 		return "details"
 	}
 	return theme
+}
+
+// plymouthPkgConfig queries pkg-config for a Plymouth variable.
+// Returns empty string if pkg-config is unavailable or the variable is not set.
+func plymouthPkgConfig(variable string) string {
+	out, err := exec.Command("pkg-config", "--variable="+variable, "ply-splash-core").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// parseThemeImageDir reads a .plymouth theme file and extracts the ImageDir= value.
+// Returns empty string if the file cannot be read or has no ImageDir directive.
+func parseThemeImageDir(plymouthFile string) string {
+	data, err := os.ReadFile(plymouthFile)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ImageDir=") {
+			return strings.TrimPrefix(line, "ImageDir=")
+		}
+	}
+	return ""
 }
 
 // parseThemeFonts reads a .plymouth theme file and extracts font family names

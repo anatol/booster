@@ -45,7 +45,14 @@ func initPlymouth() {
 	// Create udev database entries for DRM devices so that Plymouth's
 	// udev_device_get_is_initialized() check passes. Without these files,
 	// Plymouth skips all DRM devices and falls back to text-only mode.
-	createDrmUdevEntries()
+	// When booster.log includes "console", skip DRM entries so Plymouth
+	// falls back to text mode — graphical splash and console debug
+	// output cannot coexist on the same terminal.
+	if printToConsole {
+		info("plymouth: booster.log=console is set, forcing text mode to avoid display conflict")
+	} else {
+		createDrmUdevEntries()
+	}
 
 	// Build plymouthd arguments
 	args := getPlymouthdArgs()
