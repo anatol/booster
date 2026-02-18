@@ -75,7 +75,7 @@ Booster advantages:
 
  * `enable_zfs` is a flag that enables ZFS filesystem as root filesystem. This flag also makes sure all the required modules/binaries are added to the image. Note that if ZFS is enabled then `zfs=` boot option must be used instead of `root=` boot option.
 
- * `enable_plymouth` is a flag that enables Plymouth boot splash support. When enabled, booster bundles the Plymouth daemon, plugins, theme, fonts, and GPU driver into the initramfs. The `splash` kernel parameter is also required for Plymouth to display. Note that `booster.log=console` conflicts with Plymouth's graphical display; when console logging is active, Plymouth reverts to the details plugin (text-based fallback).
+ * `enable_plymouth` is a flag that enables Plymouth boot splash support. When enabled, booster bundles the Plymouth daemon, plugins, theme, and fonts into the initramfs. GPU driver must be included in `modules_force_load`. The `splash` kernel parameter is also required. Note that `booster.log=console` conflicts with Plymouth's graphical display; when console logging is active, Plymouth reverts to the details plugin (text-based fallback).
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.

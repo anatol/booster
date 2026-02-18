@@ -182,9 +182,13 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	if conf.enablePlymouth {
-		// DRM modules needed for plymouth graphical splash.
-		// These may be built-in (e.g. CONFIG_DRM=y on CachyOS) so we
-		// only force-load the ones that exist as loadable modules.
+		// Include base DRM modules for Plymouth's graphical splash.
+		// These may be built-in (e.g. CONFIG_DRM_SIMPLEDRM=y on CachyOS)
+		// so we only force-load the ones that exist as loadable modules.
+		//
+		// Booster does not run udevd, so Plymouth cannot detect new DRM
+		// devices after startup via its libudev monitor. The GPU driver
+		// must be force-loaded so it is available before Plymouth starts.
 		drmModules := []string{"simpledrm", "drm", "drm_kms_helper"}
 		if err := kmod.activateModules(true, false, drmModules...); err != nil {
 			return err
@@ -192,27 +196,6 @@ func generateInitRamfs(conf *generatorConfig) error {
 		for _, m := range drmModules {
 			if kmod.requiredModules[m] {
 				conf.modulesForceLoad = append(conf.modulesForceLoad, m)
-			}
-		}
-
-		// Detect the actual GPU driver from sysfs so plymouth has a fully
-		// capable DRM device, not just simpledrm.
-		gpuModules := detectHostGPUModules()
-		if len(gpuModules) > 0 {
-			debug("detected host GPU modules: %v", gpuModules)
-			if err := kmod.activateModules(false, false, gpuModules...); err != nil {
-				return err
-			}
-			// Only force-load modules that were actually found in the
-			// kernel's module tree. activateModules silently skips
-			// missing modules, so we check requiredModules to avoid
-			// adding nonexistent modules to the force-load list.
-			for _, m := range gpuModules {
-				if kmod.requiredModules[m] {
-					conf.modulesForceLoad = append(conf.modulesForceLoad, m)
-				} else {
-					debug("GPU module %s not found in kernel modules, not force-loading", m)
-				}
 			}
 		}
 	}
@@ -664,40 +647,6 @@ func extractFontFamily(pangoDesc string) string {
 		}
 	}
 	return strings.Join(parts, " ")
-}
-
-// detectHostGPUModules reads /sys/class/drm/card*/device/driver/module
-// to find the kernel module(s) driving the host's GPU(s).
-// The "module" symlink only exists for loadable modules, so built-in
-// drivers (e.g. simpledrm compiled with CONFIG_DRM_SIMPLEDRM=y) are
-// automatically skipped since they don't need to be in the initramfs.
-func detectHostGPUModules() []string {
-	cards, _ := filepath.Glob("/sys/class/drm/card[0-9]*")
-	seen := make(set)
-	var modules []string
-	for _, card := range cards {
-		// Skip DRM connector entries (card0-DP-1, card0-eDP-1, etc.)
-		if strings.Contains(filepath.Base(card), "-") {
-			continue
-		}
-		// Read the module symlink which points to /sys/module/<name>.
-		// This gives us the actual kernel module name, avoiding the
-		// driver-name vs module-name mismatch (e.g. the simpledrm
-		// module registers as platform driver "simple-framebuffer").
-		modLink, err := os.Readlink(filepath.Join(card, "device", "driver", "module"))
-		if err != nil {
-			// No module link means the driver is built-in; skip it.
-			debug("drm %s: no module link (driver is built-in), skipping", filepath.Base(card))
-			continue
-		}
-		modName := filepath.Base(modLink)
-		if seen[modName] {
-			continue
-		}
-		seen[modName] = true
-		modules = append(modules, modName)
-	}
-	return modules
 }
 
 func lookupPath(binary string) (string, error) {
