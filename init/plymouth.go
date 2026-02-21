@@ -236,12 +236,6 @@ func createDrmUdevEntries() {
 			continue
 		}
 
-		// Skip simpledrm devices — they have limited capabilities and
-		// Plymouth works better with a real GPU's DRM device.
-		if isSimpledrm("/dev/dri/" + cardName) {
-			continue
-		}
-
 		devBytes, err := os.ReadFile(filepath.Join(card, "dev"))
 		if err != nil {
 			debug("plymouth: failed to read dev for %s: %v", cardName, err)
@@ -249,6 +243,10 @@ func createDrmUdevEntries() {
 		}
 
 		devStr := strings.TrimSpace(string(devBytes))
+		if devStr == "" || !strings.Contains(devStr, ":") {
+			debug("plymouth: unexpected dev content for %s: %q", cardName, devStr)
+			continue
+		}
 		dbFile := "/run/udev/data/c" + devStr
 		if err := os.WriteFile(dbFile, []byte("I:1\nV:1\n"), 0o644); err != nil {
 			warning("plymouth: failed to write %s: %v", dbFile, err)

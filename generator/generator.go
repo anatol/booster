@@ -198,6 +198,31 @@ func generateInitRamfs(conf *generatorConfig) error {
 				conf.modulesForceLoad = append(conf.modulesForceLoad, m)
 			}
 		}
+
+		// In host mode, check whether a real GPU driver is present but not
+		// force-loaded. Booster does not run udevd, so Plymouth cannot
+		// transition from simpledrm to the real GPU after switch_root.
+		// If Plymouth starts on simpledrm and the real GPU driver later tears
+		// it down, plymouth-quit-wait.service (TimeoutSec=0) hangs forever.
+		// Disable Plymouth now rather than produce an unbootable system.
+		if !conf.universal {
+			if gpuModules := detectHostGPUModules(); len(gpuModules) > 0 {
+				forceLoad := make(map[string]bool, len(conf.modulesForceLoad))
+				for _, m := range conf.modulesForceLoad {
+					forceLoad[m] = true
+				}
+				var missing []string
+				for _, m := range gpuModules {
+					if !forceLoad[m] {
+						missing = append(missing, m)
+					}
+				}
+				if len(missing) > 0 {
+					warning("plymouth: GPU driver(s) %v detected but not in modules_force_load — disabling Plymouth to prevent boot hang. Add to modules_force_load in booster.yaml to enable Plymouth.", missing)
+					conf.enablePlymouth = false
+				}
+			}
+		}
 	}
 
 	if conf.enableZfs {
@@ -344,7 +369,25 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	// Detect Plymouth paths via pkg-config, falling back to common defaults
 	pluginDir := plymouthPkgConfig("pluginsdir")
 	if pluginDir == "" {
-		pluginDir = "/usr/lib/plymouth"
+		// pkg-config unavailable; try common distro locations in order:
+		// Arch/Alpine: /usr/lib/plymouth
+		// Fedora/RHEL: /usr/lib64/plymouth
+		// Debian/Ubuntu (multiarch): /usr/lib/<tuple>/plymouth
+		for _, candidate := range []string{
+			"/usr/lib/plymouth",
+			"/usr/lib64/plymouth",
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				pluginDir = candidate
+				break
+			}
+		}
+		if pluginDir == "" {
+			// Try multiarch paths (Debian/Ubuntu)
+			if entries, err := filepath.Glob("/usr/lib/*-linux-*/plymouth"); err == nil && len(entries) > 0 {
+				pluginDir = entries[0]
+			}
+		}
 	}
 	themesDir := plymouthPkgConfig("themesdir")
 	if themesDir == "" {
@@ -520,13 +563,19 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	// Add XKB data files needed by libxkbcommon for keyboard input handling.
 	// Without these, plymouthd cannot translate keycodes to characters and
 	// the password prompt won't accept keyboard input.
-	xkbDir := "/usr/share/X11/xkb"
-	if _, err := os.Stat(xkbDir); err == nil {
+	xkbDir := ""
+	for _, candidate := range []string{"/usr/share/X11/xkb", "/usr/share/xkb"} {
+		if _, err := os.Stat(candidate); err == nil {
+			xkbDir = candidate
+			break
+		}
+	}
+	if xkbDir != "" {
 		if err := img.AppendFile(xkbDir); err != nil {
 			return fmt.Errorf("xkb data: %v", err)
 		}
 	} else {
-		debug("plymouth: XKB data directory %s not found, keyboard input may not work", xkbDir)
+		warning("plymouth: XKB data directory not found (/usr/share/X11/xkb or /usr/share/xkb) — keyboard input may not work")
 	}
 
 	return nil
@@ -750,6 +799,35 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	}
 
 	return img.AppendContent(initConfigPath, 0o644, content)
+}
+
+// detectHostGPUModules returns the names of loadable (non-built-in) GPU kernel
+// modules backing real DRM devices on this host, excluding simpledrm.
+// Returns nil on a simpledrm-only or GPU-less system.
+func detectHostGPUModules() []string {
+	var modules []string
+	cards, _ := filepath.Glob("/sys/class/drm/card[0-9]*")
+	for _, card := range cards {
+		// Skip connector entries (e.g. card1-DP-1, card1-eDP-1)
+		if strings.Contains(filepath.Base(card), "-") {
+			continue
+		}
+		driverLink, err := os.Readlink(filepath.Join(card, "device", "driver"))
+		if err != nil {
+			continue
+		}
+		// simpledrm registers as platform driver "simple-framebuffer"
+		if filepath.Base(driverLink) == "simple-framebuffer" {
+			continue
+		}
+		// driver/module symlink is absent for built-in drivers; skip those
+		moduleLink, err := os.Readlink(filepath.Join(card, "device", "driver", "module"))
+		if err != nil {
+			continue
+		}
+		modules = append(modules, filepath.Base(moduleLink))
+	}
+	return modules
 }
 
 func (img *Image) appendAliasesFile(aliases []alias) error {
