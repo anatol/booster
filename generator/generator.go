@@ -42,6 +42,8 @@ type generatorConfig struct {
 	zfsImportParams         string
 	zfsCachePath            string
 
+	enablePlymouth bool
+
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
@@ -177,6 +179,50 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
+	if conf.enablePlymouth {
+		// Include base DRM modules for Plymouth's graphical splash.
+		// These may be built-in (e.g. CONFIG_DRM_SIMPLEDRM=y on CachyOS)
+		// so we only force-load the ones that exist as loadable modules.
+		//
+		// Booster does not run udevd, so Plymouth cannot detect new DRM
+		// devices after startup via its libudev monitor. The GPU driver
+		// must be force-loaded so it is available before Plymouth starts.
+		drmModules := []string{"simpledrm", "drm", "drm_kms_helper"}
+		if err := kmod.activateModules(true, false, drmModules...); err != nil {
+			return err
+		}
+		for _, m := range drmModules {
+			if kmod.requiredModules[m] {
+				conf.modulesForceLoad = append(conf.modulesForceLoad, m)
+			}
+		}
+
+		// In host mode, check whether a real GPU driver is present but not
+		// force-loaded. Booster does not run udevd, so Plymouth cannot
+		// transition from simpledrm to the real GPU after switch_root.
+		// If Plymouth starts on simpledrm and the real GPU driver later tears
+		// it down, plymouth-quit-wait.service (TimeoutSec=0) hangs forever.
+		// Disable Plymouth now rather than produce an unbootable system.
+		if !conf.universal {
+			if gpuModules := detectHostGPUModules(); len(gpuModules) > 0 {
+				forceLoad := make(map[string]bool, len(conf.modulesForceLoad))
+				for _, m := range conf.modulesForceLoad {
+					forceLoad[m] = true
+				}
+				var missing []string
+				for _, m := range gpuModules {
+					if !forceLoad[m] {
+						missing = append(missing, m)
+					}
+				}
+				if len(missing) > 0 {
+					warning("plymouth: GPU driver(s) %v detected but not in modules_force_load — disabling Plymouth to prevent boot hang. Add to modules_force_load in booster.yaml to enable Plymouth.", missing)
+					conf.enablePlymouth = false
+				}
+			}
+		}
+	}
+
 	if conf.enableZfs {
 		if err := kmod.activateModules(false, true, "zfs"); err != nil {
 			return err
@@ -241,6 +287,12 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendInitConfig(conf, kmod, vconsole); err != nil {
 		return err
+	}
+
+	if conf.enablePlymouth {
+		if err := img.addPlymouthSupport(conf); err != nil {
+			return err
+		}
 	}
 
 	// appending initrd-release file per recommendation from https://systemd.io/INITRD_INTERFACE/
@@ -389,6 +441,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.EnableMdraid = conf.enableMdraid
 	initConfig.EnableZfs = conf.enableZfs
 	initConfig.ZfsImportParams = conf.zfsImportParams
+	initConfig.EnablePlymouth = conf.enablePlymouth
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

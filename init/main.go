@@ -673,6 +673,9 @@ func deleteRamfs() error {
 
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
+	// Tell plymouth about the new root before moving mounts
+	plymouthNewroot(newRoot)
+
 	if err := moveMountpointsToHost(); err != nil {
 		return err
 	}
@@ -702,6 +705,13 @@ func switchRoot() error {
 	if err != nil {
 		return err
 	}
+
+	// For non-systemd inits, quit plymouth now since they won't do it.
+	// For systemd, leave plymouth running — systemd's plymouth-quit.service handles it.
+	if !isSystemdInit {
+		plymouthQuit()
+	}
+
 	if isSystemdInit {
 		// pass serialized state to userspace, this way we can export for example initrd execution time
 		fd, err := unix.MemfdCreate("systemd-state", 0)
@@ -824,6 +834,12 @@ func boost() error {
 	if err := mount("run", "/run", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_STRICTATIME, "mode=755"); err != nil {
 		return err
 	}
+	if err := os.MkdirAll("/dev/pts", 0o755); err != nil {
+		return err
+	}
+	if err := mount("devpts", "/dev/pts", "devpts", unix.MS_NOSUID|unix.MS_NOEXEC, "gid=5,mode=0620"); err != nil {
+		return err
+	}
 
 	// Mount efivarfs if running in EFI mode
 	if _, err := os.Stat("/sys/firmware/efi"); !errors.Is(err, os.ErrNotExist) {
@@ -862,11 +878,33 @@ func boost() error {
 		return err
 	}
 
+	// Check if plymouth should be enabled: needs both config and "splash" kernel param
+	if config.EnablePlymouth {
+		cmdlineBytes, err := os.ReadFile("/proc/cmdline")
+		if err == nil && strings.Contains(string(cmdlineBytes), "splash") {
+			plymouthEnabled = true
+			info("plymouth enabled (splash kernel parameter detected)")
+		} else {
+			debug("plymouth configured but splash not in kernel cmdline, skipping")
+		}
+	}
+
 	rootMounted.Add(1)
 
 	go func() { check(udevListener()) }()
 
-	_ = loadModules(config.ModulesForceLoad...)
+	forceLoadWg := loadModules(config.ModulesForceLoad...)
+
+	if plymouthEnabled {
+		// Wait for DRM modules to finish loading before starting plymouth,
+		// otherwise plymouthd can't find a display device and exits with EX_UNAVAILABLE.
+		forceLoadWg.Wait()
+		initPlymouth()
+	}
+	// Signal that plymouth init is complete (or was skipped). This unblocks
+	// any goroutines waiting in waitForPlymouthInit() — e.g. LUKS password
+	// prompts that arrived via udev before plymouthd was ready.
+	close(plymouthInitDone)
 
 	if err := configureVirtualConsole(); err != nil {
 		return err

@@ -396,16 +396,34 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 		}
 	}
 
-	warning("password in keyfile #{keyfile} was unable to unseal #{mappingName}\n")
+	warning("password in keyfile %s was unable to unseal %s", keyfile, mappingName)
 
 	// have to use keyboard password
 	requestKeyboardPassword(volumes, d, checkSlots, mappingName)
 }
 
 func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
+	// Wait for plymouth initialization to complete before attempting to use
+	// it. Without this, udev events can trigger LUKS password prompts while
+	// plymouthd is still starting, causing the graphical prompt to fail.
+	waitForPlymouthInit()
+
 	for {
 		prompt := fmt.Sprintf("Enter passphrase for %s:", mappingName)
-		password, err := readPassword(prompt, "   Unlocking...")
+
+		var password []byte
+		var err error
+
+		if plymouthEnabled {
+			password, err = plymouthAskPassword(prompt)
+			if err != nil {
+				warning("plymouth password prompt failed: %v, falling back to console", err)
+				password, err = readPassword(prompt, "   Unlocking...")
+			}
+		} else {
+			password, err = readPassword(prompt, "   Unlocking...")
+		}
+
 		if err != nil {
 			warning("reading password: %v", err)
 			return
@@ -427,7 +445,11 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 		}
 
 		// retry password
-		console("   Incorrect passphrase, please try again\n")
+		if plymouthEnabled {
+			plymouthMessage("Incorrect passphrase, please try again")
+		} else {
+			console("   Incorrect passphrase, please try again\n")
+		}
 	}
 }
 

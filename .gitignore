@@ -5,6 +5,26 @@
 init/init
 generator/generator
 
+# Local test files
+*.img
+booster-plymouth.yaml
+booster-journal.log
+boot-errors.log
+debug.log
+limine.conf
+limine.conf.old
+CLAUDE.md
+
+# Generated docs
+docs/manpage.1
+docs/manpage.1.html
+
+# Local packaging artifacts
+packaging/arch/*.pkg.tar.zst
+packaging/arch/pkg/
+packaging/arch/limine-booster-plymouth-entry-add
+packaging/arch/93-limine-booster-plymouth-entry-add.hook
+
 # Assets
 init/assets
 tests/assets

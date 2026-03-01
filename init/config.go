@@ -34,6 +34,7 @@ type InitConfig struct {
 	EnableMdraid           bool                `yaml:",omitempty"`
 	EnableZfs              bool                `yaml:",omitempty"`
 	ZfsImportParams        string              `yaml:",omitempty"` // TODO: remove it
+	EnablePlymouth         bool                `yaml:",omitempty"`
 }
 
 const initConfigPath = "/etc/booster.init.yaml"
