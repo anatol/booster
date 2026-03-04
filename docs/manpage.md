@@ -119,7 +119,9 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request.
- * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
+ * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS options. Supported dm-crypt flags are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
+    Token device options are also supported: `fido2-device=auto` defers the keyboard passphrase prompt until FIDO2 unlock fails or times out; `tpm2-device=auto` does the same for TPM2 tokens.
+    The optional `token-timeout=DURATION` controls how long to wait for the token before falling back to keyboard (default 30s when a token option is set; bare integers are treated as seconds; `token-timeout=0` waits forever).
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  * `resume=$deviceref` device reference to suspend-to-disk device.

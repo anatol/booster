@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func parseCmdline() error {
@@ -152,6 +154,14 @@ func getNextParam(params string, index int) (string, string, int) {
 func parseParams(params string) error {
 	var luksOptions []string
 
+	var tokenOpts struct {
+		fido2           bool
+		tpm2            bool
+		timeout         time.Duration
+		timeoutExplicit bool
+	}
+	var tokenOptsSeen bool
+
 	var key, value string
 	i := 0
 
@@ -219,6 +229,26 @@ func parseParams(params string) error {
 			rootRw = true
 		case "rd.luks.options":
 			for o := range strings.SplitSeq(value, ",") {
+				if strings.HasPrefix(o, "fido2-device=") {
+					tokenOpts.fido2 = true
+					tokenOptsSeen = true
+					continue
+				}
+				if strings.HasPrefix(o, "tpm2-device=") {
+					tokenOpts.tpm2 = true
+					tokenOptsSeen = true
+					continue
+				}
+				if strings.HasPrefix(o, "token-timeout=") {
+					d, err := parseTokenTimeout(strings.TrimPrefix(o, "token-timeout="))
+					if err != nil {
+						return fmt.Errorf("invalid token-timeout in rd.luks.options: %v", err)
+					}
+					tokenOpts.timeout = d
+					tokenOpts.timeoutExplicit = true
+					tokenOptsSeen = true
+					continue
+				}
 				flag, ok := rdLuksOptions[o]
 				if !ok {
 					return fmt.Errorf("unknown value in rd.luks.options: %v", o)
@@ -288,11 +318,48 @@ func parseParams(params string) error {
 		}
 	}
 
-	if luksOptions != nil {
+	if luksOptions != nil || tokenOptsSeen {
 		for i := range luksMappings {
-			luksMappings[i].options = luksOptions
+			if luksOptions != nil {
+				luksMappings[i].options = luksOptions
+			}
+			if tokenOptsSeen {
+				luksMappings[i].tokenFido2 = tokenOpts.fido2
+				luksMappings[i].tokenTpm2 = tokenOpts.tpm2
+				// Default 30s timeout prevents hang when token device is absent.
+				// token-timeout=0 explicitly means wait forever.
+				if (tokenOpts.fido2 || tokenOpts.tpm2) && !tokenOpts.timeoutExplicit {
+					luksMappings[i].tokenTimeout = 30 * time.Second
+				} else {
+					luksMappings[i].tokenTimeout = tokenOpts.timeout
+				}
+			}
 		}
 	}
 
 	return nil
+}
+
+// parseTokenTimeout parses token-timeout value from rd.luks.options.
+// A bare integer (no suffix) is treated as seconds, matching systemd semantics.
+// A value of 0 means wait forever.
+func parseTokenTimeout(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty timeout value")
+	}
+	isAllDigits := true
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			isAllDigits = false
+			break
+		}
+	}
+	if isAllDigits {
+		secs, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(secs) * time.Second, nil
+	}
+	return time.ParseDuration(s)
 }

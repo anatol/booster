@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anatol/clevis.go"
@@ -25,10 +26,13 @@ import (
 // specifies information needed to process/open a LUKS device
 // often these mappings specified by a user via command-line
 type luksMapping struct {
-	ref     *deviceRef
-	name    string
-	keyfile string
-	options []string
+	ref          *deviceRef
+	name         string
+	keyfile      string
+	options      []string      // dm-crypt flags for d.FlagsAdd
+	tokenFido2   bool          // fido2-device=auto was set
+	tokenTpm2    bool          // tpm2-device=auto was set
+	tokenTimeout time.Duration // 0 = wait forever; >0 = defer keyboard until elapsed
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -472,6 +476,34 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	volumes := make(chan *luks.Volume)
 
+	// done is closed when a token has successfully unlocked the device,
+	// signalling fallback goroutines not to start the keyboard prompt.
+	done := make(chan struct{})
+	var closeDone sync.Once
+
+	// priorityTypes holds token types that should delay the keyboard prompt.
+	priorityTypes := make(map[string]bool)
+	if mapping.tokenFido2 {
+		priorityTypes["systemd-fido2"] = true
+	}
+	if mapping.tokenTpm2 {
+		priorityTypes["systemd-tpm2"] = true
+	}
+	hasPriority := len(priorityTypes) > 0
+
+	var tokenWg sync.WaitGroup
+	var keyboardOnce sync.Once
+
+	startKeyboard := func(checkSlots []int) {
+		keyboardOnce.Do(func() {
+			if len(mapping.keyfile) > 0 {
+				go recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile)
+			} else {
+				go requestKeyboardPassword(volumes, d, checkSlots, mapping.name)
+			}
+		})
+	}
+
 	slotsWithTokens := make(map[int]bool)
 	tokens, err := d.Tokens()
 	if err != nil {
@@ -481,7 +513,15 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		if t.Type == "systemd-recovery" {
 			continue // skip systemd-recovery tokens as they are supposed to be entered by a keyboard later
 		}
-		go recoverTokenPassword(volumes, d, t)
+		if hasPriority && priorityTypes[t.Type] {
+			tokenWg.Add(1)
+			go func(tok luks.Token) {
+				defer tokenWg.Done()
+				recoverTokenPassword(volumes, d, tok)
+			}(t)
+		} else {
+			go recoverTokenPassword(volumes, d, t)
+		}
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
@@ -494,17 +534,31 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			checkSlotsWithPassword = append(checkSlotsWithPassword, s)
 		}
 	}
+
 	if len(checkSlotsWithPassword) > 0 {
-		// is there a keyfile defined for the password for this volume?
-		if len(mapping.keyfile) > 0 {
-			// if the keyfile doesn't work we will fallback to password
-			go recoverKeyfilePassword(volumes, d, checkSlotsWithPassword, mapping.name, mapping.keyfile)
+		if hasPriority {
+			// Launch a fallback goroutine: wait for priority tokens to finish
+			// (or for tokenTimeout to elapse), then start keyboard if not done.
+			go func() {
+				if mapping.tokenTimeout > 0 {
+					waitTimeout(&tokenWg, mapping.tokenTimeout)
+				} else {
+					tokenWg.Wait()
+				}
+				select {
+				case <-done:
+					// token already succeeded, skip keyboard
+				default:
+					startKeyboard(checkSlotsWithPassword)
+				}
+			}()
 		} else {
-			go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
+			startKeyboard(checkSlotsWithPassword)
 		}
 	}
 
 	v := <-volumes
+	closeDone.Do(func() { close(done) })
 
 	if err := loadRequiredCryptoModules(v.StorageEncryption); err != nil {
 		return err

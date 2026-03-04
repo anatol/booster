@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -9,7 +10,7 @@ import (
 func TestParseParamsInvalidLuksOptions(t *testing.T) {
 	luksMappings = nil
 
-	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt rd.luks.options=tpm2-device=auto"))
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt rd.luks.options=bogus-option"))
 }
 
 func TestParseParams(t *testing.T) {
@@ -146,4 +147,53 @@ func TestGetNextParamMulti(t *testing.T) {
 			require.Equal(t, output.outIndex, i)
 		}
 	}
+}
+
+func TestParseParamsTokenOptions(t *testing.T) {
+	luksMappings = nil
+
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=fido2-device=auto,no-read-workqueue"))
+	require.Len(t, luksMappings, 1)
+
+	root := luksMappings[0]
+	require.True(t, root.tokenFido2)
+	require.False(t, root.tokenTpm2)
+	require.Equal(t, []string{"no-read-workqueue"}, root.options)
+	// default 30s timeout applied when fido2-device=auto is set without explicit token-timeout
+	require.Equal(t, 30*time.Second, root.tokenTimeout)
+}
+
+func TestParseParamsTpm2DeviceAuto(t *testing.T) {
+	luksMappings = nil
+
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=tpm2-device=auto"))
+	require.Len(t, luksMappings, 1)
+
+	root := luksMappings[0]
+	require.False(t, root.tokenFido2)
+	require.True(t, root.tokenTpm2)
+	require.Equal(t, 30*time.Second, root.tokenTimeout)
+}
+
+func TestParseParamsTokenTimeout(t *testing.T) {
+	// explicit duration suffix
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=fido2-device=auto,token-timeout=60s"))
+	require.Equal(t, 60*time.Second, luksMappings[0].tokenTimeout)
+
+	// bare integer treated as seconds
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=fido2-device=auto,token-timeout=45"))
+	require.Equal(t, 45*time.Second, luksMappings[0].tokenTimeout)
+
+	// explicit token-timeout=0 means wait forever (no default override)
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=fido2-device=auto,token-timeout=0"))
+	require.Equal(t, time.Duration(0), luksMappings[0].tokenTimeout)
+}
+
+func TestParseParamsInvalidTokenTimeout(t *testing.T) {
+	luksMappings = nil
+
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=fido2-device=auto,token-timeout=notaduration"))
 }
