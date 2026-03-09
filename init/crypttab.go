@@ -60,6 +60,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 
 		var (
 			noauto          bool
+			noFail          bool
 			options         []string
 			header          string
 			keySlot         = -1
@@ -100,8 +101,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 				}
 				keySlot = n
 			case opt == "nofail":
-				// TODO: nofail — non-fatal unlock failure; requires rearchitecting
-				// boot dependency logic so a failed unlock doesn't block non-root mounts.
+				noFail = true
 			case strings.HasPrefix(opt, "keyfile-offset="), strings.HasPrefix(opt, "keyfile-size="):
 				// TODO: keyfile-offset= / keyfile-size= — read a sub-range of the keyfile;
 				// pass offset/size to recoverKeyfilePassword once supported.
@@ -136,6 +136,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			header:  header,
 			keySlot: keySlot,
 			tries:   tries,
+			noFail:  noFail,
 		}
 		m.tokenFido2 = fido2
 		m.tokenTpm2 = tpm2

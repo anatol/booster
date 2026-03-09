@@ -119,6 +119,18 @@ func TestParseCrypttabKeySlotInvalid(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseCrypttabNofail(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none nofail\n")
+	require.Len(t, m, 1)
+	require.True(t, m[0].noFail)
+}
+
+func TestParseCrypttabNofailDefault(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none discard\n")
+	require.Len(t, m, 1)
+	require.False(t, m[0].noFail)
+}
+
 func TestParseCrypttabTries(t *testing.T) {
 	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tries=3\n")
 	require.Len(t, m, 1)

@@ -36,6 +36,7 @@ type luksMapping struct {
 	header       string        // detached LUKS header path (empty = embedded header)
 	keySlot      int           // -1 = try all slots; >=0 restricts password checks to that slot
 	tries        int           // 0 = unlimited keyboard retries; >0 = max attempts
+	noFail       bool          // if true, unlock failure is non-fatal (boot continues)
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -591,14 +592,25 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	hasPriority := len(priorityTypes) > 0
 
 	var tokenWg sync.WaitGroup
+	// senderWg tracks every goroutine that may send to volumes.  When it
+	// reaches zero all unlock paths have given up; the watcher closes volumes
+	// so luksOpen can unblock instead of hanging forever.
+	var senderWg sync.WaitGroup
 	var keyboardOnce sync.Once
 
 	startKeyboard := func(checkSlots []int) {
 		keyboardOnce.Do(func() {
+			senderWg.Add(1)
 			if len(mapping.keyfile) > 0 {
-				go recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries)
+				go func() {
+					defer senderWg.Done()
+					recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries)
+				}()
 			} else {
-				go requestKeyboardPassword(volumes, d, checkSlots, mapping.name, mapping.tries)
+				go func() {
+					defer senderWg.Done()
+					requestKeyboardPassword(volumes, d, checkSlots, mapping.name, mapping.tries)
+				}()
 			}
 		})
 	}
@@ -622,14 +634,20 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}
 		if hasPriority && priorityTypes[t.Type] {
 			tokenWg.Add(1)
+			senderWg.Add(1)
 			go func(tok luks.Token) {
+				defer tokenWg.Done()
+				defer senderWg.Done()
 				if recoverTokenPassword(volumes, d, tok, mapping.name, done) {
 					closeDone.Do(func() { close(done) })
 				}
-				tokenWg.Done()
 			}(t)
 		} else {
-			go recoverTokenPassword(volumes, d, t, mapping.name, done)
+			senderWg.Add(1)
+			go func(tok luks.Token) {
+				defer senderWg.Done()
+				recoverTokenPassword(volumes, d, tok, mapping.name, done)
+			}(t)
 		}
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
@@ -666,8 +684,28 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}
 	}
 
-	v := <-volumes
+	// Watcher: when every unlock goroutine has given up without success,
+	// close volumes so luksOpen unblocks rather than hanging forever.
+	go func() {
+		senderWg.Wait()
+		select {
+		case <-done:
+			// Already unlocked — leave volumes alone.
+		default:
+			close(volumes)
+		}
+	}()
+
+	v, ok := <-volumes
 	closeDone.Do(func() { close(done) })
+	if !ok {
+		// All unlock paths exhausted without success.
+		if mapping.noFail {
+			warning("nofail: all unlock attempts for %s exhausted, skipping", mapping.name)
+			return nil
+		}
+		return fmt.Errorf("all unlock paths for LUKS device %s exhausted", dev)
+	}
 
 	if err := loadRequiredCryptoModules(v.StorageEncryption); err != nil {
 		return err
@@ -736,7 +774,12 @@ func handleLuksBlockDevice(blk *blkInfo) error {
 	}
 	info("a mapping for LUKS device %s has been found", blk.path)
 
-	return luksOpen(blk.path, m)
+	err := luksOpen(blk.path, m)
+	if err != nil && m.noFail {
+		warning("nofail: unable to open LUKS device %s (%s), skipping: %v", blk.path, m.name, err)
+		return nil
+	}
+	return err
 }
 
 func findOrCreateLuksMapping(uuid UUID) *luksMapping {
