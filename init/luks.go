@@ -33,10 +33,12 @@ type luksMapping struct {
 	tokenFido2   bool          // fido2-device=auto was set
 	tokenTpm2    bool          // tpm2-device=auto was set
 	tokenTimeout time.Duration // 0 = wait forever; >0 = defer keyboard until elapsed
-	header       string        // detached LUKS header path (empty = embedded header)
-	keySlot      int           // -1 = try all slots; >=0 restricts password checks to that slot
-	tries        int           // 0 = unlimited keyboard retries; >0 = max attempts
-	noFail       bool          // if true, unlock failure is non-fatal (boot continues)
+	header        string        // detached LUKS header path (empty = embedded header)
+	keySlot       int           // -1 = try all slots; >=0 restricts password checks to that slot
+	tries         int           // 0 = unlimited keyboard retries; >0 = max attempts
+	noFail        bool          // if true, unlock failure is non-fatal (boot continues)
+	keyfileOffset int64         // byte offset into keyfile (0 = start)
+	keyfileSize   int64         // bytes to read from keyfile (0 = read to end)
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -413,7 +415,34 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	return false
 }
 
-func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string, maxTries int) {
+// readKeyfile reads keyfile contents, optionally starting at keyfileOffset and
+// limiting to keyfileSize bytes (0 means read to end of file).
+func readKeyfile(path string, offset, size int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	if offset > 0 {
+		if _, err := f.Seek(offset, 0); err != nil {
+			return nil, fmt.Errorf("keyfile seek: %v", err)
+		}
+	}
+
+	if size > 0 {
+		buf := make([]byte, size)
+		n, err := io.ReadFull(f, buf)
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return nil, fmt.Errorf("keyfile read: %v", err)
+		}
+		return buf[:n], nil
+	}
+
+	return io.ReadAll(f)
+}
+
+func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string, maxTries int, keyfileOffset, keyfileSize int64) {
 	var err error
 	var password []byte
 
@@ -421,7 +450,7 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 	parts := regexp.MustCompile("(?i):UUID=").Split(keyfile, 2)
 
 	if len(parts) == 1 {
-		password, err = os.ReadFile(parts[0])
+		password, err = readKeyfile(parts[0], keyfileOffset, keyfileSize)
 
 		if err != nil {
 			warning("reading password: %v", err)
@@ -604,7 +633,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			if len(mapping.keyfile) > 0 {
 				go func() {
 					defer senderWg.Done()
-					recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries)
+					recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries, mapping.keyfileOffset, mapping.keyfileSize)
 				}()
 			} else {
 				go func() {

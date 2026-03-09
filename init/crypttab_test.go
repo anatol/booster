@@ -131,6 +131,37 @@ func TestParseCrypttabNofailDefault(t *testing.T) {
 	require.False(t, m[0].noFail)
 }
 
+func TestParseCrypttabKeyfileOffset(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/key keyfile-offset=512\n")
+	require.Len(t, m, 1)
+	require.Equal(t, int64(512), m[0].keyfileOffset)
+	require.Equal(t, int64(0), m[0].keyfileSize)
+}
+
+func TestParseCrypttabKeyfileSize(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/key keyfile-size=64\n")
+	require.Len(t, m, 1)
+	require.Equal(t, int64(0), m[0].keyfileOffset)
+	require.Equal(t, int64(64), m[0].keyfileSize)
+}
+
+func TestParseCrypttabKeyfileOffsetAndSize(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/key keyfile-offset=128,keyfile-size=32\n")
+	require.Len(t, m, 1)
+	require.Equal(t, int64(128), m[0].keyfileOffset)
+	require.Equal(t, int64(32), m[0].keyfileSize)
+}
+
+func TestParseCrypttabKeyfileOffsetInvalid(t *testing.T) {
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/key keyfile-offset=bad\n"))
+	require.Error(t, err)
+}
+
+func TestParseCrypttabKeyfileSizeInvalid(t *testing.T) {
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/key keyfile-size=-1\n"))
+	require.Error(t, err)
+}
+
 func TestParseCrypttabTries(t *testing.T) {
 	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tries=3\n")
 	require.Len(t, m, 1)

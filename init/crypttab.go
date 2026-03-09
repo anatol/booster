@@ -65,6 +65,8 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			header          string
 			keySlot         = -1
 			tries           int
+			keyfileOffset   int64
+			keyfileSize     int64
 			fido2           bool
 			tpm2            bool
 			timeout         time.Duration
@@ -102,9 +104,18 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 				keySlot = n
 			case opt == "nofail":
 				noFail = true
-			case strings.HasPrefix(opt, "keyfile-offset="), strings.HasPrefix(opt, "keyfile-size="):
-				// TODO: keyfile-offset= / keyfile-size= — read a sub-range of the keyfile;
-				// pass offset/size to recoverKeyfilePassword once supported.
+			case strings.HasPrefix(opt, "keyfile-offset="):
+				n, err := strconv.ParseInt(strings.TrimPrefix(opt, "keyfile-offset="), 10, 64)
+				if err != nil || n < 0 {
+					return nil, fmt.Errorf("crypttab entry %q: invalid keyfile-offset: %q", name, strings.TrimPrefix(opt, "keyfile-offset="))
+				}
+				keyfileOffset = n
+			case strings.HasPrefix(opt, "keyfile-size="):
+				n, err := strconv.ParseInt(strings.TrimPrefix(opt, "keyfile-size="), 10, 64)
+				if err != nil || n < 0 {
+					return nil, fmt.Errorf("crypttab entry %q: invalid keyfile-size: %q", name, strings.TrimPrefix(opt, "keyfile-size="))
+				}
+				keyfileSize = n
 			case strings.HasPrefix(opt, "tries="):
 				n, err := strconv.Atoi(strings.TrimPrefix(opt, "tries="))
 				if err != nil || n < 0 {
@@ -129,14 +140,16 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 		}
 
 		m := &luksMapping{
-			ref:     ref,
-			name:    name,
-			keyfile: keyfile,
-			options: options,
-			header:  header,
-			keySlot: keySlot,
-			tries:   tries,
-			noFail:  noFail,
+			ref:           ref,
+			name:          name,
+			keyfile:       keyfile,
+			options:       options,
+			header:        header,
+			keySlot:       keySlot,
+			tries:         tries,
+			noFail:        noFail,
+			keyfileOffset: keyfileOffset,
+			keyfileSize:   keyfileSize,
 		}
 		m.tokenFido2 = fido2
 		m.tokenTpm2 = tpm2
