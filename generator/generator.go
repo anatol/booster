@@ -116,6 +116,10 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
+	if err := img.appendCrypttab(); err != nil {
+		return err
+	}
+
 	kmod, err := NewKmod(conf)
 	if err != nil {
 		return err

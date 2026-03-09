@@ -124,6 +124,9 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     The optional `token-timeout=DURATION` controls how long to wait for the token before falling back to keyboard (default 30s when a token option is set; bare integers are treated as seconds; `token-timeout=0` waits forever).
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
+
+As an alternative to `rd.luks.*` parameters, LUKS volumes can be configured via `/etc/crypttab.initramfs` on the host (see **crypttab(5)**).  If the file exists it is automatically bundled as `/etc/crypttab` inside the initramfs.  Booster supports `fido2-device=`, `tpm2-device=`, `token-timeout=`, `key-slot=`, `header=`, `discard`, and the other standard dm-crypt flags.  Kernel cmdline parameters take precedence over crypttab entries.
+
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
  * `booster.log` configures booster init logging. It accepts a comma separated list of following values:

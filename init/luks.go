@@ -33,6 +33,8 @@ type luksMapping struct {
 	tokenFido2   bool          // fido2-device=auto was set
 	tokenTpm2    bool          // tpm2-device=auto was set
 	tokenTimeout time.Duration // 0 = wait forever; >0 = defer keyboard until elapsed
+	header       string        // detached LUKS header path (empty = embedded header)
+	keySlot      int           // -1 = try all slots; >=0 restricts password checks to that slot
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -120,7 +122,7 @@ func isHidRawFido2(devName string) (bool, error) {
 	return false, nil
 }
 
-func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string) ([]byte, error) {
 	usbhidWg.Wait()
 
 	isFido2, err := isHidRawFido2(devName)
@@ -185,12 +187,11 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 		if _, err := pipeErr.Read(buff); err != nil {
 			return nil, err
 		}
-		// Dealing with Yubikey using command-line tools is getting out of control
-		// TODO: find a way to do the same using libfido2
-		prompt := "Enter PIN for " + device + ":"
-		if strings.HasPrefix(string(buff), prompt) {
+		fido2Prompt := "Enter PIN for " + device + ":"
+		displayPrompt := "Enter FIDO2 PIN for " + mappingName + ":"
+		if strings.HasPrefix(string(buff), fido2Prompt) {
 			// fido2-assert tool requests for PIN
-			pin, err := readPassword(prompt, "")
+			pin, err := readPassword(displayPrompt, "")
 			if err != nil {
 				return nil, err
 			}
@@ -216,9 +217,29 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	return lines[4], nil
 }
 
+// isFido2PinInvalidError reports whether err indicates a wrong FIDO2 PIN.
+// With fido2-assert the error text contains "PIN_INVALID" when the PIN is incorrect.
+func isFido2PinInvalidError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "PIN_INVALID")
+}
+
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
 
-func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
+// passphraseCache stores passwords that have successfully unlocked a LUKS
+// volume so they can be tried silently against other volumes before prompting.
+var passphraseCache struct {
+	sync.Mutex
+	passwords [][]byte
+}
+
+// recoverSystemdFido2Password attempts to recover a LUKS passphrase from a
+// systemd-fido2 token.  done is closed when the LUKS device has been unlocked
+// by any means (keyboard, another token, etc.) — this cancels a pending FIDO2
+// wait so the goroutine exits cleanly rather than blocking forever.
+func recoverSystemdFido2Password(t luks.Token, mappingName string, done <-chan struct{}) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
 		Salt                     string `json:"fido2-salt"`       // base64
@@ -230,7 +251,6 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
 	}
-
 	if node.RelyingParty == "" {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
@@ -239,33 +259,61 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	// Seed the channel with devices already present in sysfs so they are
+	// processed before any late-arriving udev events.
 	go func() {
 		for _, d := range dir {
-			// run it in a separate goroutine to avoid blocking on channel
 			hidrawDevices <- d.Name()
 		}
 	}()
 
 	seenHidrawDevices := make(set)
 
-	for devName := range hidrawDevices {
+	for {
+		var devName string
+		select {
+		case <-done:
+			// Device unlocked by keyboard or another token — exit cleanly.
+			return nil, fmt.Errorf("FIDO2 recovery cancelled")
+		case devName = <-hidrawDevices:
+		}
+
 		if seenHidrawDevices[devName] {
 			continue
 		}
 		seenHidrawDevices[devName] = true
 
-		password, err := recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired)
+		maxAttempts := 1
+		if node.PinRequired {
+			maxAttempts = 3
+		}
+		var password []byte
+		var err error
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName)
+			if err == nil {
+				break
+			}
+			if !isFido2PinInvalidError(err) {
+				break
+			}
+			if attempt < maxAttempts-1 {
+				if plymouthEnabled {
+					plymouthMessage("FIDO2 PIN incorrect, please try again")
+				} else {
+					warning("FIDO2 PIN incorrect, please try again")
+				}
+			}
+		}
 		if err != nil {
-			if err != io.EOF {
-				info("%v", err)
+			info("%v", err)
+			if plymouthEnabled {
+				plymouthMessage("") // clear any "PIN incorrect" message
 			}
 			continue
 		}
 		return password, nil
 	}
-
-	return nil, fmt.Errorf("no matching fido2 devices available")
 }
 
 func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
@@ -324,7 +372,7 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
-func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token) {
+func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string, done <-chan struct{}) bool {
 	var password []byte
 	var err error
 
@@ -332,17 +380,17 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	case "clevis":
 		password, err = recoverClevisPassword(t, d.Version())
 	case "systemd-fido2":
-		password, err = recoverSystemdFido2Password(t)
+		password, err = recoverSystemdFido2Password(t, mappingName, done)
 	case "systemd-tpm2":
 		password, err = recoverSystemdTPM2Password(t)
 	default:
 		info("token #%d has unknown type: %s", t.ID, t.Type)
-		return
+		return false
 	}
 
 	if err != nil {
 		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
-		return
+		return false
 	}
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
@@ -357,9 +405,10 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 		}
 		info("password from %s token #%d matches", t.Type, t.ID)
 		volumes <- v
-		return
+		return true
 	}
 	info("password from %s token #%d does not match", t.Type, t.ID)
+	return false
 }
 
 func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string) {
@@ -460,13 +509,34 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 func luksOpen(dev string, mapping *luksMapping) error {
 	module := loadModules("dm_crypt")
 
+	if mapping.header != "" {
+		// TODO: use luks.OpenWithHeader(dev, mapping.header) once pilotstew/luks.go fork is available
+		return fmt.Errorf("LUKS device %s: detached header not yet supported (requires luks.go fork)", mapping.name)
+	}
+
 	d, err := luks.Open(dev)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 
-	if len(d.Slots()) == 0 {
+	// availableSlots is d.Slots() optionally filtered to a single key slot (crypttab key-slot=).
+	availableSlots := d.Slots()
+	if mapping.keySlot >= 0 {
+		filtered := make([]int, 0, 1)
+		for _, s := range availableSlots {
+			if s == mapping.keySlot {
+				filtered = append(filtered, s)
+				break
+			}
+		}
+		availableSlots = filtered
+	}
+
+	if len(availableSlots) == 0 {
+		if mapping.keySlot >= 0 {
+			return fmt.Errorf("device %s: key slot %d not found or not active", dev, mapping.keySlot)
+		}
 		return fmt.Errorf("device %s has no slots to unlock", dev)
 	}
 
@@ -513,14 +583,24 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		if t.Type == "systemd-recovery" {
 			continue // skip systemd-recovery tokens as they are supposed to be entered by a keyboard later
 		}
+		// systemd-fido2 and systemd-tpm2 require explicit opt-in via fido2-device= / tpm2-device=,
+		// matching systemd-cryptsetup behaviour.
+		if t.Type == "systemd-fido2" && !mapping.tokenFido2 {
+			continue
+		}
+		if t.Type == "systemd-tpm2" && !mapping.tokenTpm2 {
+			continue
+		}
 		if hasPriority && priorityTypes[t.Type] {
 			tokenWg.Add(1)
 			go func(tok luks.Token) {
-				defer tokenWg.Done()
-				recoverTokenPassword(volumes, d, tok)
+				if recoverTokenPassword(volumes, d, tok, mapping.name, done) {
+					closeDone.Do(func() { close(done) })
+				}
+				tokenWg.Done()
 			}(t)
 		} else {
-			go recoverTokenPassword(volumes, d, t)
+			go recoverTokenPassword(volumes, d, t, mapping.name, done)
 		}
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
@@ -528,7 +608,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 
 	var checkSlotsWithPassword []int
-	for _, s := range d.Slots() {
+	for _, s := range availableSlots {
 		if !slotsWithTokens[s] {
 			// only slots that do not have tokens will be checked with keyboard password
 			checkSlotsWithPassword = append(checkSlotsWithPassword, s)
@@ -608,8 +688,9 @@ func matchLuksMapping(blk *blkInfo) *luksMapping {
 	if blk.matchesRef(cmdRoot) {
 		info("LUKS device %s matches root=, unlock this device", blk.path)
 		m := &luksMapping{
-			ref:  cmdRoot,
-			name: "root",
+			ref:     cmdRoot,
+			name:    "root",
+			keySlot: -1,
 		}
 		cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/root"}
 		return m
@@ -642,8 +723,9 @@ func findOrCreateLuksMapping(uuid UUID) *luksMapping {
 
 	// didn't locate the device make a new one
 	m := &luksMapping{
-		ref:  &deviceRef{refFsUUID, uuid},
-		name: "luks-" + uuid.toString(),
+		ref:     &deviceRef{refFsUUID, uuid},
+		name:    "luks-" + uuid.toString(),
+		keySlot: -1,
 	}
 	luksMappings = append(luksMappings, m)
 
