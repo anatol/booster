@@ -119,6 +119,23 @@ func TestParseCrypttabKeySlotInvalid(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseCrypttabTries(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tries=3\n")
+	require.Len(t, m, 1)
+	require.Equal(t, 3, m[0].tries)
+}
+
+func TestParseCrypttabTriesZero(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tries=0\n")
+	require.Len(t, m, 1)
+	require.Equal(t, 0, m[0].tries)
+}
+
+func TestParseCrypttabTriesInvalid(t *testing.T) {
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tries=bad\n"))
+	require.Error(t, err)
+}
+
 func TestParseCrypttabTokenTimeoutInvalid(t *testing.T) {
 	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none fido2-device=auto,token-timeout=bad\n"))
 	require.Error(t, err)

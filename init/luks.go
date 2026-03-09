@@ -35,6 +35,7 @@ type luksMapping struct {
 	tokenTimeout time.Duration // 0 = wait forever; >0 = defer keyboard until elapsed
 	header       string        // detached LUKS header path (empty = embedded header)
 	keySlot      int           // -1 = try all slots; >=0 restricts password checks to that slot
+	tries        int           // 0 = unlimited keyboard retries; >0 = max attempts
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -411,7 +412,7 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	return false
 }
 
-func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string) {
+func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string, maxTries int) {
 	var err error
 	var password []byte
 
@@ -452,16 +453,48 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 	warning("password in keyfile %s was unable to unseal %s", keyfile, mappingName)
 
 	// have to use keyboard password
-	requestKeyboardPassword(volumes, d, checkSlots, mappingName)
+	requestKeyboardPassword(volumes, d, checkSlots, mappingName, maxTries)
 }
 
-func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
+func tryPassphraseAgainstSlots(volumes chan *luks.Volume, d luks.Device, checkSlots []int, password []byte) bool {
+	for _, s := range checkSlots {
+		v, err := d.UnsealVolume(s, password)
+		if err == luks.ErrPassphraseDoesNotMatch {
+			continue
+		} else if err != nil {
+			warning("unlocking slot %v: %v", s, err)
+			continue
+		}
+		volumes <- v
+		return true
+	}
+	return false
+}
+
+func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
 	waitForPlymouthInit()
 
+	// Try passwords that already unlocked another volume before prompting.
+	passphraseCache.Lock()
+	cached := append([][]byte(nil), passphraseCache.passwords...)
+	passphraseCache.Unlock()
+
+	for _, pw := range cached {
+		if tryPassphraseAgainstSlots(volumes, d, checkSlots, pw) {
+			return
+		}
+	}
+
+	attempts := 0
 	for {
+		if maxTries > 0 && attempts >= maxTries {
+			warning("maximum passphrase attempts (%d) reached for %s", maxTries, mappingName)
+			return
+		}
+
 		prompt := fmt.Sprintf("Enter passphrase for %s:", mappingName)
 
 		var password []byte
@@ -485,15 +518,11 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 			continue
 		}
 
-		for _, s := range checkSlots {
-			v, err := d.UnsealVolume(s, password)
-			if err == luks.ErrPassphraseDoesNotMatch {
-				continue
-			} else if err != nil {
-				warning("unlocking slot %v: %v", s, err)
-				continue
-			}
-			volumes <- v
+		attempts++
+		if tryPassphraseAgainstSlots(volumes, d, checkSlots, password) {
+			passphraseCache.Lock()
+			passphraseCache.passwords = append(passphraseCache.passwords, password)
+			passphraseCache.Unlock()
 			return
 		}
 
@@ -567,9 +596,9 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	startKeyboard := func(checkSlots []int) {
 		keyboardOnce.Do(func() {
 			if len(mapping.keyfile) > 0 {
-				go recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile)
+				go recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries)
 			} else {
-				go requestKeyboardPassword(volumes, d, checkSlots, mapping.name)
+				go requestKeyboardPassword(volumes, d, checkSlots, mapping.name, mapping.tries)
 			}
 		})
 	}

@@ -63,6 +63,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			options         []string
 			header          string
 			keySlot         = -1
+			tries           int
 			fido2           bool
 			tpm2            bool
 			timeout         time.Duration
@@ -105,8 +106,11 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 				// TODO: keyfile-offset= / keyfile-size= — read a sub-range of the keyfile;
 				// pass offset/size to recoverKeyfilePassword once supported.
 			case strings.HasPrefix(opt, "tries="):
-				// TODO: tries=N — limit keyboard password retries to N attempts;
-				// currently the keyboard prompt retries indefinitely.
+				n, err := strconv.Atoi(strings.TrimPrefix(opt, "tries="))
+				if err != nil || n < 0 {
+					return nil, fmt.Errorf("crypttab entry %q: invalid tries value: %q", name, strings.TrimPrefix(opt, "tries="))
+				}
+				tries = n
 			default:
 				if flag, ok := rdLuksOptions[opt]; ok {
 					options = append(options, flag)
@@ -131,6 +135,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			options: options,
 			header:  header,
 			keySlot: keySlot,
+			tries:   tries,
 		}
 		m.tokenFido2 = fido2
 		m.tokenTpm2 = tpm2
