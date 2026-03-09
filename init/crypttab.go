@@ -98,6 +98,15 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 					return nil, fmt.Errorf("crypttab entry %q: invalid key-slot: %v", name, err)
 				}
 				keySlot = n
+			case opt == "nofail":
+				// TODO: nofail — non-fatal unlock failure; requires rearchitecting
+				// boot dependency logic so a failed unlock doesn't block non-root mounts.
+			case strings.HasPrefix(opt, "keyfile-offset="), strings.HasPrefix(opt, "keyfile-size="):
+				// TODO: keyfile-offset= / keyfile-size= — read a sub-range of the keyfile;
+				// pass offset/size to recoverKeyfilePassword once supported.
+			case strings.HasPrefix(opt, "tries="):
+				// TODO: tries=N — limit keyboard password retries to N attempts;
+				// currently the keyboard prompt retries indefinitely.
 			default:
 				if flag, ok := rdLuksOptions[opt]; ok {
 					options = append(options, flag)

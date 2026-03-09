@@ -62,6 +62,8 @@ func (img *Image) appendCrypttabFrom(hostPath string) error {
 		}
 
 		// bundle keyfile if it is an absolute path (not none/-)
+		// TODO: keyfile of the form "/path:UUID=..." means the key is on a separate
+		// device — requires mounting that device at early boot (issue #26).
 		if keyfile != "" && keyfile != "none" && keyfile != "-" && filepath.IsAbs(keyfile) {
 			if err := img.AppendFile(keyfile); err != nil {
 				return fmt.Errorf("crypttab.initramfs: keyfile %s: %v", keyfile, err)
