@@ -147,3 +147,25 @@ func TestGetNextParamMulti(t *testing.T) {
 		}
 	}
 }
+
+func TestParseParamsLuksHeader(t *testing.T) {
+	luksMappings = nil
+
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e=/etc/luks-headers/root.hdr root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
+	require.Len(t, luksMappings, 1)
+	require.Equal(t, "/etc/luks-headers/root.hdr", luksMappings[0].header)
+}
+
+func TestParseParamsLuksHeaderInvalid(t *testing.T) {
+	luksMappings = nil
+	// no = separator between UUID and path
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
+
+	luksMappings = nil
+	// invalid UUID
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=notauuid=/etc/luks-headers/root.hdr root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
+
+	luksMappings = nil
+	// empty path
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e= root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
+}
