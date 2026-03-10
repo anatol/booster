@@ -311,6 +311,24 @@ func parseParams(params string) error {
 			}
 			m.keyfile = path
 			m.keyfileDeviceRef = ref
+		case "rd.luks.header":
+			// Format: rd.luks.header=<UUID>=<path>
+			// where UUID identifies the LUKS device and path is the detached header.
+			// The path must be absolute and refers to a file bundled in the initramfs.
+			eqIdx := strings.Index(value, "=")
+			if eqIdx < 0 {
+				return fmt.Errorf("invalid rd.luks.header kernel parameter %q, expected format rd.luks.header=<UUID>=<path>", value)
+			}
+			uuid, err := parseUUID(value[:eqIdx])
+			if err != nil {
+				return fmt.Errorf("invalid UUID %s in rd.luks.header boot param: %v", value[:eqIdx], err)
+			}
+			headerPath := value[eqIdx+1:]
+			if headerPath == "" {
+				return fmt.Errorf("rd.luks.header: header path is empty")
+			}
+			m := findOrCreateLuksMapping(uuid)
+			m.header = headerPath
 		case "zfs":
 			zfsDataset = value
 		default:
