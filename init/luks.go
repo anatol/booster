@@ -14,13 +14,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"regexp"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
+	"golang.org/x/sys/unix"
 )
 
 // specifies information needed to process/open a LUKS device
@@ -37,8 +38,10 @@ type luksMapping struct {
 	keySlot       int           // -1 = try all slots; >=0 restricts password checks to that slot
 	tries         int           // 0 = unlimited keyboard retries; >0 = max attempts
 	noFail        bool          // if true, unlock failure is non-fatal (boot continues)
-	keyfileOffset int64         // byte offset into keyfile (0 = start)
-	keyfileSize   int64         // bytes to read from keyfile (0 = read to end)
+	keyfileOffset    int64         // byte offset into keyfile (0 = start)
+	keyfileSize      int64         // bytes to read from keyfile (0 = read to end)
+	keyfileDeviceRef *deviceRef    // non-nil when keyfile lives on a separate device
+	keyfileTimeout   time.Duration // 0 = use MountTimeout; >0 = per-entry device wait timeout
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -442,28 +445,51 @@ func readKeyfile(path string, offset, size int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string, maxTries int, keyfileOffset, keyfileSize int64) {
-	var err error
-	var password []byte
+func mountKeyDevice(ref *deviceRef, mountPoint string, timeout time.Duration) (func(), error) {
+	blk, err := waitForDeviceRef(ref, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if !blk.isFs {
+		return nil, fmt.Errorf("keyfile device %s is not a mountable filesystem", blk.path)
+	}
+	if err := os.MkdirAll(mountPoint, 0o700); err != nil {
+		return nil, err
+	}
+	flags := uintptr(unix.MS_RDONLY | unix.MS_NOEXEC | unix.MS_NOSUID | unix.MS_NODEV)
+	if err := unix.Mount(blk.path, mountPoint, blk.format, flags, ""); err != nil {
+		return nil, fmt.Errorf("mounting keyfile device %s: %v", blk.path, err)
+	}
+	return func() {
+		_ = unix.Unmount(mountPoint, unix.MNT_DETACH)
+		_ = os.Remove(mountPoint)
+	}, nil
+}
 
-	// keyfile might be in the format /path:UUID=<DEV UUID> to indicate the keyfile lives on another device
-	parts := regexp.MustCompile("(?i):UUID=").Split(keyfile, 2)
-
-	if len(parts) == 1 {
-		password, err = readKeyfile(parts[0], keyfileOffset, keyfileSize)
-
-		if err != nil {
-			warning("reading password: %v", err)
+// acquireKeyfilePassword reads the keyfile, mounting a separate device if needed.
+// The device is unmounted before this function returns.
+func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
+	keyPath := mapping.keyfile
+	if mapping.keyfileDeviceRef != nil {
+		timeout := mapping.keyfileTimeout
+		if timeout == 0 {
+			timeout = time.Duration(config.MountTimeout) * time.Second
 		}
-	} else {
-		// read password from device matching uuid
-		uuid, err := parseUUID(parts[1])
+		mountPoint := "/run/booster/keydev-" + mapping.name
+		unmount, err := mountKeyDevice(mapping.keyfileDeviceRef, mountPoint, timeout)
 		if err != nil {
-			warning("invalid UUID %s in rd.luks.key boot param: %s", uuid, keyfile)
-		} else {
-			// TODO: access path on uuid device, read password
-			warning("user wants keyfile from device %s, but I don't know how to do that", uuid)
+			return nil, err
 		}
+		defer unmount()
+		keyPath = filepath.Join(mountPoint, mapping.keyfile)
+	}
+	return readKeyfile(keyPath, mapping.keyfileOffset, mapping.keyfileSize)
+}
+
+func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mapping *luksMapping) {
+	password, err := acquireKeyfilePassword(mapping)
+	if err != nil {
+		warning("keyfile %s: %v — falling back to keyboard", mapping.keyfile, err)
 	}
 
 	if len(password) > 0 {
@@ -478,12 +504,10 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 			volumes <- v
 			return
 		}
+		warning("keyfile %s does not match any slot for %s", mapping.keyfile, mapping.name)
 	}
 
-	warning("password in keyfile %s was unable to unseal %s", keyfile, mappingName)
-
-	// have to use keyboard password
-	requestKeyboardPassword(volumes, d, checkSlots, mappingName, maxTries)
+	requestKeyboardPassword(volumes, d, checkSlots, mapping.name, mapping.tries)
 }
 
 func tryPassphraseAgainstSlots(volumes chan *luks.Volume, d luks.Device, checkSlots []int, password []byte) bool {
@@ -507,8 +531,11 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 	// plymouthd is still starting, causing the graphical prompt to fail.
 	waitForPlymouthInit()
 
-	// Try passwords that already unlocked another volume before prompting.
+	// Fast path: try passwords already in the cache without acquiring the
+	// console mutex.  These come from volumes that finished unlocking before
+	// this goroutine reached this point.
 	passphraseCache.Lock()
+	seenCount := len(passphraseCache.passwords)
 	cached := append([][]byte(nil), passphraseCache.passwords...)
 	passphraseCache.Unlock()
 
@@ -529,6 +556,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 
 		var password []byte
 		var err error
+		consoleLocked := false
 
 		if plymouthEnabled {
 			password, err = plymouthAskPassword(prompt)
@@ -537,14 +565,42 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 				password, err = readPassword(prompt, "   Unlocking...")
 			}
 		} else {
-			password, err = readPassword(prompt, "   Unlocking...")
+			// Acquire the console mutex and hold it through PBKDF.  This
+			// eliminates the race where two goroutines for concurrent LUKS
+			// volumes both see an empty cache and start prompting before
+			// either finishes key derivation: the next goroutine to acquire
+			// the mutex will find the cached password and can unlock silently
+			// without a second prompt.
+			inputMutex.Lock()
+			consoleLocked = true
+
+			// Re-check cache for entries added while we waited for the mutex
+			// (a concurrent goroutine may have finished unlocking by now).
+			passphraseCache.Lock()
+			newPws := append([][]byte(nil), passphraseCache.passwords[seenCount:]...)
+			seenCount = len(passphraseCache.passwords)
+			passphraseCache.Unlock()
+			for _, pw := range newPws {
+				if tryPassphraseAgainstSlots(volumes, d, checkSlots, pw) {
+					inputMutex.Unlock()
+					return
+				}
+			}
+
+			password, err = readPasswordLocked(prompt, "   Unlocking...")
 		}
 
 		if err != nil {
 			warning("reading password: %v", err)
+			if consoleLocked {
+				inputMutex.Unlock()
+			}
 			return
 		}
 		if len(password) == 0 {
+			if consoleLocked {
+				inputMutex.Unlock()
+			}
 			continue
 		}
 
@@ -552,8 +608,16 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 		if tryPassphraseAgainstSlots(volumes, d, checkSlots, password) {
 			passphraseCache.Lock()
 			passphraseCache.passwords = append(passphraseCache.passwords, password)
+			seenCount = len(passphraseCache.passwords)
 			passphraseCache.Unlock()
+			if consoleLocked {
+				inputMutex.Unlock()
+			}
 			return
+		}
+
+		if consoleLocked {
+			inputMutex.Unlock()
 		}
 
 		// retry password
@@ -568,12 +632,15 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 func luksOpen(dev string, mapping *luksMapping) error {
 	module := loadModules("dm_crypt")
 
+	var (
+		d   luks.Device
+		err error
+	)
 	if mapping.header != "" {
-		// TODO: use luks.OpenWithHeader(dev, mapping.header) once pilotstew/luks.go fork is available
-		return fmt.Errorf("LUKS device %s: detached header not yet supported (requires luks.go fork)", mapping.name)
+		d, err = luks.OpenWithHeader(dev, mapping.header)
+	} else {
+		d, err = luks.Open(dev)
 	}
-
-	d, err := luks.Open(dev)
 	if err != nil {
 		return err
 	}
@@ -633,7 +700,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			if len(mapping.keyfile) > 0 {
 				go func() {
 					defer senderWg.Done()
-					recoverKeyfilePassword(volumes, d, checkSlots, mapping.name, mapping.keyfile, mapping.tries, mapping.keyfileOffset, mapping.keyfileSize)
+					recoverKeyfilePassword(volumes, d, checkSlots, mapping)
 				}()
 			} else {
 				go func() {

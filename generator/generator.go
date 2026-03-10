@@ -25,6 +25,7 @@ type generatorConfig struct {
 	compression             string
 	timeout                 time.Duration
 	extraFiles              []string
+	crypttabFile            string // path to crypttab on host; empty = use default /etc/crypttab.initramfs
 	output                  string
 	forceOverwrite          bool // overwrite output file
 	initBinary              string
@@ -116,7 +117,11 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
-	if err := img.appendCrypttab(); err != nil {
+	crypttabPath := conf.crypttabFile
+	if crypttabPath == "" {
+		crypttabPath = "/etc/crypttab.initramfs"
+	}
+	if err := img.appendCrypttabFrom(crypttabPath); err != nil {
 		return err
 	}
 

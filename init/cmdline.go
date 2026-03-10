@@ -305,7 +305,12 @@ func parseParams(params string) error {
 			}
 
 			m := findOrCreateLuksMapping(uuid)
-			m.keyfile = keyfile
+			path, ref, err := parseKeyfileField(keyfile)
+			if err != nil {
+				return fmt.Errorf("rd.luks.key: %v", err)
+			}
+			m.keyfile = path
+			m.keyfileDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
 		default:

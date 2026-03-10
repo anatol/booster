@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+// parseKeyfileField parses the keyfile field from a crypttab or rd.luks.key value.
+// If the right-hand side of a colon is a device specifier (UUID=, LABEL=, PARTUUID=, PARTLABEL=),
+// the device ref is returned and path contains only the left-hand side (path within that device).
+// Otherwise path == raw and ref == nil.
+func parseKeyfileField(raw string) (path string, ref *deviceRef, err error) {
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		right := raw[idx+1:]
+		if strings.HasPrefix(right, "UUID=") || strings.HasPrefix(right, "LABEL=") ||
+			strings.HasPrefix(right, "PARTUUID=") || strings.HasPrefix(right, "PARTLABEL=") {
+			ref, err = parseDeviceRef(right)
+			if err != nil {
+				return "", nil, fmt.Errorf("keyfile device ref %q: %v", right, err)
+			}
+			return raw[:idx], ref, nil
+		}
+	}
+	return raw, nil, nil
+}
+
 // parseCrypttab reads /etc/crypttab (bundled from the host's /etc/crypttab.initramfs)
 // and returns a slice of LUKS mappings to unlock at boot.
 // Returns nil without error if /etc/crypttab is absent — opt-in by file presence.
@@ -67,6 +86,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			tries           int
 			keyfileOffset   int64
 			keyfileSize     int64
+			keyfileTimeout  time.Duration
 			fido2           bool
 			tpm2            bool
 			timeout         time.Duration
@@ -94,6 +114,12 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 				}
 				timeout = d
 				timeoutExplicit = true
+			case strings.HasPrefix(opt, "keyfile-timeout="):
+				d, err := parseTokenTimeout(strings.TrimPrefix(opt, "keyfile-timeout="))
+				if err != nil {
+					return nil, fmt.Errorf("crypttab entry %q: invalid keyfile-timeout: %v", name, err)
+				}
+				keyfileTimeout = d
 			case strings.HasPrefix(opt, "header="):
 				header = strings.TrimPrefix(opt, "header=")
 			case strings.HasPrefix(opt, "key-slot="):
@@ -139,17 +165,28 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			return nil, fmt.Errorf("crypttab entry %q: invalid device %q: %v", name, deviceStr, err)
 		}
 
+		keyfilePath, keyfileRef, err := parseKeyfileField(keyfile)
+		if err != nil {
+			return nil, fmt.Errorf("crypttab entry %q: %v", name, err)
+		}
+
+		if keyfileRef != nil && deviceRefEqual(ref, keyfileRef) {
+			return nil, fmt.Errorf("crypttab entry %q: keyfile device must not be the LUKS device", name)
+		}
+
 		m := &luksMapping{
-			ref:           ref,
-			name:          name,
-			keyfile:       keyfile,
-			options:       options,
-			header:        header,
-			keySlot:       keySlot,
-			tries:         tries,
-			noFail:        noFail,
-			keyfileOffset: keyfileOffset,
-			keyfileSize:   keyfileSize,
+			ref:              ref,
+			name:             name,
+			keyfile:          keyfilePath,
+			options:          options,
+			header:           header,
+			keySlot:          keySlot,
+			tries:            tries,
+			noFail:           noFail,
+			keyfileOffset:    keyfileOffset,
+			keyfileSize:      keyfileSize,
+			keyfileDeviceRef: keyfileRef,
+			keyfileTimeout:   keyfileTimeout,
 		}
 		m.tokenFido2 = fido2
 		m.tokenTpm2 = tpm2

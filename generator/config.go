@@ -140,6 +140,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	} else {
 		conf.modulesDir = filepath.Join(imageModulesDir, conf.kernelVersion)
 	}
+	conf.crypttabFile = opts.BuildCommand.CrypttabFile
 	conf.debug = opts.Verbose
 	conf.readDeviceAliases = readDeviceAliases
 	conf.readHostModules = readHostModules

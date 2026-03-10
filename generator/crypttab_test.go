@@ -116,6 +116,51 @@ func TestAppendCrypttabHeaderRelativePathError(t *testing.T) {
 	require.Error(t, img.appendCrypttabFrom(crypttab))
 }
 
+func TestIsKeyfileOnDeviceUUID(t *testing.T) {
+	require.True(t, isKeyfileOnDevice("/keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789"))
+}
+
+func TestIsKeyfileOnDeviceLabel(t *testing.T) {
+	require.True(t, isKeyfileOnDevice("/keyfile:LABEL=myusbkey"))
+}
+
+func TestIsKeyfileOnDevicePartuuid(t *testing.T) {
+	require.True(t, isKeyfileOnDevice("/key:PARTUUID=f1e2d3c4-b5a6-4789-8abc-def123456789"))
+}
+
+func TestIsKeyfileOnDevicePartlabel(t *testing.T) {
+	require.True(t, isKeyfileOnDevice("/key:PARTLABEL=usbkeys"))
+}
+
+func TestIsKeyfileOnDevicePlainPath(t *testing.T) {
+	require.False(t, isKeyfileOnDevice("/etc/keys/root.key"))
+}
+
+func TestIsKeyfileOnDeviceColonNonDevice(t *testing.T) {
+	// colon present but right side is not a device specifier
+	require.False(t, isKeyfileOnDevice("/path/key:something"))
+}
+
+func TestIsKeyfileOnDeviceEmpty(t *testing.T) {
+	require.False(t, isKeyfileOnDevice(""))
+}
+
+func TestAppendCrypttabKeyfileOnDeviceNotBundled(t *testing.T) {
+	dir := t.TempDir()
+
+	// The keyfile itself doesn't exist on the host — it lives on a runtime device.
+	// The generator should skip bundling it without error.
+	crypttab := filepath.Join(dir, "crypttab.initramfs")
+	content := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789 discard\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFrom(crypttab))
+	require.True(t, img.contains["/etc/crypttab"])
+	// the device-resident keyfile path must NOT be bundled
+	require.False(t, img.contains["/keyfile"])
+}
+
 func TestAppendCrypttabCommentAndBlankLines(t *testing.T) {
 	dir := t.TempDir()
 

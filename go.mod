@@ -2,6 +2,8 @@ module github.com/anatol/booster
 
 go 1.26
 
+replace github.com/anatol/luks.go => /home/stew/Coding/claude/luks.go
+
 require (
 	github.com/anatol/clevis.go v0.0.0-20251105050026-c2c7ddab8f14
 	github.com/anatol/devmapper.go v0.0.0-20250316020617-2671eefd35d7

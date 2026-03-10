@@ -246,6 +246,108 @@ func TestDeviceRefEqual(t *testing.T) {
 	require.False(t, deviceRefEqual(nil, a))
 }
 
+func TestParseKeyfileFieldPlain(t *testing.T) {
+	path, ref, err := parseKeyfileField("/etc/keys/root.key")
+	require.NoError(t, err)
+	require.Equal(t, "/etc/keys/root.key", path)
+	require.Nil(t, ref)
+}
+
+func TestParseKeyfileFieldEmpty(t *testing.T) {
+	path, ref, err := parseKeyfileField("")
+	require.NoError(t, err)
+	require.Equal(t, "", path)
+	require.Nil(t, ref)
+}
+
+func TestParseKeyfileFieldUUID(t *testing.T) {
+	path, ref, err := parseKeyfileField("/keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789")
+	require.NoError(t, err)
+	require.Equal(t, "/keyfile", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refFsUUID, ref.format)
+}
+
+func TestParseKeyfileFieldLabel(t *testing.T) {
+	path, ref, err := parseKeyfileField("/keyfile:LABEL=myusbkey")
+	require.NoError(t, err)
+	require.Equal(t, "/keyfile", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refFsLabel, ref.format)
+	require.Equal(t, "myusbkey", ref.data.(string))
+}
+
+func TestParseKeyfileFieldPartuuid(t *testing.T) {
+	path, ref, err := parseKeyfileField("/key:PARTUUID=f1e2d3c4-b5a6-4789-8abc-def123456789")
+	require.NoError(t, err)
+	require.Equal(t, "/key", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refGptUUID, ref.format)
+}
+
+func TestParseKeyfileFieldPartlabel(t *testing.T) {
+	path, ref, err := parseKeyfileField("/key:PARTLABEL=usbkeys")
+	require.NoError(t, err)
+	require.Equal(t, "/key", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refGptLabel, ref.format)
+	require.Equal(t, "usbkeys", ref.data.(string))
+}
+
+func TestParseKeyfileFieldColonNonDevice(t *testing.T) {
+	// colon present but right side is not a recognised device specifier — treat whole string as path
+	path, ref, err := parseKeyfileField("/etc/key:something")
+	require.NoError(t, err)
+	require.Equal(t, "/etc/key:something", path)
+	require.Nil(t, ref)
+}
+
+func TestParseKeyfileFieldInvalidUUID(t *testing.T) {
+	_, _, err := parseKeyfileField("/keyfile:UUID=not-a-valid-uuid")
+	require.Error(t, err)
+}
+
+func TestParseCrypttabKeyfileOnDevice(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789\n")
+	require.Len(t, m, 1)
+	require.Equal(t, "/keyfile", m[0].keyfile)
+	require.NotNil(t, m[0].keyfileDeviceRef)
+	require.Equal(t, refFsUUID, m[0].keyfileDeviceRef.format)
+}
+
+func TestParseCrypttabKeyfileTimeout(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789 keyfile-timeout=30\n")
+	require.Len(t, m, 1)
+	require.Equal(t, 30*time.Second, m[0].keyfileTimeout)
+}
+
+func TestParseCrypttabKeyfileTimeoutZero(t *testing.T) {
+	// keyfile-timeout=0 means wait forever
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789 keyfile-timeout=0\n")
+	require.Len(t, m, 1)
+	require.Equal(t, time.Duration(0), m[0].keyfileTimeout)
+}
+
+func TestParseCrypttabKeyfileTimeoutInvalid(t *testing.T) {
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile keyfile-timeout=bad\n"))
+	require.Error(t, err)
+}
+
+func TestParseCrypttabSameDeviceError(t *testing.T) {
+	// keyfile device UUID == LUKS device UUID → parse-time error
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /keyfile:UUID=ab6d7d78-b816-4495-928d-766d6607035e\n"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "keyfile device must not be the LUKS device")
+}
+
+func TestParseCrypttabKeyfileOnDeviceNoRef(t *testing.T) {
+	// plain keyfile path (no colon) → keyfileDeviceRef must be nil
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /etc/keys/root.key discard\n")
+	require.Len(t, m, 1)
+	require.Nil(t, m[0].keyfileDeviceRef)
+	require.Equal(t, time.Duration(0), m[0].keyfileTimeout)
+}
+
 func TestLuksMatchExists(t *testing.T) {
 	uuidStr := "ab6d7d78-b816-4495-928d-766d6607035e"
 	uuid, err := parseUUID(uuidStr)

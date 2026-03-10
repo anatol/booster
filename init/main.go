@@ -82,6 +82,9 @@ var (
 
 	seenDevices       = make(set) // devices that are already seen by the system, the devices might be fully processed or processing right now
 	processingDevices = make(map[string]*sync.WaitGroup)
+
+	processedBlkInfos []*blkInfo               // append-only; protected by devicesMutex
+	deviceReadyCond   = sync.NewCond(&devicesMutex)
 )
 
 // waitForDeviceToProcess waits till the given device gets handled.
@@ -106,6 +109,34 @@ func markDeviceProcessed(dev string) {
 
 	wg := processingDevices[dev]
 	wg.Done()
+}
+
+// waitForDeviceRef waits until a processed block device matching ref appears.
+// When timeout > 0 it gives up after that duration; timeout == 0 waits forever.
+func waitForDeviceRef(ref *deviceRef, timeout time.Duration) (*blkInfo, error) {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+		go func() {
+			time.Sleep(timeout)
+			deviceReadyCond.Broadcast()
+		}()
+	}
+
+	devicesMutex.Lock()
+	defer devicesMutex.Unlock()
+
+	for {
+		for _, blk := range processedBlkInfos {
+			if blk.matchesRef(ref) {
+				return blk, nil
+			}
+		}
+		if timeout > 0 && time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for keyfile device")
+		}
+		deviceReadyCond.Wait()
+	}
 }
 
 func diskSymlink(typ, oldname, newname string) error {
@@ -159,6 +190,11 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	}
 
 	blk.symlinks = symlinks
+
+	devicesMutex.Lock()
+	processedBlkInfos = append(processedBlkInfos, blk)
+	devicesMutex.Unlock()
+	deviceReadyCond.Broadcast()
 
 	if blk.uuid != nil {
 		if err := diskSymlink("uuid", devpath, blk.uuid.toString()); err != nil {
@@ -926,6 +962,10 @@ func boost() error {
 		if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
 			return err
 		}
+	}
+
+	if err := os.MkdirAll("/run/booster", 0o700); err != nil {
+		return err
 	}
 
 	go func() { check(scanSysModaliases()) }()

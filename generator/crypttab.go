@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// isKeyfileOnDevice reports whether kf is a keyfile-on-device specifier of the
+// form "/path:UUID=xxx", "/path:LABEL=xxx", etc.
+func isKeyfileOnDevice(kf string) bool {
+	idx := strings.Index(kf, ":")
+	if idx < 0 {
+		return false
+	}
+	r := kf[idx+1:]
+	return strings.HasPrefix(r, "UUID=") || strings.HasPrefix(r, "LABEL=") ||
+		strings.HasPrefix(r, "PARTUUID=") || strings.HasPrefix(r, "PARTLABEL=")
+}
+
 // appendCrypttab bundles /etc/crypttab.initramfs (if present on the host) into
 // the image as /etc/crypttab, and pre-bundles any referenced keyfiles or
 // detached LUKS headers.  Silently skips if the file does not exist — opting in
@@ -62,10 +74,10 @@ func (img *Image) appendCrypttabFrom(hostPath string) error {
 		}
 
 		// bundle keyfile if it is an absolute path (not none/-)
-		// TODO: keyfile of the form "/path:UUID=..." means the key is on a separate
-		// device — requires mounting that device at early boot (issue #26).
 		if keyfile != "" && keyfile != "none" && keyfile != "-" && filepath.IsAbs(keyfile) {
-			if err := img.AppendFile(keyfile); err != nil {
+			if isKeyfileOnDevice(keyfile) {
+				// key lives on a separate runtime device — nothing to bundle
+			} else if err := img.AppendFile(keyfile); err != nil {
 				return fmt.Errorf("crypttab.initramfs: keyfile %s: %v", keyfile, err)
 			}
 		}
