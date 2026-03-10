@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -82,5 +84,120 @@ func TestLoadableCryptoModule(t *testing.T) {
 
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+const (
+	keyfileDevLuksUUID   = "7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f"
+	keyfileDevFsUUID     = "a3d8e2c1-4f7b-4e9c-b2a1-6d5f3c8e1a7b"
+	keyfileDevKeydevUUID = "f1e2d3c4-b5a6-4789-8abc-def123456789"
+
+	keyfileOffsetLuksUUID = "c0d3f4a5-b6e7-4809-9abc-def012345678"
+	keyfileOffsetFsUUID   = "d1e2f3a4-c5b6-4789-abcd-ef0123456789"
+)
+
+// TestLUKS2KeyfileOnDeviceCmdline verifies that booster can unlock a LUKS2
+// volume whose keyfile lives on a separate block device, specified via the
+// rd.luks.key=/path:UUID=<keydev> kernel parameter.
+func TestLUKS2KeyfileOnDeviceCmdline(t *testing.T) {
+	vm, err := buildVmInstance(t, Opts{
+		disk:   "assets/luks2.keyfile_device.img",
+		params: []string{"-drive", "file=assets/luks2.keyfile_device.keydev.img,if=virtio,format=raw"},
+		kernelArgs: []string{
+			"rd.luks.name=" + keyfileDevLuksUUID + "=cryptroot",
+			"rd.luks.key=" + keyfileDevLuksUUID + "=/keyfile:UUID=" + keyfileDevKeydevUUID,
+			"root=/dev/mapper/cryptroot",
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2KeyfileOnDeviceCrypttab verifies the same keyfile-on-device unlock
+// path but driven by /etc/crypttab (the keyfile= field with :UUID= suffix).
+func TestLUKS2KeyfileOnDeviceCrypttab(t *testing.T) {
+	crypttab := filepath.Join(t.TempDir(), "crypttab.initramfs")
+	content := "cryptroot UUID=" + keyfileDevLuksUUID + " /keyfile:UUID=" + keyfileDevKeydevUUID + "\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.keyfile_device.img",
+		params:       []string{"-drive", "file=assets/luks2.keyfile_device.keydev.img,if=virtio,format=raw"},
+		kernelArgs:   []string{"root=UUID=" + keyfileDevFsUUID},
+		crypttabFile: crypttab,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2CrypttabPassphrase verifies that booster can unlock a LUKS2 volume
+// driven entirely by /etc/crypttab (no rd.luks.* kernel arguments).
+func TestLUKS2CrypttabPassphrase(t *testing.T) {
+	crypttab := filepath.Join(t.TempDir(), "crypttab.initramfs")
+	content := "cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.img",
+		kernelArgs:   []string{"root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
+		crypttabFile: crypttab,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2NofailCrypttab verifies that a crypttab entry with nofail does not
+// prevent boot when the referenced device is absent.
+func TestLUKS2NofailCrypttab(t *testing.T) {
+	crypttab := filepath.Join(t.TempDir(), "crypttab.initramfs")
+	content := "cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none\n" +
+		"nonexistent UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee none nofail\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.img",
+		kernelArgs:   []string{"root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
+		crypttabFile: crypttab,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2CrypttabKeyfileOffsetSize verifies that booster can unlock a LUKS2
+// volume using a bundled keyfile with keyfile-offset= and keyfile-size= in
+// /etc/crypttab — the keyfile has a 512-byte random preamble before the real
+// key material.
+func TestLUKS2CrypttabKeyfileOffsetSize(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.keyfile_offset.img"))
+
+	// The keyfile was written alongside the image by the asset generator.
+	// Use its absolute path so the booster generator can bundle it.
+	keyfilePath, err := filepath.Abs("assets/luks2.keyfile_offset.key")
+	require.NoError(t, err)
+
+	crypttab := filepath.Join(t.TempDir(), "crypttab.initramfs")
+	content := "cryptroot UUID=" + keyfileOffsetLuksUUID + " " + keyfilePath + " keyfile-offset=512,keyfile-size=4096\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.keyfile_offset.img",
+		kernelArgs:   []string{"root=UUID=" + keyfileOffsetFsUUID},
+		crypttabFile: crypttab,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }

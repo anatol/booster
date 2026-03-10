@@ -23,7 +23,44 @@ var assetGenerators = map[string]assetGenerator{
 	"luks2.clevis.yubikey.img": {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf52", "FS_UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=yubikey", `CLEVIS_CONFIG={"slot":2}`}},
 	"luks2.clevis.remote.img":  {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf22", "FS_UUID=7acb3a9e-9b51-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=remote", `CLEVIS_CONFIG={"adv":"assets/remote/key.pub", "port":34551}`}},
 	// camellia is a loadable module at Arch and it is a good candidate to verify loading it works correctly
-	"luks2.external.module.img": {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=ad575500-a9e3-4692-b1b2-eed95a6e8ce2", "FS_UUID=0118f2b1-3c4f-4eff-9663-b58447ad797c", `LUKS_PARAMS=-c camellia-xts-plain64 -s 512 -h sha512 -i 8000 --pbkdf argon2id --pbkdf-memory 4100000`}},
+	"luks2.external.module.img":   {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=ad575500-a9e3-4692-b1b2-eed95a6e8ce2", "FS_UUID=0118f2b1-3c4f-4eff-9663-b58447ad797c", `LUKS_PARAMS=-c camellia-xts-plain64 -s 512 -h sha512 -i 8000 --pbkdf argon2id --pbkdf-memory 4100000`}},
+	// luks2.keyfile_offset.img: LUKS2 image enrolled with a keyfile that has a 512-byte random
+	// preamble before the real key material.  Tests keyfile-offset= and keyfile-size= in crypttab.
+	// The keyfile (preamble+key) is written to KEYFILE_OUTPUT alongside the image.
+	"luks2.keyfile_offset.img": {"luks_keyfile_offset.sh", []string{
+		"LUKS_UUID=c0d3f4a5-b6e7-4809-9abc-def012345678",
+		"FS_UUID=d1e2f3a4-c5b6-4789-abcd-ef0123456789",
+		"KEYFILE_OUTPUT=assets/luks2.keyfile_offset.key",
+	}},
+	// luks2.keyfile_device.img and its companion keydev are both created by a single generator run.
+	"luks2.keyfile_device.img": {"luks_keyfile_device.sh", []string{
+		"LUKS_UUID=7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f",
+		"FS_UUID=a3d8e2c1-4f7b-4e9c-b2a1-6d5f3c8e1a7b",
+		"KEYDEV_UUID=f1e2d3c4-b5a6-4789-8abc-def123456789",
+		"KEYDEV_OUTPUT=assets/luks2.keyfile_device.keydev.img",
+	}},
+	// luks2.btrfs_two_a.img + luks2.btrfs_two_a2.img: two LUKS2 drives with the
+	// SAME passphrase forming a btrfs RAID1.  Tests passphrase cache (enter once,
+	// both drives unlock automatically).
+	"luks2.btrfs_two_a.img": {"luks_btrfs_two.sh", []string{
+		"LUKS_UUID1=a1b2c3d4-1111-4111-8111-111111111111",
+		"LUKS_UUID2=a2b2c3d4-2222-4222-8222-222222222222",
+		"LUKS_PASSWORD1=1234",
+		"LUKS_PASSWORD2=1234",
+		"FS_UUID=a3b2c3d4-3333-4333-8333-333333333333",
+		"OUTPUT2=assets/luks2.btrfs_two_a2.img",
+	}},
+	// luks2.btrfs_two_b.img + luks2.btrfs_two_b2.img: two LUKS2 drives with
+	// DIFFERENT passphrases forming a btrfs RAID1.  Tests that booster prompts
+	// for each passphrase and waits for both drives before mounting btrfs.
+	"luks2.btrfs_two_b.img": {"luks_btrfs_two.sh", []string{
+		"LUKS_UUID1=b1b2c3d4-1111-4111-8111-111111111112",
+		"LUKS_UUID2=b2b2c3d4-2222-4222-8222-222222222223",
+		"LUKS_PASSWORD1=1234",
+		"LUKS_PASSWORD2=5678",
+		"FS_UUID=b3b2c3d4-3333-4333-8333-333333333334",
+		"OUTPUT2=assets/luks2.btrfs_two_b2.img",
+	}},
 	"gpt.img":                   {"gpt.sh", []string{"FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}},
 	"gpt_4ksector.img":          {"gpt_4ksector.sh", nil},
 	"lvm.img":                   {"lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
