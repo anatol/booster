@@ -220,7 +220,11 @@ func handleMapperDeviceUevent(ev netlink.UEvent) error {
 	dmLinkPath := "/dev/mapper/" + info.Name // later we use /dev/mapper/NAME as a mount point
 	// setup symlink /dev/mapper/NAME -> /dev/dm-NN
 	if err := os.Symlink(devPath, dmLinkPath); err != nil {
-		return err
+		if !os.IsExist(err) {
+			return err
+		}
+		// LVM (pvscan) may have already created this symlink; ignore.
+		debug("symlink %s already exists, skipping", dmLinkPath)
 	}
 	symlinks = append(symlinks, dmLinkPath)
 
@@ -231,7 +235,10 @@ func handleMapperDeviceUevent(ev netlink.UEvent) error {
 			return err
 		}
 		if err := os.Symlink(devPath, lvmLinkPath); err != nil {
-			return err
+			if !os.IsExist(err) {
+				return err
+			}
+			debug("symlink %s already exists, skipping", lvmLinkPath)
 		}
 		symlinks = append(symlinks, lvmLinkPath)
 	}

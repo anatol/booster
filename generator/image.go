@@ -141,8 +141,11 @@ func stripElf(in []byte, stripAll bool) ([]byte, error) {
 		args = append(args, "--strip-unneeded")
 	}
 	args = append(args, t.Name())
-	if err := exec.Command("strip", args...).Run(); err != nil {
-		return nil, unwrapExitError(err)
+	cmd := exec.Command("strip", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("strip: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	return os.ReadFile(t.Name())
@@ -183,9 +186,14 @@ func (img *Image) AppendContent(dest string, osMode os.FileMode, content []byte)
 			if doStrip {
 				// do not use --strip-all for modules/shared libs as it fails to load
 				isBinary := ef.Type == elf.ET_EXEC
-				content, err = stripElf(content, isBinary)
-				if err != nil {
-					return err
+				stripped, stripErr := stripElf(content, isBinary)
+				if stripErr != nil {
+					// Strip is an optional size optimisation; a failure (e.g. LTO
+					// modules, signed modules, unusual toolchains) must not abort
+					// the build.  Warn and fall back to the unstripped binary.
+					warning("strip %s: %v — using unstripped", dest, stripErr)
+				} else {
+					content = stripped
 				}
 			}
 
