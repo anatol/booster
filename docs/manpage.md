@@ -118,14 +118,16 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. rootflags=user_xattr,nobarrier. In partition autodiscovery mode GPT attribute 60 ("read-only") is taken into account.
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
- * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request.
+ * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID. Falls back to a password prompt if the file does not exist or does not match.
+    The keyfile may reside on a separate block device using the syntax `$PATH:$DEVICEREF` where `$DEVICEREF` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster will wait for the device, mount it read-only, read the key, then unmount before unlocking.
+ * `rd.luks.header=$UUID=$PATH` absolute path to a detached LUKS header file bundled in the initramfs, for the device identified by UUID. The header must be included in the image at build time (via `header=` in `/etc/crypttab.initramfs` or `extra_files`).
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS options. Supported dm-crypt flags are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Token device options are also supported: `fido2-device=auto` defers the keyboard passphrase prompt until FIDO2 unlock fails or times out; `tpm2-device=auto` does the same for TPM2 tokens.
     The optional `token-timeout=DURATION` controls how long to wait for the token before falling back to keyboard (default 30s when a token option is set; bare integers are treated as seconds; `token-timeout=0` waits forever).
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
 
-As an alternative to `rd.luks.*` parameters, LUKS volumes can be configured via `/etc/crypttab.initramfs` on the host (see **crypttab(5)**).  If the file exists it is automatically bundled as `/etc/crypttab` inside the initramfs.  Booster supports `fido2-device=`, `tpm2-device=`, `token-timeout=`, `key-slot=`, `header=`, `discard`, and the other standard dm-crypt flags.  Kernel cmdline parameters take precedence over crypttab entries.
+As an alternative to `rd.luks.*` parameters, LUKS volumes can be configured via `/etc/crypttab.initramfs` on the host. If the file exists it is automatically bundled as `/etc/crypttab` inside the initramfs and processed at boot. Kernel cmdline parameters take precedence over crypttab entries. See **crypttab(5)** for the full option syntax.
 
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
