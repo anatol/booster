@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// parsePathWithDeviceRef parses a "path:SPECIFIER=value" string where the
+// right side of the colon is a device specifier (UUID=, LABEL=, PARTUUID=,
+// PARTLABEL=). If matched, path is the left side and ref is the parsed device
+// ref. Otherwise path == raw and ref == nil.
+// fieldName is used only in error messages (e.g. "keyfile", "header").
+func parsePathWithDeviceRef(raw, fieldName string) (path string, ref *deviceRef, err error) {
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		right := raw[idx+1:]
+		if strings.HasPrefix(right, "UUID=") || strings.HasPrefix(right, "LABEL=") ||
+			strings.HasPrefix(right, "PARTUUID=") || strings.HasPrefix(right, "PARTLABEL=") {
+			ref, err = parseDeviceRef(right)
+			if err != nil {
+				return "", nil, fmt.Errorf("%s device ref %q: %v", fieldName, right, err)
+			}
+			return raw[:idx], ref, nil
+		}
+	}
+	return raw, nil, nil
+}
+
 func parseCmdline() error {
 	b, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -276,6 +296,30 @@ func parseParams(params string) error {
 
 			m := findOrCreateLuksMapping(uuid)
 			m.keyfile = keyfile
+		case "rd.luks.header":
+			// Format: rd.luks.header=<UUID>=<path>
+			// where UUID identifies the LUKS device and path is the detached header.
+			// path may be an absolute initramfs file, a /dev/xxx raw block device,
+			// or a /file/path:UUID=xxx reference to a file on a separate device.
+			eqIdx := strings.Index(value, "=")
+			if eqIdx < 0 {
+				return fmt.Errorf("invalid rd.luks.header kernel parameter %q, expected format rd.luks.header=<UUID>=<path>", value)
+			}
+			uuid, err := parseUUID(value[:eqIdx])
+			if err != nil {
+				return fmt.Errorf("invalid UUID %s in rd.luks.header boot param: %v", value[:eqIdx], err)
+			}
+			headerPath := value[eqIdx+1:]
+			if headerPath == "" {
+				return fmt.Errorf("rd.luks.header: header path is empty")
+			}
+			path, ref, err := parsePathWithDeviceRef(headerPath, "header")
+			if err != nil {
+				return fmt.Errorf("rd.luks.header: %v", err)
+			}
+			m := findOrCreateLuksMapping(uuid)
+			m.header = path
+			m.headerDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
 		default:

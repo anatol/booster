@@ -25,10 +25,12 @@ import (
 // specifies information needed to process/open a LUKS device
 // often these mappings specified by a user via command-line
 type luksMapping struct {
-	ref     *deviceRef
-	name    string
-	keyfile string
-	options []string
+	ref             *deviceRef
+	name            string
+	keyfile         string
+	options         []string
+	header          string     // detached LUKS header path (empty = embedded header)
+	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
