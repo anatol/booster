@@ -178,10 +178,9 @@ func readPasswordLine(reader io.Reader) ([]byte, error) {
 
 var inputMutex sync.Mutex
 
-func readPassword(prompt, postPrompt string) ([]byte, error) {
-	inputMutex.Lock()
-	defer inputMutex.Unlock()
-
+// readPasswordLocked reads a password from stdin. The caller must hold
+// inputMutex before calling this function.
+func readPasswordLocked(prompt, postPrompt string) ([]byte, error) {
 	console(prompt)
 
 	stdin := os.Stdin
@@ -210,4 +209,10 @@ func readPassword(prompt, postPrompt string) ([]byte, error) {
 		console("\n")
 	}
 	return password, err
+}
+
+func readPassword(prompt, postPrompt string) ([]byte, error) {
+	inputMutex.Lock()
+	defer inputMutex.Unlock()
+	return readPasswordLocked(prompt, postPrompt)
 }
