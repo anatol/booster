@@ -240,7 +240,8 @@ func TestLUKS2DetachedHeaderCmdline(t *testing.T) {
 	require.NoError(t, err)
 
 	vm, err := buildVmInstance(t, Opts{
-		disk: "assets/luks2.detached_header.img",
+		disk:       "assets/luks2.detached_header.img",
+		extraFiles: headerPath,
 		kernelArgs: []string{
 			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
 			"rd.luks.header=" + detachedHeaderLuksUUID + "=" + headerPath,

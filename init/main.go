@@ -221,6 +221,27 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		return handleGptBlockDevice(blk)
 	}
 
+	// Detached LUKS header: the data device carries no embedded header so
+	// probeLuks returns nil and blk.format is empty.  Check whether any
+	// luksMapping has a header= path whose UUID matches the mapping's ref;
+	// if so, adopt this device as the data device for that mapping.
+	if blk.format == "" {
+		for _, m := range luksMappings {
+			if m.header == "" {
+				continue
+			}
+			hdrBlk := probeLuksHeader(m.header)
+			if hdrBlk == nil {
+				continue
+			}
+			if hdrBlk.matchesRef(m.ref) {
+				blk.format = "luks"
+				blk.uuid = hdrBlk.uuid
+				return handleLuksBlockDevice(blk)
+			}
+		}
+	}
+
 	if blk.matchesRef(cmdResume) {
 		if err := resume(devpath); err != nil {
 			return err
