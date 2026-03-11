@@ -34,6 +34,10 @@ func TestHostHwPath(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, e := range ents {
+		if e.Type()&os.ModeSymlink == 0 {
+			// ignore non-symlink entries (e.g. spurious directories)
+			continue
+		}
 		if partitionRe.MatchString(e.Name()) {
 			// ignore partitions
 			continue
