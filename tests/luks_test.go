@@ -88,6 +88,9 @@ func TestLoadableCryptoModule(t *testing.T) {
 }
 
 const (
+	detachedHeaderLuksUUID = "cbd49694-81de-41bd-a850-0d934aff8328"
+	detachedHeaderFsUUID   = "781780d2-bf67-4a17-9ca8-fd22336c1b2e"
+
 	keyfileDevLuksUUID   = "7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f"
 	keyfileDevFsUUID     = "a3d8e2c1-4f7b-4e9c-b2a1-6d5f3c8e1a7b"
 	keyfileDevKeydevUUID = "f1e2d3c4-b5a6-4789-8abc-def123456789"
@@ -199,5 +202,55 @@ func TestLUKS2CrypttabKeyfileOffsetSize(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2DetachedHeaderCrypttab verifies that booster can unlock a LUKS2
+// volume whose header is stored in a separate file, configured via crypttab
+// header= option. The header is bundled into the initramfs by the generator.
+func TestLUKS2DetachedHeaderCrypttab(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+
+	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
+	require.NoError(t, err)
+
+	crypttab := filepath.Join(t.TempDir(), "crypttab.initramfs")
+	content := "cryptroot UUID=" + detachedHeaderLuksUUID + " none header=" + headerPath + "\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.detached_header.img",
+		kernelArgs:   []string{"root=UUID=" + detachedHeaderFsUUID},
+		crypttabFile: crypttab,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2DetachedHeaderCmdline verifies the same detached-header unlock path
+// driven by the rd.luks.header= kernel parameter instead of crypttab.
+func TestLUKS2DetachedHeaderCmdline(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+
+	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.detached_header.img",
+		kernelArgs: []string{
+			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
+			"rd.luks.header=" + detachedHeaderLuksUUID + "=" + headerPath,
+			"root=/dev/mapper/cryptroot",
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }

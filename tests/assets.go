@@ -32,6 +32,14 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=d1e2f3a4-c5b6-4789-abcd-ef0123456789",
 		"KEYFILE_OUTPUT=assets/luks2.keyfile_offset.key",
 	}},
+	// luks2.detached_header.img: LUKS2 image whose header is stored in a separate file.
+	// Tests crypttab header= and rd.luks.header= detached-header unlock.
+	// The header file is written to HEADER_OUTPUT alongside the image.
+	"luks2.detached_header.img": {"luks_detached_header.sh", []string{
+		"LUKS_UUID=cbd49694-81de-41bd-a850-0d934aff8328",
+		"FS_UUID=781780d2-bf67-4a17-9ca8-fd22336c1b2e",
+		"HEADER_OUTPUT=assets/luks2.detached_header.hdr",
+	}},
 	// luks2.keyfile_device.img and its companion keydev are both created by a single generator run.
 	"luks2.keyfile_device.img": {"luks_keyfile_device.sh", []string{
 		"LUKS_UUID=7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f",
