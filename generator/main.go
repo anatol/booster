@@ -22,7 +22,7 @@ var opts struct {
 		KernelVersion    string `long:"kernel-version" description:"Linux kernel version to generate initramfs for"`
 		ModulesDirectory string `long:"modules-dir" description:"Directory with kernel modules, if not set then /usr/lib/modules/$kernel-version is used"`
 		ConfigFile       string `long:"config" default:"/etc/booster.yaml" description:"Configuration file path"`
-		CrypttabFile     string `long:"crypttab" description:"Path to crypttab file to bundle (default: /etc/crypttab.initramfs)"`
+		CrypttabFile     string `long:"crypttab" description:"Explicit crypttab file to bundle (default: read /etc/crypttab filtered by x-initrd.attach)"`
 		Universal        bool   `long:"universal" description:"Add wide range of modules/tools to allow this image boot at different machines"`
 		Strip            bool   `long:"strip" description:"Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image"`
 		Args             struct {

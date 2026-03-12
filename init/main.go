@@ -85,6 +85,12 @@ var (
 
 	processedBlkInfos []*blkInfo               // append-only; protected by devicesMutex
 	deviceReadyCond   = sync.NewCond(&devicesMutex)
+
+	// pendingDevices accumulates format=="" block devices that could not be
+	// matched to a LUKS mapping on first arrival.  They are retried when a
+	// detached header device appears.
+	pendingDevicesMu sync.Mutex
+	pendingDevices   []*blkInfo
 )
 
 // waitForDeviceToProcess waits till the given device gets handled.
@@ -209,7 +215,68 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		}
 	}
 
-	// check non-mountable types that require extra processing
+	return processBlkInfo(blk)
+}
+
+// probeHeaderOnDevice non-blockingly checks whether m's header device is already
+// in processedBlkInfos.  If so it mounts it read-only and returns the full path
+// to the header file together with a cleanup function that unmounts it.
+// Returns ("", no-op) when the device has not yet appeared or is not mountable.
+// The caller must invoke cleanup() after use.
+func probeHeaderOnDevice(m *luksMapping) (path string, cleanup func()) {
+	noop := func() {}
+	devicesMutex.Lock()
+	var hdrDev *blkInfo
+	for _, b := range processedBlkInfos {
+		if b.matchesRef(m.headerDeviceRef) {
+			hdrDev = b
+			break
+		}
+	}
+	devicesMutex.Unlock()
+	if hdrDev == nil || !hdrDev.isFs {
+		return "", noop
+	}
+	mp := "/run/booster/hdrdev-probe-" + m.name
+	if err := os.MkdirAll(mp, 0o700); err != nil {
+		return "", noop
+	}
+	flags := uintptr(unix.MS_RDONLY | unix.MS_NOEXEC | unix.MS_NOSUID | unix.MS_NODEV)
+	if err := unix.Mount(hdrDev.path, mp, hdrDev.format, flags, ""); err != nil {
+		_ = os.Remove(mp)
+		return "", noop
+	}
+	return filepath.Join(mp, m.header), func() {
+		_ = unix.Unmount(mp, unix.MNT_DETACH)
+		_ = os.Remove(mp)
+	}
+}
+
+// processBlkInfo dispatches a newly-discovered (or retried) block device to the
+// appropriate handler.  Called from addBlockDevice for new devices and directly
+// from retryPendingDevices for previously-unmatched devices.
+func processBlkInfo(blk *blkInfo) error {
+	devpath := blk.path
+
+	// Intercept raw block devices that serve as detached LUKS headers so they
+	// are not erroneously opened as LUKS data devices.  Trigger a retry of any
+	// data devices that were parked in pending while waiting for this header.
+	for _, m := range luksMappings {
+		if m.headerDeviceRef == nil && m.header == devpath {
+			retryPendingDevices()
+			return nil
+		}
+	}
+
+	// If a filesystem device arrives that matches any mapping's headerDeviceRef,
+	// trigger retry so data devices in pending can now mount it and open the header.
+	for _, m := range luksMappings {
+		if m.headerDeviceRef != nil && blk.matchesRef(m.headerDeviceRef) {
+			retryPendingDevices()
+			break
+		}
+	}
+
 	switch blk.format {
 	case "luks":
 		return handleLuksBlockDevice(blk)
@@ -221,14 +288,46 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 		return handleGptBlockDevice(blk)
 	}
 
-	// Detached LUKS header: the data device carries no embedded header so
-	// probeLuks returns nil and blk.format is empty.  Check whether any
-	// luksMapping has a header= path whose UUID matches the mapping's ref;
-	// if so, adopt this device as the data device for that mapping.
 	if blk.format == "" {
+		// Case 1: header is a file on a separate device (headerDeviceRef != nil).
+		// Try direct ref match first (works for PARTUUID/path/label on the data device).
+		// Fall back to probing via the header device: the LUKS UUID lives in the header
+		// file, not in the data device, so UUID-based refs require reading the header.
 		for _, m := range luksMappings {
-			if m.header == "" {
+			if m.headerDeviceRef == nil {
 				continue
+			}
+			if blk.matchesRef(m.ref) {
+				blk.format = "luks"
+				return handleLuksBlockDevice(blk)
+			}
+			// Non-blocking probe: if the header device is already in processedBlkInfos,
+			// mount it and read the header to recover the LUKS UUID for matching.
+			hdrPath, cleanup := probeHeaderOnDevice(m)
+			if hdrPath != "" {
+				hdrBlk := probeLuksHeader(hdrPath)
+				cleanup()
+				if hdrBlk != nil && hdrBlk.matchesRef(m.ref) {
+					blk.format = "luks"
+					blk.uuid = hdrBlk.uuid
+					return handleLuksBlockDevice(blk)
+				}
+			}
+		}
+
+		// Case 2: header is a raw block device or a bundled initramfs file.
+		// Try direct ref matching first (works for path/label/hwpath refs on the
+		// data device without needing to probe the header).  Fall back to probing
+		// the header to obtain the LUKS UUID for UUID-based refs.
+		for _, m := range luksMappings {
+			if m.header == "" || m.headerDeviceRef != nil {
+				continue
+			}
+			if blk.matchesRef(m.ref) {
+				// Matched by path/label/hwpath — acquireHeader in luksOpen will
+				// wait for the header device if it has not appeared yet.
+				blk.format = "luks"
+				return handleLuksBlockDevice(blk)
 			}
 			hdrBlk := probeLuksHeader(m.header)
 			if hdrBlk == nil {
@@ -240,6 +339,12 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 				return handleLuksBlockDevice(blk)
 			}
 		}
+
+		// Not matched as a LUKS data device.  Park in pending in case a detached
+		// header device arrives later and makes a match possible.
+		pendingDevicesMu.Lock()
+		pendingDevices = append(pendingDevices, blk)
+		pendingDevicesMu.Unlock()
 	}
 
 	if blk.matchesRef(cmdResume) {
@@ -263,6 +368,20 @@ func addBlockDevice(devpath string, isDevice bool, symlinks []string) error {
 	}
 
 	return nil
+}
+
+// retryPendingDevices replays all devices that were parked in pendingDevices
+// because no LUKS mapping could be matched at their original arrival time.
+func retryPendingDevices() {
+	pendingDevicesMu.Lock()
+	pending := pendingDevices
+	pendingDevices = nil
+	pendingDevicesMu.Unlock()
+	for _, blk := range pending {
+		if err := processBlkInfo(blk); err != nil {
+			warning("retry pending device %s: %v", blk.path, err)
+		}
+	}
 }
 
 func setupDiskSymlinks(devpath string, blk *blkInfo, err error) error {

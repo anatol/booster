@@ -25,7 +25,7 @@ type generatorConfig struct {
 	compression             string
 	timeout                 time.Duration
 	extraFiles              []string
-	crypttabFile            string // path to crypttab on host; empty = use default /etc/crypttab.initramfs
+	crypttabFile            string // explicit crypttab path (--crypttab flag); empty = read /etc/crypttab filtered by x-initrd.attach
 	output                  string
 	forceOverwrite          bool // overwrite output file
 	initBinary              string

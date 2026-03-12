@@ -42,6 +42,7 @@ type luksMapping struct {
 	keyfileSize      int64         // bytes to read from keyfile (0 = read to end)
 	keyfileDeviceRef *deviceRef    // non-nil when keyfile lives on a separate device
 	keyfileTimeout   time.Duration // 0 = use MountTimeout; >0 = per-entry device wait timeout
+	headerDeviceRef  *deviceRef    // non-nil when header is a file on a separate device
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -466,6 +467,35 @@ func mountKeyDevice(ref *deviceRef, mountPoint string, timeout time.Duration) (f
 	}, nil
 }
 
+// acquireHeader resolves the detached LUKS header path for a mapping, waiting
+// for the header device to appear if necessary. The returned cleanup function
+// unmounts any temporarily-mounted device; callers must defer it.
+// If the mapping has no detached header, path is "" and cleanup is a no-op.
+func acquireHeader(m *luksMapping) (path string, cleanup func(), err error) {
+	if m.header == "" {
+		return "", func() {}, nil
+	}
+	timeout := time.Duration(config.MountTimeout) * time.Second
+	if m.headerDeviceRef != nil {
+		// Header is a file on a separate filesystem device.
+		mp := "/run/booster/hdrdev-" + m.name
+		unmount, err := mountKeyDevice(m.headerDeviceRef, mp, timeout)
+		if err != nil {
+			return "", nil, err
+		}
+		return filepath.Join(mp, m.header), unmount, nil
+	}
+	if strings.HasPrefix(m.header, "/dev/") {
+		// Header is a raw block device — wait for it to appear.
+		ref := &deviceRef{refPath, m.header}
+		if _, err := waitForDeviceRef(ref, timeout); err != nil {
+			return "", nil, fmt.Errorf("header device %s: %v", m.header, err)
+		}
+	}
+	// Bundled initramfs file or now-present block device path.
+	return m.header, func() {}, nil
+}
+
 // acquireKeyfilePassword reads the keyfile, mounting a separate device if needed.
 // The device is unmounted before this function returns.
 func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
@@ -636,8 +666,13 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		d   luks.Device
 		err error
 	)
-	if mapping.header != "" {
-		d, err = luks.OpenWithHeader(dev, mapping.header)
+	headerPath, headerCleanup, err := acquireHeader(mapping)
+	if err != nil {
+		return err
+	}
+	defer headerCleanup()
+	if headerPath != "" {
+		d, err = luks.OpenWithHeader(dev, headerPath)
 	} else {
 		d, err = luks.Open(dev)
 	}

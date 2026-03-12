@@ -11,18 +11,19 @@ import (
 	"time"
 )
 
-// parseKeyfileField parses the keyfile field from a crypttab or rd.luks.key value.
-// If the right-hand side of a colon is a device specifier (UUID=, LABEL=, PARTUUID=, PARTLABEL=),
-// the device ref is returned and path contains only the left-hand side (path within that device).
-// Otherwise path == raw and ref == nil.
-func parseKeyfileField(raw string) (path string, ref *deviceRef, err error) {
+// parsePathWithDeviceRef parses a "path:SPECIFIER=value" string where the
+// right side of the colon is a device specifier (UUID=, LABEL=, PARTUUID=,
+// PARTLABEL=).  If matched, path is the left side and ref is the parsed device
+// ref.  Otherwise path == raw and ref == nil.
+// fieldName is used only in error messages (e.g. "keyfile", "header").
+func parsePathWithDeviceRef(raw, fieldName string) (path string, ref *deviceRef, err error) {
 	if idx := strings.Index(raw, ":"); idx >= 0 {
 		right := raw[idx+1:]
 		if strings.HasPrefix(right, "UUID=") || strings.HasPrefix(right, "LABEL=") ||
 			strings.HasPrefix(right, "PARTUUID=") || strings.HasPrefix(right, "PARTLABEL=") {
 			ref, err = parseDeviceRef(right)
 			if err != nil {
-				return "", nil, fmt.Errorf("keyfile device ref %q: %v", right, err)
+				return "", nil, fmt.Errorf("%s device ref %q: %v", fieldName, right, err)
 			}
 			return raw[:idx], ref, nil
 		}
@@ -30,9 +31,24 @@ func parseKeyfileField(raw string) (path string, ref *deviceRef, err error) {
 	return raw, nil, nil
 }
 
-// parseCrypttab reads /etc/crypttab (bundled from the host's /etc/crypttab.initramfs)
-// and returns a slice of LUKS mappings to unlock at boot.
-// Returns nil without error if /etc/crypttab is absent — opt-in by file presence.
+// parseKeyfileField parses the keyfile field from a crypttab or rd.luks.key
+// value.  If the right-hand side of a colon is a device specifier, the device
+// ref is returned and path contains only the left-hand side (path on that
+// device).  Otherwise path == raw and ref == nil.
+func parseKeyfileField(raw string) (path string, ref *deviceRef, err error) {
+	return parsePathWithDeviceRef(raw, "keyfile")
+}
+
+// parseHeaderField is the header= analogue of parseKeyfileField.
+// Used by rd.luks.header= (cmdline); crypttab header= stores the value verbatim.
+func parseHeaderField(raw string) (path string, ref *deviceRef, err error) {
+	return parsePathWithDeviceRef(raw, "header")
+}
+
+// parseCrypttab reads /etc/crypttab (bundled by the generator from the host's
+// /etc/crypttab, filtered to x-initrd.attach entries) and returns a slice of
+// LUKS mappings to unlock at boot.
+// Returns nil without error if /etc/crypttab is absent.
 func parseCrypttab() ([]*luksMapping, error) {
 	f, err := os.Open("/etc/crypttab")
 	if os.IsNotExist(err) {
