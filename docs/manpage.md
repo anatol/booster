@@ -96,6 +96,7 @@ Build initrd image. Usage: `booster [OPTIONS] build [build-OPTIONS] output`
 * `--compression` <default: _zstd_> Output file compression. Possible values: _zstd_, _gzip_, _xz_, _lz4_, _none_.
 * `--kernel-version` Linux kernel version to generate initramfs for.
 * `--config` <default: _/etc/booster.yaml_> Configuration file path.
+* `--crypttab` Explicit crypttab file to bundle all entries from (default: read `/etc/crypttab` filtered by `x-initrd.attach`).
 * `--universal` Add wide range of modules/tools to allow this image boot at different machines.
 * `--strip` Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image.
 
@@ -120,14 +121,19 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID. Falls back to a password prompt if the file does not exist or does not match.
     The keyfile may reside on a separate block device using the syntax `$PATH:$DEVICEREF` where `$DEVICEREF` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster will wait for the device, mount it read-only, read the key, then unmount before unlocking.
- * `rd.luks.header=$UUID=$PATH` absolute path to a detached LUKS header file bundled in the initramfs, for the device identified by UUID. The header must be included in the image at build time (via `header=` in `/etc/crypttab.initramfs` or `extra_files`).
+ * `rd.luks.header=$UUID=$PATH` detached LUKS header for the device identified by UUID. `$PATH` may be one of:
+    * An absolute path to a header file bundled in the initramfs (e.g. `/etc/luks/root.hdr`). The file must be included at build time via `header=` in a crypttab entry (with `x-initrd.attach`) or via `extra_files`.
+    * A raw block device path such as `/dev/sdb`. The header device must carry the LUKS header at byte offset 0. Booster waits for the device to appear before opening LUKS. No filesystem is mounted; the device is accessed directly by cryptsetup.
+    * A file on a separate device using the syntax `$PATH:$DEVICEREF` where `$DEVICEREF` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header, then unmounts before unlocking.
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS options. Supported dm-crypt flags are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Token device options are also supported: `fido2-device=auto` defers the keyboard passphrase prompt until FIDO2 unlock fails or times out; `tpm2-device=auto` does the same for TPM2 tokens.
     The optional `token-timeout=DURATION` controls how long to wait for the token before falling back to keyboard (default 30s when a token option is set; bare integers are treated as seconds; `token-timeout=0` waits forever).
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
 
-As an alternative to `rd.luks.*` parameters, LUKS volumes can be configured via `/etc/crypttab.initramfs` on the host. If the file exists it is automatically bundled as `/etc/crypttab` inside the initramfs and processed at boot. Kernel cmdline parameters take precedence over crypttab entries. See **crypttab(5)** for the full option syntax.
+As an alternative to `rd.luks.*` parameters, LUKS volumes can be configured via `/etc/crypttab`. Booster includes entries marked with the `x-initrd.attach` option — the standard systemd convention for entries that must be unlocked by the initramfs. Referenced keyfiles and detached LUKS headers are bundled into the image automatically. Kernel cmdline parameters take precedence over crypttab entries. See **crypttab(5)** for the full option syntax.
+
+Booster supports the standard crypttab `header=` option. In addition to a bundled file path, the value may be a raw block device (e.g. `header=/dev/sdb`), in which case booster waits for the device to appear at boot and passes it directly to cryptsetup.
 
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
