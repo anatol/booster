@@ -348,6 +348,82 @@ func TestParseCrypttabKeyfileOnDeviceNoRef(t *testing.T) {
 	require.Equal(t, time.Duration(0), m[0].keyfileTimeout)
 }
 
+func TestParseHeaderFieldPlain(t *testing.T) {
+	path, ref, err := parseHeaderField("/etc/luks/root.hdr")
+	require.NoError(t, err)
+	require.Equal(t, "/etc/luks/root.hdr", path)
+	require.Nil(t, ref)
+}
+
+func TestParseHeaderFieldRawDevice(t *testing.T) {
+	path, ref, err := parseHeaderField("/dev/sdb")
+	require.NoError(t, err)
+	require.Equal(t, "/dev/sdb", path)
+	require.Nil(t, ref)
+}
+
+func TestParseHeaderFieldEmpty(t *testing.T) {
+	path, ref, err := parseHeaderField("")
+	require.NoError(t, err)
+	require.Equal(t, "", path)
+	require.Nil(t, ref)
+}
+
+func TestParseHeaderFieldUUID(t *testing.T) {
+	path, ref, err := parseHeaderField("/hdr/root.hdr:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789")
+	require.NoError(t, err)
+	require.Equal(t, "/hdr/root.hdr", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refFsUUID, ref.format)
+}
+
+func TestParseHeaderFieldLabel(t *testing.T) {
+	path, ref, err := parseHeaderField("/hdr/root.hdr:LABEL=usbhdr")
+	require.NoError(t, err)
+	require.Equal(t, "/hdr/root.hdr", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refFsLabel, ref.format)
+	require.Equal(t, "usbhdr", ref.data.(string))
+}
+
+func TestParseHeaderFieldPartuuid(t *testing.T) {
+	path, ref, err := parseHeaderField("/hdr/root.hdr:PARTUUID=f1e2d3c4-b5a6-4789-8abc-def123456789")
+	require.NoError(t, err)
+	require.Equal(t, "/hdr/root.hdr", path)
+	require.NotNil(t, ref)
+	require.Equal(t, refGptUUID, ref.format)
+}
+
+func TestParseHeaderFieldColonNonDevice(t *testing.T) {
+	// colon present but right side is not a recognised device specifier
+	path, ref, err := parseHeaderField("/etc/hdr:something")
+	require.NoError(t, err)
+	require.Equal(t, "/etc/hdr:something", path)
+	require.Nil(t, ref)
+}
+
+func TestParseHeaderFieldInvalidUUID(t *testing.T) {
+	_, _, err := parseHeaderField("/hdr/root.hdr:UUID=not-a-valid-uuid")
+	require.Error(t, err)
+}
+
+func TestParseCrypttabHeaderOnDevice(t *testing.T) {
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none header=/dev/vdb\n")
+	require.Len(t, m, 1)
+	require.Equal(t, "/dev/vdb", m[0].header)
+	// raw device path — no separate device ref
+	require.Nil(t, m[0].headerDeviceRef)
+}
+
+func TestParseCrypttabHeaderColonSyntaxStoredVerbatim(t *testing.T) {
+	// header=/path:UUID=xxx is not a supported crypttab extension — the whole
+	// string is stored as-is and no device ref is parsed from it.
+	m := crypttabMappings(t, "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none header=/hdr/root.hdr:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789\n")
+	require.Len(t, m, 1)
+	require.Equal(t, "/hdr/root.hdr:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789", m[0].header)
+	require.Nil(t, m[0].headerDeviceRef)
+}
+
 func TestLuksMatchExists(t *testing.T) {
 	uuidStr := "ab6d7d78-b816-4495-928d-766d6607035e"
 	uuid, err := parseUUID(uuidStr)

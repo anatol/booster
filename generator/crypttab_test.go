@@ -161,6 +161,130 @@ func TestAppendCrypttabKeyfileOnDeviceNotBundled(t *testing.T) {
 	require.False(t, img.contains["/keyfile"])
 }
 
+func TestIsHeaderOnDeviceRawBlock(t *testing.T) {
+	require.True(t, isHeaderOnDevice("/dev/sdb"))
+	require.True(t, isHeaderOnDevice("/dev/vdb"))
+}
+
+func TestIsHeaderOnDevicePlainFile(t *testing.T) {
+	require.False(t, isHeaderOnDevice("/etc/luks/root.hdr"))
+}
+
+func TestIsHeaderOnDeviceEmpty(t *testing.T) {
+	require.False(t, isHeaderOnDevice(""))
+}
+
+func TestAppendCrypttabHeaderRawDeviceNotBundled(t *testing.T) {
+	dir := t.TempDir()
+
+	// header=/dev/vdb — lives on a runtime block device, must not be bundled.
+	crypttab := filepath.Join(dir, "crypttab.initramfs")
+	content := "cryptroot /dev/vda none header=/dev/vdb\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFrom(crypttab))
+	require.True(t, img.contains["/etc/crypttab"])
+	require.False(t, img.contains["/dev/vdb"])
+}
+
+func TestHasXInitrdAttach(t *testing.T) {
+	require.True(t, hasXInitrdAttach("x-initrd.attach"))
+	require.True(t, hasXInitrdAttach("discard,x-initrd.attach"))
+	require.True(t, hasXInitrdAttach("x-initrd.attach,nofail"))
+	require.False(t, hasXInitrdAttach("discard,nofail"))
+	require.False(t, hasXInitrdAttach(""))
+}
+
+func TestAppendCrypttabFilteredAbsent(t *testing.T) {
+	dir := t.TempDir()
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFiltered(filepath.Join(dir, "no-such-file")))
+	require.False(t, img.contains["/etc/crypttab"])
+}
+
+func TestAppendCrypttabFilteredNoXInitrd(t *testing.T) {
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	// entries without x-initrd.attach should be ignored
+	content := "cryptroot UUID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa none discard\n" +
+		"cryptswap UUID=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb none swap\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFiltered(crypttab))
+	require.False(t, img.contains["/etc/crypttab"])
+}
+
+func TestAppendCrypttabFilteredXInitrdIncluded(t *testing.T) {
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	content := "cryptroot UUID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa none discard,x-initrd.attach\n" +
+		"cryptdata UUID=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb none discard\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFiltered(crypttab))
+	require.True(t, img.contains["/etc/crypttab"])
+}
+
+func TestAppendCrypttabFilteredKeyfileBundled(t *testing.T) {
+	dir := t.TempDir()
+
+	kf := filepath.Join(dir, "root.key")
+	require.NoError(t, os.WriteFile(kf, []byte("secret"), 0o600))
+
+	crypttab := filepath.Join(dir, "crypttab")
+	content := "cryptroot UUID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa " + kf + " discard,x-initrd.attach\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFiltered(crypttab))
+	require.True(t, img.contains[kf])
+}
+
+func TestAppendCrypttabFilteredKeyfileNotBundledWithoutXInitrd(t *testing.T) {
+	dir := t.TempDir()
+
+	kf := filepath.Join(dir, "root.key")
+	require.NoError(t, os.WriteFile(kf, []byte("secret"), 0o600))
+
+	crypttab := filepath.Join(dir, "crypttab")
+	content := "cryptroot UUID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa " + kf + " discard\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttabFiltered(crypttab))
+	require.False(t, img.contains["/etc/crypttab"])
+	require.False(t, img.contains[kf])
+}
+
+// TestAppendCrypttabSystemPath exercises the appendCrypttab() entry point
+// (i.e. the BOOSTER_SYSTEM_CRYPTTAB env var path) end-to-end: entries with
+// x-initrd.attach are bundled, those without are filtered out.
+func TestAppendCrypttabSystemPath(t *testing.T) {
+	dir := t.TempDir()
+
+	kfIncluded := filepath.Join(dir, "included.key")
+	require.NoError(t, os.WriteFile(kfIncluded, []byte("secret1"), 0o600))
+
+	kfExcluded := filepath.Join(dir, "excluded.key")
+	require.NoError(t, os.WriteFile(kfExcluded, []byte("secret2"), 0o600))
+
+	crypttab := filepath.Join(dir, "crypttab")
+	content := "cryptroot UUID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa " + kfIncluded + " discard,x-initrd.attach\n" +
+		"cryptdata UUID=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb " + kfExcluded + " discard\n"
+	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
+
+	t.Setenv("BOOSTER_SYSTEM_CRYPTTAB", crypttab)
+
+	img := newTestImage(t)
+	require.NoError(t, img.appendCrypttab())
+	require.True(t, img.contains["/etc/crypttab"])
+	require.True(t, img.contains[kfIncluded])  // x-initrd.attach entry's keyfile is bundled
+	require.False(t, img.contains[kfExcluded]) // non-x-initrd.attach entry's keyfile is not
+}
+
 func TestAppendCrypttabCommentAndBlankLines(t *testing.T) {
 	dir := t.TempDir()
 

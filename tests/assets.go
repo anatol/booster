@@ -40,6 +40,14 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=781780d2-bf67-4a17-9ca8-fd22336c1b2e",
 		"HEADER_OUTPUT=assets/luks2.detached_header.hdr",
 	}},
+	// luks2.detached_header.hdrdev.img: small ext4 device containing luks2.detached_header.hdr
+	// at /root.hdr.  Used by TestLUKS2DetachedHeaderCmdlineOnDevice to exercise the
+	// rd.luks.header=UUID=/root.hdr:UUID=<devuuid> cmdline path (headerDeviceRef != nil).
+	// Depends on luks2.detached_header.img having been generated first (creates the .hdr file).
+	"luks2.detached_header.hdrdev.img": {"luks_detached_header_device.sh", []string{
+		"HDRDEV_UUID=e2d8f1a3-7b4c-4e9d-a1b2-3c4d5e6f7a8b",
+		"HEADER_INPUT=assets/luks2.detached_header.hdr",
+	}},
 	// luks2.keyfile_device.img and its companion keydev are both created by a single generator run.
 	"luks2.keyfile_device.img": {"luks_keyfile_device.sh", []string{
 		"LUKS_UUID=7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f",
