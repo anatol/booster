@@ -7,7 +7,7 @@ require (
 	github.com/anatol/devmapper.go v0.0.0-20250316020617-2671eefd35d7
 	github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f
 	github.com/anatol/luks.go v0.0.0-20250316021219-8cd744c3576f
-	github.com/anatol/smart.go v0.0.0-20241126061019-f03d79b340d2
+	github.com/anatol/smart.go v0.0.0-20260312005832-ba85fde868de
 	github.com/anatol/tang.go v0.0.0-20250920193351-e505ad2c76db
 	github.com/anatol/vmtest v0.0.0-20250627153117-302402d269a6
 	github.com/cavaliergopher/cpio v1.0.1
@@ -21,8 +21,8 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.44.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/crypto v0.49.0
+	golang.org/x/sys v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -46,5 +46,5 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/valyala/fastjson v1.6.4 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
-	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
 )

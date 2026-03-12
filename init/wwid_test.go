@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"regexp"
 	"sort"
@@ -16,7 +18,7 @@ func TestHostDeviceWWID(t *testing.T) {
 	var generatedWwids []string
 	for _, e := range ents {
 		wwids, err := wwid("/dev/" + e.Name())
-		if os.IsPermission(err) {
+		if errors.Is(err, fs.ErrPermission) {
 			t.Skip("test requires root permission")
 		}
 		require.NoError(t, err)
