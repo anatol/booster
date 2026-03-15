@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -15,11 +14,14 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
+	"github.com/google/go-tpm/legacy/tpm2"
 )
 
 // specifies information needed to process/open a LUKS device
@@ -264,60 +266,253 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 	return nil, fmt.Errorf("no matching fido2 devices available")
 }
 
+// flattenSystemdTPM2 copies all fields from raw and, if present, flattens the nested node
+// "systemd-tpm2" / "systemd_tpm2" to the same level (without overwriting existing keys).
+func flattenSystemdTPM2(raw map[string]any) map[string]any {
+	out := make(map[string]any, len(raw))
+	for k, v := range raw {
+		out[k] = v
+	}
+	// Possible container names used by systemd
+	for _, wrapper := range []string{"systemd-tpm2", "systemd_tpm2"} {
+		v, ok := raw[wrapper]
+		if !ok || v == nil {
+			continue
+		}
+		switch sub := v.(type) {
+		case map[string]any:
+			for k, vv := range sub {
+				if _, exists := out[k]; !exists {
+					out[k] = vv
+				}
+			}
+		case []any:
+			// sometimes it can be an array with a single object
+			if len(sub) > 0 {
+				if mm, ok := sub[0].(map[string]any); ok {
+					for k, vv := range mm {
+						if _, exists := out[k]; !exists {
+							out[k] = vv
+						}
+					}
+				}
+			}
+		case json.RawMessage:
+			var mm map[string]any
+			if err := json.Unmarshal(sub, &mm); err == nil {
+				for k, vv := range mm {
+					if _, exists := out[k]; !exists {
+						out[k] = vv
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"` // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
-		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
-		PolicyHash string `json:"tpm2-policy-hash"` // base64
+		HashPCRs   string `json:"tpm2-hash-pcrs"`
+		PCRBank    string `json:"tpm2-pcr-bank"`
+		PolicyHash string `json:"tpm2-policy-hash"` // hex or base64
 		Pin        bool   `json:"tpm2-pin"`
+		Salt       bool   `json:"tpm2-salt"`
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
 	}
 
+	// raw access to all fields
+	var raw map[string]any
+	_ = json.Unmarshal(t.Payload, &raw)
+	m := flattenSystemdTPM2(raw)
+
+	// extract the policy hash (try hex first, then base64)
+	if strings.TrimSpace(node.PolicyHash) == "" {
+		return nil, fmt.Errorf("empty policy hash")
+	}
+	var policyHash []byte
+	if b, err := hex.DecodeString(strings.TrimSpace(node.PolicyHash)); err == nil {
+		policyHash = b
+	} else {
+		b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(node.PolicyHash))
+		if err != nil {
+			return nil, fmt.Errorf("parse tpm2-policy-hash: not hex/base64: %w", err)
+		}
+		policyHash = b
+	}
+
+	// blob = TPM2B_PRIVATE || TPM2B_PUBLIC
 	blob, err := base64.StdEncoding.DecodeString(node.Blob)
 	if err != nil {
 		return nil, err
 	}
-
-	privateSize := binary.BigEndian.Uint16(blob[:2])
-	blob = blob[2:]
-	private := blob[:privateSize]
-	blob = blob[privateSize:]
-
-	publcSize := binary.BigEndian.Uint16(blob[:2])
-	blob = blob[2:]
-	public := blob[:publcSize]
-	blob = blob[publcSize:]
-
-	if node.PolicyHash == "" {
-		return nil, fmt.Errorf("empty policy hash")
+	if len(blob) < 2 {
+		return nil, fmt.Errorf("bad tpm2-blob")
 	}
-	policyHash, err := hex.DecodeString(node.PolicyHash)
-	if err != nil {
-		return nil, err
+	privLen := int(binary.BigEndian.Uint16(blob[:2]))
+	blob = blob[2:]
+	if len(blob) < privLen+2 {
+		return nil, fmt.Errorf("bad tpm2-blob (private)")
+	}
+	private := blob[:privLen]
+	blob = blob[privLen:]
+	pubLen := int(binary.BigEndian.Uint16(blob[:2]))
+	blob = blob[2:]
+	if len(blob) < pubLen {
+		return nil, fmt.Errorf("bad tpm2-blob (public)")
+	}
+	public := blob[:pubLen]
+
+	// PCR bank
+	pcrBank := parsePCRBank(node.PCRBank)
+	if pcrBank == 0 {
+		// better default — SHA1 (often matches the policy in systemd)
+		pcrBank = tpm2.AlgSHA1
 	}
 
-	bank := parsePCRBank(node.PCRBank)
+	// if the token has no PCR array, parse "tpm2-hash-pcrs"
+	if len(node.PCRs) == 0 && strings.TrimSpace(node.HashPCRs) != "" {
+		for _, s := range strings.Split(node.HashPCRs, "+") {
+			if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && v >= 0 {
+				node.PCRs = append(node.PCRs, v)
+			}
+		}
+	}
 
+	// salt: support both tpm2-salt and tpm2_salt
+	var saltBytes []byte
+	if list, _ := getBytesListAuto(m, "tpm2_salt"); len(list) > 0 {
+		saltBytes = list[0]
+	}
+	if len(saltBytes) > 0 {
+		info("Using tpm2-salt from token: %d bytes", len(saltBytes))
+	}
+
+	// (new) Read keyslot(s) directly from the token's payload if the author provided them
+	if v, ok := m["keyslots"]; ok && v != nil {
+		if slots := parseSlotsFromAny(v); len(slots) > 0 {
+			setTokenSlotsOverride(t.ID, slots)
+			info("token #%d: using keyslots from token payload: %v", t.ID, slots)
+		}
+	} else if v, ok := m["keyslot"]; ok && v != nil {
+		if slots := parseSlotsFromAny(v); len(slots) > 0 {
+			setTokenSlotsOverride(t.ID, slots)
+			info("token #%d: using keyslot from token payload: %v", t.ID, slots)
+		}
+	}
+
+	// SRK (optional) and primary type
+	var srkBytes []byte
+	if v, ok := m["tpm2_srk"].(string); ok && v != "" {
+		if b, e := base64.StdEncoding.DecodeString(v); e == nil {
+			srkBytes = b
+		}
+	}
+	preferECC := true
+	if v, ok := m["tpm2-primary-alg"].(string); ok {
+		preferECC = strings.EqualFold(v, "ecc")
+	}
+
+	// === key point: prepare the RAW 32-byte authValue for Unseal ===
 	var authValue []byte
 	if node.Pin {
-		prompt := fmt.Sprintf("Please enter TPM pin: ")
-		pin, err := readPassword(prompt, "")
+		var pin []byte
+		p, err := readPassword("Please enter TPM pin: ", "")
 		if err != nil {
 			return nil, err
 		}
+		pin = bytes.TrimRight(p, "\r\n")
+		if len(pin) == 0 {
+			return nil, fmt.Errorf("tpm2-pin=true, but PIN not provided")
+		}
+		// }
 
-		hash := sha256.Sum256(pin)
-		authValue = hash[:]
+		// 2) derive PIN material
+		dk, _ := derivePINForTPM(pin, saltBytes, true, pcrBank)
+
+		// 3) IMPORTANT: the object's authValue in TPM = RAW 32-byte dk.
+		// We use Base64 only for an informational check against tpm2-pin (if it was stored in the token).
+		if len(saltBytes) > 0 {
+			b64 := base64.StdEncoding.EncodeToString(dk) // 44 characters
+			if v, ok := m["tpm2-pin"]; ok {
+				if tokenB64, _ := v.(string); strings.TrimSpace(tokenB64) == b64 {
+					info("PBKDF2/Base64 matches tpm2-pin from token")
+				} else {
+					warning("PBKDF2/Base64 mismatch with tpm2-pin from token (len derived=%d token=%d)",
+						len(b64), len(strings.TrimSpace(tokenB64)))
+				}
+			}
+		}
+		authValue = dk
+		info("Prepared raw authValue: %d bytes (salt=%d)", len(authValue), len(saltBytes))
+	} else {
+		authValue = nil // no PIN — empty auth
 	}
 
-	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue)
+	// informational log about the public part
+	if pa, e := tpm2.DecodePublic(public); e == nil {
+		info("CHILD public: type=%v, nameAlg=%v, attrs=%#x", pa.Type, pa.NameAlg, pa.Attributes)
+	}
+
+	// attempt to unseal
+	usePolicyAuth := node.Pin
+	secret, err := tpm2Unseal(
+		public, private,
+		node.PCRs, pcrBank,
+		policyHash,
+		authValue, usePolicyAuth,
+		srkBytes, preferECC,
+		nil, // pcrDigests (optional)
+	)
 	if err != nil {
 		return nil, err
 	}
-	return []byte(base64.StdEncoding.EncodeToString(password)), nil
+	return secret, nil
+}
+
+// getBytesListAuto: accepts either a string or an array of strings; accepts base64 or hex
+func getBytesListAuto(m map[string]any, key string) ([][]byte, error) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	parse := func(s string) ([]byte, error) {
+		if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+			return b, nil
+		}
+		if b, err := hex.DecodeString(s); err == nil {
+			return b, nil
+		}
+		return nil, fmt.Errorf("cannot parse %s as base64/hex", key)
+	}
+	switch vv := v.(type) {
+	case string:
+		b, err := parse(vv)
+		if err != nil {
+			return nil, err
+		}
+		return [][]byte{b}, nil
+	case []any:
+		out := make([][]byte, 0, len(vv))
+		for _, it := range vv {
+			s, ok := it.(string)
+			if !ok {
+				continue
+			}
+			if b, err := parse(s); err == nil {
+				out = append(out, b)
+			} else {
+				return nil, err
+			}
+		}
+		return out, nil
+	default:
+		return nil, nil
+	}
 }
 
 func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token) {
@@ -342,20 +537,176 @@ func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token
 	}
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
+	// If the token payload contains keyslot(s), give them priority
+	slotsToTry := getTokenSlotsOverride(t.ID)
+	if len(slotsToTry) == 0 {
+		slotsToTry = t.Slots
+	} else {
+		info("token #%d: overriding slots %v -> %v", t.ID, t.Slots, slotsToTry)
+	}
 
-	for _, s := range t.Slots {
-		v, err := d.UnsealVolume(s, password)
-		if err == luks.ErrPassphraseDoesNotMatch {
-			continue
-		} else if err != nil {
+	// Try different "compatible" variants of the secret
+	tryVariants := func(slot int, secret []byte) (*luks.Volume, error) {
+		// A) if the secret is exactly 32 bytes — FIRST try Base64-ENCODED (priority #1)
+		if len(secret) == 32 {
+			enc := []byte(base64.StdEncoding.EncodeToString(secret))
+			if v, err := d.UnsealVolume(slot, enc); err == nil {
+				info("slot %v: matched with Base64-ENCODED secret (priority #1)", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: Base64-encoded secret did not match", slot)
+			}
+		}
+		// B) RAW as is (priority #2)
+		if v, err := d.UnsealVolume(slot, secret); err == nil {
+			info("slot %v: matched with RAW secret", slot)
+			return v, nil
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			return nil, err
+		} else {
+			info("slot %v: passphrase does not match (raw)", slot)
+		}
+		// C) trim \n/\r
+		if len(secret) > 0 && (secret[len(secret)-1] == '\n' || secret[len(secret)-1] == '\r') {
+			trimmed := bytes.TrimRight(secret, "\r\n")
+			if v, err := d.UnsealVolume(slot, trimmed); err == nil {
+				info("slot %v: matched after trimming newline", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: still no match after trimming newline", slot)
+			}
+		}
+		// D) if the secret looks like Base64 text — try to decode
+		if b, err := base64.StdEncoding.DecodeString(string(secret)); err == nil {
+			if v, err2 := d.UnsealVolume(slot, b); err2 == nil {
+				info("slot %v: matched with Base64-decoded secret", slot)
+				return v, nil
+			} else if err2 != luks.ErrPassphraseDoesNotMatch {
+				return nil, err2
+			} else {
+				info("slot %v: Base64-decoded secret did not match", slot)
+			}
+		}
+		// E) if the secret is exactly 32 bytes — try its Base64-ENCODED form as text
+		if len(secret) == 32 {
+			enc := []byte(base64.StdEncoding.EncodeToString(secret))
+			if v, err := d.UnsealVolume(slot, enc); err == nil {
+				info("slot %v: matched with Base64-ENCODED secret", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: Base64-encoded secret did not match", slot)
+			}
+		}
+		return nil, luks.ErrPassphraseDoesNotMatch
+	}
+
+	// 1) First — slots from override/token
+	tried := map[int]bool{}
+	for _, s := range slotsToTry {
+		tried[s] = true
+		if v, err := tryVariants(s, password); err == nil {
+			info("password from %s token #%d matches", t.Type, t.ID)
+			volumes <- v
+			return
+		} else if err != luks.ErrPassphraseDoesNotMatch {
 			warning("unlocking slot %v: %v", s, err)
+		}
+	}
+
+	// 2) Fallback — try the same secret across all other slots (in case t.Slots is outdated)
+	for _, s := range d.Slots() {
+		if tried[s] {
 			continue
 		}
-		info("password from %s token #%d matches", t.Type, t.ID)
-		volumes <- v
+		if v, err := tryVariants(s, password); err == nil {
+			info("password matched on non-advertised slot %v", s)
+			volumes <- v
+			return
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			warning("unlocking slot %v: %v", s, err)
+		}
+	}
+	info("password from %s token #%d does not match any slot", t.Type, t.ID)
+}
+
+// ---- overrides taken from the token payload ----
+var tokenSlotsOverride sync.Map // map[int][]int
+
+func setTokenSlotsOverride(id int, slots []int) {
+	if len(slots) == 0 {
 		return
 	}
-	info("password from %s token #%d does not match", t.Type, t.ID)
+	seen := map[int]bool{}
+	out := make([]int, 0, len(slots))
+	for _, s := range slots {
+		if s < 0 {
+			continue
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	// insertion sort for small lists
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j-1] > out[j]; j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	tokenSlotsOverride.Store(id, out)
+}
+
+func getTokenSlotsOverride(id int) []int {
+	if v, ok := tokenSlotsOverride.Load(id); ok {
+		if slots, ok2 := v.([]int); ok2 {
+			return slots
+		}
+	}
+	return nil
+}
+
+// accepts a number, a string "1,3", or an array of numbers/strings
+func parseSlotsFromAny(v any) []int {
+	var out []int
+	add := func(n int) {
+		if n >= 0 {
+			out = append(out, n)
+		}
+	}
+	switch vv := v.(type) {
+	case float64:
+		add(int(vv))
+	case int:
+		add(vv)
+	case int32:
+		add(int(vv))
+	case int64:
+		add(int(vv))
+	case string:
+		s := strings.TrimSpace(vv)
+		if s == "" {
+			break
+		}
+		for _, p := range strings.Split(s, ",") {
+			p = strings.TrimSpace(p)
+			if n, err := strconv.Atoi(p); err == nil {
+				add(n)
+			}
+		}
+	case []any:
+		for _, it := range vv {
+			for _, n := range parseSlotsFromAny(it) {
+				add(n)
+			}
+		}
+	}
+	return out
 }
 
 func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string) {
