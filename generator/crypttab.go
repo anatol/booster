@@ -101,23 +101,9 @@ func (img *Image) bundleCrypttabAssets(content []byte) error {
 	return nil
 }
 
-// systemCrypttabPath returns the host's /etc/crypttab path, which may be
-// overridden by the BOOSTER_SYSTEM_CRYPTTAB environment variable for testing.
-func systemCrypttabPath() string {
-	if p := os.Getenv("BOOSTER_SYSTEM_CRYPTTAB"); p != "" {
-		return p
-	}
-	return "/etc/crypttab"
-}
-
-// appendCrypttab reads the host's /etc/crypttab and bundles entries marked
+// appendCrypttabFiltered reads a crypttab file and bundles entries marked
 // with x-initrd.attach into the image as /etc/crypttab.  Silently succeeds
 // if the file is absent or contains no x-initrd.attach entries.
-func (img *Image) appendCrypttab() error {
-	return img.appendCrypttabFiltered(systemCrypttabPath())
-}
-
-// appendCrypttabFiltered is the testable implementation of appendCrypttab.
 func (img *Image) appendCrypttabFiltered(hostPath string) error {
 	content, err := os.ReadFile(hostPath)
 	if os.IsNotExist(err) || os.IsPermission(err) {
@@ -149,18 +135,3 @@ func (img *Image) appendCrypttabFiltered(hostPath string) error {
 	return img.bundleCrypttabAssets(filtered)
 }
 
-// appendCrypttabFrom bundles all entries from hostPath into the image as
-// /etc/crypttab.  Used when an explicit --crypttab path is provided.
-func (img *Image) appendCrypttabFrom(hostPath string) error {
-	content, err := os.ReadFile(hostPath)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if err := img.AppendContent("/etc/crypttab", 0o600, content); err != nil {
-		return err
-	}
-	return img.bundleCrypttabAssets(content)
-}

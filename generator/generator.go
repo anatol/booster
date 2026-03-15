@@ -119,9 +119,9 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	crypttabPath := conf.crypttabFile
 	if crypttabPath == "" {
-		crypttabPath = "/etc/crypttab.initramfs"
+		crypttabPath = "/etc/crypttab"
 	}
-	if err := img.appendCrypttabFrom(crypttabPath); err != nil {
+	if err := img.appendCrypttabFiltered(crypttabPath); err != nil {
 		return err
 	}
 
