@@ -23,6 +23,12 @@ type UserConfig struct {
 		IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
+
+		SshAddr           string `yaml:"ssh_addr,omitempty"`
+		SshServerKeys     string `yaml:"ssh_server_keys,omitempty"`
+		SshUser           string `yaml:"ssh_user,omitempty"`
+		SshPass           string `yaml:"ssh_pass,omitempty"`
+		SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"`
 	}
 	Universal            bool   `yaml:",omitempty"`
 	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
@@ -96,6 +102,13 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 				conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
 			}
 		}
+
+		// copy ssh config
+		conf.sshAddr = n.SshAddr
+		conf.sshServerKeys = n.SshServerKeys
+		conf.sshUser = n.SshUser
+		conf.sshPass = n.SshPass
+		conf.sshAuthorizedKeys = n.SshAuthorizedKeys
 	}
 	conf.universal = u.Universal || opts.BuildCommand.Universal
 	if u.Modules != "" {

@@ -367,7 +367,6 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots
 
 	if len(parts) == 1 {
 		password, err = os.ReadFile(parts[0])
-
 		if err != nil {
 			warning("reading password: %v", err)
 		}
