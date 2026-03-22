@@ -20,17 +20,17 @@ func TestSystemdFido2(t *testing.T) {
 		params = append(params, y.toQemuParams()...)
 	}
 	vm, err := buildVmInstance(t, Opts{
-		disk:       "assets/systemd-fido2.img",
-		kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
-		params:     params,
-		extraFiles: "fido2-assert",
+		disk:        "assets/systemd-fido2.img",
+		kernelArgs:  []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
+		params:      params,
+		enableFido2: true,
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
 	pin := "1111"
-	// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
-	re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
+	// there can be multiple Yubikeys, iterate over all "Enter FIDO2 PIN" requests
+	re, err := regexp.Compile(`(Enter FIDO2 PIN for |Hello, booster!)`)
 	require.NoError(t, err)
 	for {
 		matches, err := vm.ConsoleExpectRE(re)
@@ -53,7 +53,6 @@ func TestSystemdTPM2(t *testing.T) {
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
 		params:     params,
-		extraFiles: "fido2-assert",
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
@@ -70,7 +69,6 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 		disk:       "assets/systemd-tpm2-withpin.img",
 		kernelArgs: []string{"rd.luks.uuid=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "root=UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618"},
 		params:     params,
-		extraFiles: "fido2-assert",
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
