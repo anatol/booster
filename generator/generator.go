@@ -113,6 +113,14 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
+	for _, f := range conf.extraFiles {
+		if filepath.Base(f) == "fido2-assert" {
+			warning("extra_files: fido2-assert is deprecated — use enable_fido2: true in /etc/booster.yaml instead")
+			conf.enableFido2 = true
+			break
+		}
+	}
+
 	if conf.enableFido2 {
 		pluginPath := filepath.Join(filepath.Dir(conf.initBinary), "fido2plugin.so")
 		content, err := os.ReadFile(pluginPath)
