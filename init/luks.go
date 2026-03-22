@@ -131,6 +131,10 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	fido2Mu.Lock()
 	defer fido2Mu.Unlock()
 
+	if plymouthEnabled {
+		plymouthMessage("") // clear "Waiting for FIDO2" now that device is detected and we have the lock
+	}
+
 	credID, err := base64.StdEncoding.DecodeString(credential)
 	if err != nil {
 		return nil, fmt.Errorf("invalid credential: %v", err)
@@ -144,13 +148,15 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if pinRequired {
 		prompt := "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
 		if plymouthEnabled {
-			pin, err = plymouthAskPassword(prompt)
+			pinBytes, err := plymouthAskPassword(prompt)
 			if err != nil {
 				warning("Plymouth password prompt failed: %v, falling back to console", err)
 				pinBytes, err2 := readPassword(prompt, "")
 				if err2 != nil {
 					return nil, err2
 				}
+				pin = string(pinBytes)
+			} else {
 				pin = string(pinBytes)
 			}
 		} else {
@@ -169,7 +175,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	notifyTouch := func() {
 		msg := "Please touch the FIDO2 key for " + mappingName
 		if plymouthEnabled {
-			_ = plymouthMessage(msg)
+			plymouthMessage(msg)
 		} else {
 			console(msg + "\n")
 		}
@@ -211,7 +217,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 	}
 
 	if plymouthEnabled {
-		_ = plymouthMessage("Waiting for FIDO2 security key for " + mappingName + "...")
+		plymouthMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 	} else {
 		console("Waiting for FIDO2 security key for " + mappingName + "...\n")
 	}
@@ -226,7 +232,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 	if len(dir) == 0 {
 		msg := "No FIDO2 device found for " + mappingName + ", insert security key or wait for passphrase prompt"
 		if plymouthEnabled {
-			_ = plymouthMessage(msg)
+			plymouthMessage(msg)
 		} else {
 			console(msg + "\n")
 		}
@@ -264,7 +270,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 			if attempt < maxAttempts-1 {
 				msg := "FIDO2 PIN incorrect, please try again"
 				if plymouthEnabled {
-					_ = plymouthMessage(msg)
+					plymouthMessage(msg)
 				} else {
 					warning(msg)
 				}
@@ -288,6 +294,9 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 		return password, nil
 	}
 
+	if plymouthEnabled {
+		plymouthMessage("") // clear any FIDO2 status message before keyboard fallback
+	}
 	return nil, fmt.Errorf("no matching fido2 devices available")
 }
 
