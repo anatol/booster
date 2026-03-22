@@ -40,6 +40,7 @@ type UserConfig struct {
 	ZfsImportParams      string `yaml:"zfs_import_params"`
 	ZfsCachePath         string `yaml:"zfs_cache_path"`
 	EnablePlymouth       bool   `yaml:"enable_plymouth"`
+	EnableFido2          bool   `yaml:"enable_fido2"`
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -158,7 +159,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.vconsolePath = "/etc/vconsole.conf"
 		conf.localePath = "/etc/locale.conf"
 	}
-
+	conf.enablePlymouth = u.EnablePlymouth
+	conf.enableFido2 = u.EnableFido2
 	return &conf, nil
 }
 

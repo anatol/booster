@@ -47,6 +47,7 @@ type generatorConfig struct {
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
+	enableFido2              bool
 }
 
 type networkStaticConfig struct {
@@ -110,6 +111,17 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendInitBinary(conf.initBinary); err != nil {
 		return err
+	}
+
+	if conf.enableFido2 {
+		pluginPath := filepath.Join(filepath.Dir(conf.initBinary), "fido2plugin.so")
+		content, err := os.ReadFile(pluginPath)
+		if err != nil {
+			return fmt.Errorf("fido2 plugin %s: %v", pluginPath, err)
+		}
+		if err := img.AppendContent("/usr/lib/booster/fido2plugin.so", 0o755, content); err != nil {
+			return fmt.Errorf("fido2 plugin: %v", err)
+		}
 	}
 
 	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
