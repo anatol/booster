@@ -24,6 +24,22 @@ var assetGenerators = map[string]assetGenerator{
 	"luks2.clevis.remote.img":  {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=f2473f71-9a61-4b16-ae54-8f942b2daf22", "FS_UUID=7acb3a9e-9b51-4aa2-9965-e41ae8467d8a", "CLEVIS_PIN=remote", `CLEVIS_CONFIG={"adv":"assets/remote/key.pub", "port":34551}`}},
 	// camellia is a loadable module at Arch and it is a good candidate to verify loading it works correctly
 	"luks2.external.module.img": {"luks.sh", []string{"LUKS_VERSION=2", "LUKS_PASSWORD=1234", "LUKS_UUID=ad575500-a9e3-4692-b1b2-eed95a6e8ce2", "FS_UUID=0118f2b1-3c4f-4eff-9663-b58447ad797c", `LUKS_PARAMS=-c camellia-xts-plain64 -s 512 -h sha512 -i 8000 --pbkdf argon2id --pbkdf-memory 4100000`}},
+	// luks2.detached_header.img: LUKS2 image whose header is stored in a separate file.
+	// Tests rd.luks.header= detached-header unlock via kernel cmdline.
+	// The header file is written to HEADER_OUTPUT alongside the image.
+	"luks2.detached_header.img": {"luks_detached_header.sh", []string{
+		"LUKS_UUID=cbd49694-81de-41bd-a850-0d934aff8328",
+		"FS_UUID=781780d2-bf67-4a17-9ca8-fd22336c1b2e",
+		"HEADER_OUTPUT=assets/luks2.detached_header.hdr",
+	}},
+	// luks2.detached_header.hdrdev.img: small ext4 device containing luks2.detached_header.hdr
+	// at /root.hdr.  Used by TestLUKS2DetachedHeaderCmdlineOnDevice to exercise the
+	// rd.luks.header=UUID=/root.hdr:UUID=<devuuid> cmdline path (headerDeviceRef != nil).
+	// Depends on luks2.detached_header.img having been generated first (creates the .hdr file).
+	"luks2.detached_header.hdrdev.img": {"luks_detached_header_device.sh", []string{
+		"HDRDEV_UUID=e2d8f1a3-7b4c-4e9d-a1b2-3c4d5e6f7a8b",
+		"HEADER_INPUT=assets/luks2.detached_header.hdr",
+	}},
 	"gpt.img":                   {"gpt.sh", []string{"FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}},
 	"gpt_4ksector.img":          {"gpt_4ksector.sh", nil},
 	"lvm.img":                   {"lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
