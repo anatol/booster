@@ -249,6 +249,17 @@ func probeFat(f *os.File) *blkInfo {
 	return nil
 }
 
+// probeLuksHeader reads LUKS metadata from a detached header file path.
+// Returns nil if the file is not a valid LUKS header.
+func probeLuksHeader(headerPath string) *blkInfo {
+	f, err := os.Open(headerPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	return probeLuks(f)
+}
+
 func probeLuks(f *os.File) *blkInfo {
 	// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/LUKS-standard/on-disk-format.pdf
 	// both LUKS v1 and v2 have the same magic and UUID offset
