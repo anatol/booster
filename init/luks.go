@@ -14,12 +14,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
+	"golang.org/x/sys/unix"
 )
 
 // specifies information needed to process/open a LUKS device
@@ -455,10 +457,73 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 	}
 }
 
+func mountDeviceReadOnly(ref *deviceRef, mountPoint string, timeout time.Duration) (func(), error) {
+	blk, err := waitForDeviceRef(ref, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if !blk.isFs {
+		return nil, fmt.Errorf("device %s is not a mountable filesystem", blk.path)
+	}
+	if err := os.MkdirAll(mountPoint, 0o700); err != nil {
+		return nil, err
+	}
+	flags := uintptr(unix.MS_RDONLY | unix.MS_NOEXEC | unix.MS_NOSUID | unix.MS_NODEV)
+	if err := unix.Mount(blk.path, mountPoint, blk.format, flags, ""); err != nil {
+		return nil, fmt.Errorf("mounting device %s: %v", blk.path, err)
+	}
+	return func() {
+		_ = unix.Unmount(mountPoint, unix.MNT_DETACH)
+		_ = os.Remove(mountPoint)
+	}, nil
+}
+
+// acquireHeader resolves the detached LUKS header path for a mapping, waiting
+// for the header device to appear if necessary. The returned cleanup function
+// unmounts any temporarily-mounted device; callers must defer it.
+// If the mapping has no detached header, path is "" and cleanup is a no-op.
+func acquireHeader(m *luksMapping) (path string, cleanup func(), err error) {
+	if m.header == "" {
+		return "", func() {}, nil
+	}
+	timeout := time.Duration(config.MountTimeout) * time.Second
+	if m.headerDeviceRef != nil {
+		// Header is a file on a separate filesystem device.
+		mp := "/run/booster/hdrdev-" + m.name
+		unmount, err := mountDeviceReadOnly(m.headerDeviceRef, mp, timeout)
+		if err != nil {
+			return "", nil, err
+		}
+		return filepath.Join(mp, m.header), unmount, nil
+	}
+	if strings.HasPrefix(m.header, "/dev/") {
+		// Header is a raw block device — wait for it to appear.
+		ref := &deviceRef{refPath, m.header}
+		if _, err := waitForDeviceRef(ref, timeout); err != nil {
+			return "", nil, fmt.Errorf("header device %s: %v", m.header, err)
+		}
+	}
+	// Bundled initramfs file or now-present block device path.
+	return m.header, func() {}, nil
+}
+
 func luksOpen(dev string, mapping *luksMapping) error {
 	module := loadModules("dm_crypt")
 
-	d, err := luks.Open(dev)
+	var (
+		d   luks.Device
+		err error
+	)
+	headerPath, headerCleanup, err := acquireHeader(mapping)
+	if err != nil {
+		return err
+	}
+	defer headerCleanup()
+	if headerPath != "" {
+		d, err = luks.OpenWithHeader(dev, headerPath)
+	} else {
+		d, err = luks.Open(dev)
+	}
 	if err != nil {
 		return err
 	}
