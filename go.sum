@@ -4,8 +4,8 @@ github.com/anatol/devmapper.go v0.0.0-20250316020617-2671eefd35d7 h1:rmzBzcHwcMj
 github.com/anatol/devmapper.go v0.0.0-20250316020617-2671eefd35d7/go.mod h1:gc23OPOgbAUVQPvBD6aJTlpnwmKfx3AdrmjkBXstafE=
 github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f h1:Dxki5W8sSFVyPkoYut11RXlIzouHVM5dX99qUL8xsGA=
 github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f/go.mod h1:xM57GU8ntwu+q88yo/exYza/WG1fKGxhJUtvtebxdXg=
-github.com/anatol/luks.go v0.0.0-20250316021219-8cd744c3576f h1:4tLJrnm3h3biCFsXHQ9w6DVGwuZXW4KMfiKV/atSYXg=
-github.com/anatol/luks.go v0.0.0-20250316021219-8cd744c3576f/go.mod h1:kEOnWwULAKOORfFvE4dEkdRZJS7+NMJKxRb/vWvmARk=
+github.com/anatol/luks.go v0.0.0-20260311221814-15ee027e288c h1:6SEiatFEIEO8sxxNQLkjzR2e9EOYHJzFg+JUgMrZRhI=
+github.com/anatol/luks.go v0.0.0-20260311221814-15ee027e288c/go.mod h1:kEOnWwULAKOORfFvE4dEkdRZJS7+NMJKxRb/vWvmARk=
 github.com/anatol/smart.go v0.0.0-20260312005832-ba85fde868de h1:xDc8kZVHTjYLIP1EAq0rt3lMAU1HQ+pWDjn3cfolNl0=
 github.com/anatol/smart.go v0.0.0-20260312005832-ba85fde868de/go.mod h1:ukYit5s/IEmWOGZokOlZs6bIvV5xD4bly0SFawzj7+8=
 github.com/anatol/tang.go v0.0.0-20250920193351-e505ad2c76db h1:4AyNx4ipXJv+OGyH/29A7qPTUmaEnZRLQDz74AZh9R4=
