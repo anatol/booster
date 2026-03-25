@@ -158,6 +158,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.vconsolePath = "/etc/vconsole.conf"
 		conf.localePath = "/etc/locale.conf"
 	}
+	conf.crypttabFile = opts.BuildCommand.CrypttabFile
 
 	return &conf, nil
 }
