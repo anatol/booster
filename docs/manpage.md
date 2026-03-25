@@ -119,6 +119,10 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request.
+ * `rd.luks.header=$UUID=$PATH` detached LUKS header for the device identified by `$UUID`. `$PATH` can take three forms:
+    * **Initramfs file** — an absolute path (e.g. `/etc/luks/root.hdr`) to a header file bundled into the initramfs at build time via `extra_files`.
+    * **Raw block device** — a device path (e.g. `/dev/sdb`) where the LUKS header begins at byte offset 0. Booster waits for the device to appear and passes it directly to cryptsetup without mounting.
+    * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
