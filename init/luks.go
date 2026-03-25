@@ -65,6 +65,14 @@ func tryPassphraseAgainstSlots(volumes chan *luks.Volume, done <-chan struct{}, 
 	return false
 }
 
+// passphraseCache holds passwords that successfully unlocked a LUKS volume during
+// this boot, so subsequent volumes (e.g. btrfs RAID1 members) can be tried
+// automatically without prompting the user again.
+var passphraseCache struct {
+	sync.Mutex
+	passwords [][]byte
+}
+
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
 var rdLuksOptions = map[string]string{
 	"discard":                luks.FlagAllowDiscards,
@@ -503,6 +511,19 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 	// plymouthd is still starting, causing the graphical prompt to fail.
 	waitForPlymouthInit()
 
+	// Fast path: try passwords that already unlocked another volume this boot
+	// (e.g. two LUKS members of a btrfs RAID1 with the same passphrase).
+	passphraseCache.Lock()
+	cached := make([][]byte, len(passphraseCache.passwords))
+	copy(cached, passphraseCache.passwords)
+	passphraseCache.Unlock()
+
+	for _, pw := range cached {
+		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
+			return
+		}
+	}
+
 	attempts := 0
 	promptPrefix := ""
 	for {
@@ -533,6 +554,9 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 		attempts++
 
 		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, password) {
+			passphraseCache.Lock()
+			passphraseCache.passwords = append(passphraseCache.passwords, password)
+			passphraseCache.Unlock()
 			statusMessage("") // clear any error message before Plymouth quits
 			return
 		}
