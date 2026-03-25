@@ -47,6 +47,8 @@ type generatorConfig struct {
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
+
+	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
 }
 
 type networkStaticConfig struct {
@@ -109,6 +111,14 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	if err := img.appendInitBinary(conf.initBinary); err != nil {
+		return err
+	}
+
+	crypttabPath := conf.crypttabFile
+	if crypttabPath == "" {
+		crypttabPath = "/etc/crypttab"
+	}
+	if err := img.appendCrypttab(crypttabPath); err != nil {
 		return err
 	}
 

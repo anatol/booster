@@ -24,6 +24,7 @@ var opts struct {
 		ConfigFile       string `long:"config" default:"/etc/booster.yaml" description:"Configuration file path"`
 		Universal        bool   `long:"universal" description:"Add wide range of modules/tools to allow this image boot at different machines"`
 		Strip            bool   `long:"strip" description:"Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image"`
+		CrypttabFile     string `long:"crypttab" description:"Path to host crypttab file (default: /etc/crypttab)"`
 		Args             struct {
 			Output string `positional-arg-name:"output" required:"true"`
 		} `positional-args:"true"`
