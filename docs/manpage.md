@@ -125,6 +125,10 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
+
+Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see **crypttab(5)**).
+Only entries marked with the `x-initrd.attach` option are bundled into the initramfs at image build time. `rd.luks.*` kernel parameters take precedence — if a cmdline parameter already covers a device, its crypttab entry is skipped.
+
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
