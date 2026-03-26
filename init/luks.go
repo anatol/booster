@@ -15,8 +15,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anatol/clevis.go"
@@ -33,6 +33,32 @@ type luksMapping struct {
 	options         []string
 	header          string     // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
+
+	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
+	tries         int   // 0 = unlimited keyboard retries; >0 = max attempts
+	noFail        bool  // non-fatal unlock failure — boot continues on error
+	keyfileOffset int64 // bytes to skip at start of keyfile
+	keyfileSize   int64 // max bytes to read from keyfile (0 = all)
+}
+
+// tryPassphraseAgainstSlots tries password against each slot, sending the opened
+// volume on volumes if successful.  Returns true on success.
+func tryPassphraseAgainstSlots(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, password []byte) bool {
+	for _, s := range checkSlots {
+		v, err := d.UnsealVolume(s, password)
+		if err == luks.ErrPassphraseDoesNotMatch {
+			continue
+		} else if err != nil {
+			warning("unlocking slot %v: %v", s, err)
+			continue
+		}
+		select {
+		case volumes <- v:
+		case <-done:
+		}
+		return true
+	}
+	return false
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -324,95 +350,65 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
-func recoverTokenPassword(volumes chan *luks.Volume, d luks.Device, t luks.Token) {
-	var password []byte
-	var err error
 
-	switch t.Type {
-	case "clevis":
-		password, err = recoverClevisPassword(t, d.Version())
-	case "systemd-fido2":
-		password, err = recoverSystemdFido2Password(t)
-	case "systemd-tpm2":
-		password, err = recoverSystemdTPM2Password(t)
-	default:
-		info("token #%d has unknown type: %s", t.ID, t.Type)
-		return
-	}
-
+// readKeyfile reads a keyfile at path, skipping offset bytes and reading at most
+// size bytes (0 means read until EOF).
+func readKeyfile(path string, offset, size int64) ([]byte, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
-		return
+		return nil, err
 	}
+	defer f.Close()
 
-	info("recovered password from %s token #%d", t.Type, t.ID)
-
-	for _, s := range t.Slots {
-		v, err := d.UnsealVolume(s, password)
-		if err == luks.ErrPassphraseDoesNotMatch {
-			continue
-		} else if err != nil {
-			warning("unlocking slot %v: %v", s, err)
-			continue
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("seeking keyfile %s: %v", path, err)
 		}
-		info("password from %s token #%d matches", t.Type, t.ID)
-		volumes <- v
-		return
 	}
-	info("password from %s token #%d does not match", t.Type, t.ID)
+
+	if size > 0 {
+		return io.ReadAll(io.LimitReader(f, size))
+	}
+	return io.ReadAll(f)
 }
 
-func recoverKeyfilePassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, keyfile string) {
-	var err error
-	var password []byte
+// acquireKeyfilePassword reads the keyfile referenced by mapping, applying any
+// configured offset and size restrictions.
+func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
+	return readKeyfile(mapping.keyfile, mapping.keyfileOffset, mapping.keyfileSize)
+}
 
-	// keyfile might be in the format /path:UUID=<DEV UUID> to indicate the keyfile lives on another device
-	parts := regexp.MustCompile("(?i):UUID=").Split(keyfile, 2)
-
-	if len(parts) == 1 {
-		password, err = os.ReadFile(parts[0])
-
-		if err != nil {
-			warning("reading password: %v", err)
-		}
-	} else {
-		// read password from device matching uuid
-		uuid, err := parseUUID(parts[1])
-		if err != nil {
-			warning("invalid UUID %s in rd.luks.key boot param: %s", uuid, keyfile)
-		} else {
-			// TODO: access path on uuid device, read password
-			warning("user wants keyfile from device %s, but I don't know how to do that", uuid)
-		}
+func recoverKeyfilePassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mapping *luksMapping) {
+	password, err := acquireKeyfilePassword(mapping)
+	if err != nil {
+		warning("reading keyfile %s: %v", mapping.keyfile, err)
 	}
 
 	if len(password) > 0 {
-		for _, s := range checkSlots {
-			v, err := d.UnsealVolume(s, password)
-			if err == luks.ErrPassphraseDoesNotMatch {
-				continue
-			} else if err != nil {
-				warning("unlocking slot %v: %v", s, err)
-				continue
-			}
-			volumes <- v
+		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, password) {
 			return
 		}
 	}
 
-	warning("password in keyfile %s was unable to unseal %s", keyfile, mappingName)
+	warning("password in keyfile %s was unable to unseal %s", mapping.keyfile, mapping.name)
 
-	// have to use keyboard password
-	requestKeyboardPassword(volumes, d, checkSlots, mappingName)
+	// fall back to keyboard
+	requestKeyboardPassword(volumes, done, d, checkSlots, mapping.name, mapping.tries)
 }
 
-func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string) {
+func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
 	waitForPlymouthInit()
 
+	attempts := 0
 	for {
+		if maxTries > 0 && attempts >= maxTries {
+			warning("maximum passphrase attempts (%d) reached for %s", maxTries, mappingName)
+			return
+		}
+
 		prompt := fmt.Sprintf("Enter passphrase for %s:", mappingName)
 
 		var password []byte
@@ -435,16 +431,9 @@ func requestKeyboardPassword(volumes chan *luks.Volume, d luks.Device, checkSlot
 		if len(password) == 0 {
 			continue
 		}
+		attempts++
 
-		for _, s := range checkSlots {
-			v, err := d.UnsealVolume(s, password)
-			if err == luks.ErrPassphraseDoesNotMatch {
-				continue
-			} else if err != nil {
-				warning("unlocking slot %v: %v", s, err)
-				continue
-			}
-			volumes <- v
+		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, password) {
 			return
 		}
 
@@ -529,8 +518,23 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 	defer d.Close()
 
-	if len(d.Slots()) == 0 {
+	availableSlots := d.Slots()
+	if len(availableSlots) == 0 {
 		return fmt.Errorf("device %s has no slots to unlock", dev)
+	}
+
+	// Restrict to the requested key slot if specified.
+	if mapping.keySlot >= 0 {
+		var filtered []int
+		for _, s := range availableSlots {
+			if s == mapping.keySlot {
+				filtered = append(filtered, s)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("device %s: key-slot=%d not found in available slots", dev, mapping.keySlot)
+		}
+		availableSlots = filtered
 	}
 
 	if err := d.FlagsAdd(mapping.options...); err != nil {
@@ -538,6 +542,28 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 
 	volumes := make(chan *luks.Volume)
+	done := make(chan struct{})
+	var senderWg sync.WaitGroup
+	var keyboardOnce sync.Once
+
+	// startKeyboard launches the keyboard (or keyfile) unlock goroutine at most once.
+	startKeyboard := func() {
+		senderWg.Add(1)
+		go func() {
+			defer senderWg.Done()
+			if mapping.keyfile != "" {
+				recoverKeyfilePassword(volumes, done, d, availableSlots, mapping)
+			} else {
+				requestKeyboardPassword(volumes, done, d, availableSlots, mapping.name, mapping.tries)
+			}
+		}()
+	}
+
+	// Watcher: close volumes once all senders are done so the receiver unblocks.
+	go func() {
+		senderWg.Wait()
+		close(volumes)
+	}()
 
 	slotsWithTokens := make(map[int]bool)
 	tokens, err := d.Tokens()
@@ -546,32 +572,72 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 	for _, t := range tokens {
 		if t.Type == "systemd-recovery" {
-			continue // skip systemd-recovery tokens as they are supposed to be entered by a keyboard later
+			continue // skipped: entered via keyboard later
 		}
-		go recoverTokenPassword(volumes, d, t)
+		t := t
+		senderWg.Add(1)
+		go func() {
+			defer senderWg.Done()
+			var password []byte
+			var err error
+			switch t.Type {
+			case "clevis":
+				password, err = recoverClevisPassword(t, d.Version())
+			case "systemd-fido2":
+				password, err = recoverSystemdFido2Password(t)
+			case "systemd-tpm2":
+				password, err = recoverSystemdTPM2Password(t)
+			default:
+				info("token #%d has unknown type: %s", t.ID, t.Type)
+				keyboardOnce.Do(startKeyboard)
+				return
+			}
+			if err != nil {
+				warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
+				keyboardOnce.Do(startKeyboard)
+				return
+			}
+			info("recovered password from %s token #%d", t.Type, t.ID)
+			for _, s := range t.Slots {
+				v, err := d.UnsealVolume(s, password)
+				if err == luks.ErrPassphraseDoesNotMatch {
+					continue
+				} else if err != nil {
+					warning("unlocking slot %v: %v", s, err)
+					continue
+				}
+				info("password from %s token #%d matches", t.Type, t.ID)
+				select {
+				case volumes <- v:
+				case <-done:
+				}
+				return
+			}
+			info("password from %s token #%d does not match", t.Type, t.ID)
+			keyboardOnce.Do(startKeyboard)
+		}()
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
 	}
 
-	var checkSlotsWithPassword []int
-	for _, s := range d.Slots() {
+	// Start keyboard/keyfile unlock for any slots that have no tokens.
+	var passwordSlots []int
+	for _, s := range availableSlots {
 		if !slotsWithTokens[s] {
-			// only slots that do not have tokens will be checked with keyboard password
-			checkSlotsWithPassword = append(checkSlotsWithPassword, s)
+			passwordSlots = append(passwordSlots, s)
 		}
 	}
-	if len(checkSlotsWithPassword) > 0 {
-		// is there a keyfile defined for the password for this volume?
-		if len(mapping.keyfile) > 0 {
-			// if the keyfile doesn't work we will fallback to password
-			go recoverKeyfilePassword(volumes, d, checkSlotsWithPassword, mapping.name, mapping.keyfile)
-		} else {
-			go requestKeyboardPassword(volumes, d, checkSlotsWithPassword, mapping.name)
-		}
+	if len(passwordSlots) > 0 {
+		keyboardOnce.Do(startKeyboard)
 	}
 
-	v := <-volumes
+	v, ok := <-volumes
+	close(done)
+
+	if !ok {
+		return fmt.Errorf("failed to unlock %s: all unlock attempts exhausted", dev)
+	}
 
 	if err := loadRequiredCryptoModules(v.StorageEncryption); err != nil {
 		return err
@@ -621,8 +687,9 @@ func matchLuksMapping(blk *blkInfo) *luksMapping {
 	if blk.matchesRef(cmdRoot) {
 		info("LUKS device %s matches root=, unlock this device", blk.path)
 		m := &luksMapping{
-			ref:  cmdRoot,
-			name: "root",
+			ref:     cmdRoot,
+			name:    "root",
+			keySlot: -1,
 		}
 		cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/root"}
 		return m
@@ -639,7 +706,12 @@ func handleLuksBlockDevice(blk *blkInfo) error {
 	}
 	info("a mapping for LUKS device %s has been found", blk.path)
 
-	return luksOpen(blk.path, m)
+	err := luksOpen(blk.path, m)
+	if err != nil && m.noFail {
+		warning("ignoring error unlocking LUKS device %s (nofail): %v", blk.path, err)
+		return nil
+	}
+	return err
 }
 
 func findOrCreateLuksMapping(uuid UUID) *luksMapping {
@@ -655,8 +727,9 @@ func findOrCreateLuksMapping(uuid UUID) *luksMapping {
 
 	// didn't locate the device make a new one
 	m := &luksMapping{
-		ref:  &deviceRef{refFsUUID, uuid},
-		name: "luks-" + uuid.toString(),
+		ref:     &deviceRef{refFsUUID, uuid},
+		name:    "luks-" + uuid.toString(),
+		keySlot: -1,
 	}
 	luksMappings = append(luksMappings, m)
 
