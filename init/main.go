@@ -1054,6 +1054,18 @@ func boost() error {
 		return err
 	}
 
+	// Merge /etc/crypttab entries for devices not already covered by rd.luks.* params.
+	// rd.luks.* kernel parameters take precedence over crypttab.
+	if ctMappings, err := parseCrypttab(); err != nil {
+		warning("crypttab: %v", err)
+	} else {
+		for _, cm := range ctMappings {
+			if !luksMatchExists(cm.ref) {
+				luksMappings = append(luksMappings, cm)
+			}
+		}
+	}
+
 	// Check if plymouth should be enabled: needs both config and "splash" kernel param
 	if config.EnablePlymouth {
 		cmdlineBytes, err := os.ReadFile("/proc/cmdline")
