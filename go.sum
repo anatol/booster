@@ -12,6 +12,8 @@ github.com/anatol/tang.go v0.0.0-20250920193351-e505ad2c76db h1:4AyNx4ipXJv+OGyH
 github.com/anatol/tang.go v0.0.0-20250920193351-e505ad2c76db/go.mod h1:dH7UKUQ+S9LM+IT3Va46o5lIlhRt3PeQFoZKOBOlpYI=
 github.com/anatol/vmtest v0.0.0-20250627153117-302402d269a6 h1:zdaWj/ncXyzpPH3YqACvJXMrJxkkILrnWbjHojHBctc=
 github.com/anatol/vmtest v0.0.0-20250627153117-302402d269a6/go.mod h1:m5pN88x7ZnEDGXZldwg7RCX+EikR9qz/iSI2GzXq++Y=
+github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be h1:9AeTilPcZAjCFIImctFaOjnTIavg87rW78vTPkQqLI8=
+github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be/go.mod h1:ySMOLuWl6zY27l47sB3qLNK6tF2fkHG55UZxx8oIVo4=
 github.com/cavaliergopher/cpio v1.0.1 h1:KQFSeKmZhv0cr+kawA3a0xTQCU4QxXF1vhU7P7av2KM=
 github.com/cavaliergopher/cpio v1.0.1/go.mod h1:pBdaqQjnvXxdS/6CvNDwIANIFSP0xRKI16PX4xejRQc=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -21,6 +23,12 @@ github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 h1:NMZiJj8QnKe1LgsbDayM4UoHwbvw
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0/go.mod h1:ZXNYxsqcloTdSy/rNShjYzMhyjf0LaoftYK0p+A3h40=
 github.com/dgryski/go-camellia v0.0.0-20191119043421-69a8a13fb23d h1:CPqTNIigGweVPT4CYb+OO2E6XyRKFOmvTHwWRLgCAlE=
 github.com/dgryski/go-camellia v0.0.0-20191119043421-69a8a13fb23d/go.mod h1:QX5ZVULjAfZJux/W62Y91HvCh9hyW6enAwcrrv/sLj0=
+github.com/gliderlabs/ssh v0.3.8 h1:a4YXD1V7xMF9g5nTkdfnja3Sxy1PVDCj1Zg4Wb8vY6c=
+github.com/gliderlabs/ssh v0.3.8/go.mod h1:xYoytBv1sV0aL3CavoDuJIQNURXkkfPA/wxQ1pL1fAU=
+github.com/go-crypt/crypt v0.4.10 h1:bJiJ9MRrKjHQEfbZMT+Q/XkwxoU3oahCJv1eLJ4u0UU=
+github.com/go-crypt/crypt v0.4.10/go.mod h1:KHr1XXnCbQ3rkNhoJovldRd3mbLSnkuAeAPmrTBvxKI=
+github.com/go-crypt/x v0.4.13 h1:aE4ieFDpDoHKzF1qKOhadZAS8GHZR6bSxUkKVOdIx1c=
+github.com/go-crypt/x v0.4.13/go.mod h1:KWDO2p5WT94GKRj6fdNo7+XKTya53zfxCB1V3e2B9hU=
 github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
 github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/google/go-tpm v0.9.7 h1:u89J4tUUeDTlH8xxC3CTW7OHZjbjKoHdQ9W7gCUhtxA=

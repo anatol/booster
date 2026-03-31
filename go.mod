@@ -11,6 +11,8 @@ require (
 	github.com/anatol/tang.go v0.0.0-20250920193351-e505ad2c76db
 	github.com/anatol/vmtest v0.0.0-20250627153117-302402d269a6
 	github.com/cavaliergopher/cpio v1.0.1
+	github.com/gliderlabs/ssh v0.3.8
+	github.com/go-crypt/crypt v0.4.10
 	github.com/google/go-tpm v0.9.7
 	github.com/google/renameio/v2 v2.0.0
 	github.com/insomniacslk/dhcp v0.0.0-20251020182700-175e84fbb167
@@ -27,9 +29,11 @@ require (
 )
 
 require (
+	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/dgryski/go-camellia v0.0.0-20191119043421-69a8a13fb23d // indirect
+	github.com/go-crypt/x v0.4.13 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/jzelinskie/whirlpool v0.0.0-20201016144138-0675e54bb004 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -917,6 +918,7 @@ func switchRoot() error {
 func cleanup() {
 	close(udevQuitLoop)
 	udevConn.Close()
+	sshShutdown()
 	shutdownNetwork()
 }
 
@@ -1100,6 +1102,18 @@ func boost() error {
 		if err := mountZfsRoot(); err != nil {
 			return err
 		}
+	}
+
+	// start ssh
+	if config.Network != nil && (config.Network.SshPass != "" || config.Network.SshAuthorizedKeys != "") {
+		// ensure secure key
+		if config.Network.SshServerKeys == "" {
+			var err error
+			if config.Network.SshServerKeys, err = sshGenEcdsaKey(rand.Reader); err != nil {
+				warning("ssh: unable to generate ecdsa key: %v", err)
+			}
+		}
+		go sshRun(config.Network)
 	}
 
 	if config.MountTimeout != 0 {

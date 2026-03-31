@@ -35,3 +35,5 @@ generator/assets/*.ko*
 generator/assets/*.mod
 generator/assets/*.mod.*
 generator/assets/*.o
+
+ssh_host_*

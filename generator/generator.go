@@ -44,6 +44,12 @@ type generatorConfig struct {
 
 	enablePlymouth bool
 
+	sshAddr           string
+	sshServerKeys     string
+	sshUser           string
+	sshPass           string
+	sshAuthorizedKeys string
+
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
@@ -455,6 +461,12 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	if conf.networkActiveInterfaces != nil {
 		initConfig.Network.Interfaces = conf.networkActiveInterfaces
 	}
+
+	initConfig.Network.SshAddr = conf.sshAddr
+	initConfig.Network.SshServerKeys = conf.sshServerKeys
+	initConfig.Network.SshUser = conf.sshUser
+	initConfig.Network.SshPass = conf.sshPass
+	initConfig.Network.SshAuthorizedKeys = conf.sshAuthorizedKeys
 
 	content, err := yaml.Marshal(initConfig)
 	if err != nil {

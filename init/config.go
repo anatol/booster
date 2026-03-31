@@ -10,6 +10,12 @@ type InitNetworkConfig struct {
 	IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 	Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 	DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
+
+	SshAddr           string `yaml:"ssh_addr,omitempty"`
+	SshServerKeys     string `yaml:"ssh_server_keys,omitempty"`
+	SshUser           string `yaml:"ssh_user,omitempty"`
+	SshPass           string `yaml:"ssh_pass,omitempty"`
+	SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"`
 }
 
 type VirtualConsole struct {
