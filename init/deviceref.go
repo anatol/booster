@@ -22,6 +22,7 @@ const (
 	refFsLabel
 	refHwPath
 	refWwID
+	refRemote // either a virtiofs or nfs (remote) target, either case non-local
 )
 
 // The are many ways a user can specify root partition (using name, fs uuid, fs label, gpt attribute, ...).
@@ -262,4 +263,13 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 	}
 
 	return nil, fmt.Errorf("unable to parse the device reference")
+}
+
+func parseRemoteRef(remote string, fsType string) (*deviceRef, error) {
+	switch fsType {
+	case "virtiofs":
+		return &deviceRef{refRemote, remote}, nil
+	default:
+		return nil, fmt.Errorf("remote root reference of type %v not supported, currently only virtiofs is supported", fsType)
+	}
 }
