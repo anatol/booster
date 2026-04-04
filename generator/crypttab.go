@@ -24,9 +24,6 @@ func isKeyfileOnDevice(kf string) bool {
 // /etc/crypttab.  Returns nil if path does not exist.
 func (img *Image) appendCrypttab(path string) error {
 	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}

@@ -49,8 +49,7 @@ func readImageFile(t *testing.T, img *Image, imgPath, name string) []byte {
 
 func TestAppendCrypttabAbsent(t *testing.T) {
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(filepath.Join(t.TempDir(), "no-such-file")))
-	require.False(t, img.contains["/etc/crypttab"])
+	require.Error(t, img.appendCrypttab(filepath.Join(t.TempDir(), "no-such-file")))
 }
 
 func TestAppendCrypttabBundled(t *testing.T) {
