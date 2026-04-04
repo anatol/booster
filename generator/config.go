@@ -40,6 +40,7 @@ type UserConfig struct {
 	ZfsImportParams      string `yaml:"zfs_import_params"`
 	ZfsCachePath         string `yaml:"zfs_cache_path"`
 	EnablePlymouth       bool   `yaml:"enable_plymouth"`
+	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -159,6 +160,9 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.localePath = "/etc/locale.conf"
 	}
 	conf.crypttabFile = opts.BuildCommand.CrypttabFile
+	if conf.crypttabFile == "" {
+		conf.crypttabFile = u.CrypttabPath
+	}
 
 	return &conf, nil
 }

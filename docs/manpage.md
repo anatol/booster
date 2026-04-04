@@ -75,6 +75,8 @@ Booster advantages:
 
  * `enable_zfs` is a flag that enables ZFS filesystem as root filesystem. This flag also makes sure all the required modules/binaries are added to the image. Note that if ZFS is enabled then `zfs=` boot option must be used instead of `root=` boot option.
 
+ * `crypttab_path` path to the crypttab file to read at image build time. Defaults to `/etc/crypttab` if not set. Can be overridden by the `--crypttab` flag. If set, any read error is reported as a failure.
+
  * `enable_plymouth` is a flag that enables Plymouth boot splash support. When enabled, booster bundles the Plymouth daemon, plugins, theme, and fonts into the initramfs. GPU driver must be included in `modules_force_load`. The `splash` kernel parameter is also required. Note that `booster.log=console` conflicts with Plymouth's graphical display; when console logging is active, Plymouth reverts to the details plugin (text-based fallback).
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
@@ -98,6 +100,7 @@ Build initrd image. Usage: `booster [OPTIONS] build [build-OPTIONS] output`
 * `--config` <default: _/etc/booster.yaml_> Configuration file path.
 * `--universal` Add wide range of modules/tools to allow this image boot at different machines.
 * `--strip` Strip ELF files (binaries, shared libraries and kernel modules) before adding it to the image.
+* `--crypttab` <default: _/etc/crypttab_> Path to the crypttab file to read at image build time. Overrides `crypttab_path` from the config file. If neither is set, booster reads `/etc/crypttab` and silently skips it if the file is absent or unreadable. If specified explicitly, any read error is reported as a failure.
 
 ### cat
 Show content of the file inside the image. Usage: `booster [OPTIONS] cat image file-in-image`
