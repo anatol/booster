@@ -115,11 +115,16 @@ func generateInitRamfs(conf *generatorConfig) error {
 	}
 
 	crypttabPath := conf.crypttabFile
-	if crypttabPath == "" {
+	explicitCrypttab := crypttabPath != ""
+	if !explicitCrypttab {
 		crypttabPath = "/etc/crypttab"
 	}
 	if err := img.appendCrypttab(crypttabPath); err != nil {
-		return err
+		if !explicitCrypttab && (os.IsNotExist(err) || os.IsPermission(err)) {
+			// default path unavailable — crypttab is optional, skip silently
+		} else {
+			return err
+		}
 	}
 
 	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
