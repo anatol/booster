@@ -9,6 +9,15 @@ import (
 )
 
 func TestSystemdFido2(t *testing.T) {
+	// Check prerequisites before starting QEMU or touching hardware.
+	// PIN is read from the environment to avoid hardcoding it in source.
+	// Set BOOSTER_TEST_FIDO2_PIN to the PIN on your FIDO2 device before running.
+	// Tip: use read -s to avoid shell history: read -s BOOSTER_TEST_FIDO2_PIN && sudo -E BOOSTER_TEST_FIDO2_PIN=$BOOSTER_TEST_FIDO2_PIN go test -run TestSystemdFido2
+	pin := os.Getenv("BOOSTER_TEST_FIDO2_PIN")
+	if pin == "" {
+		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
+	}
+
 	yubikeys, err := detectYubikeys()
 	require.NoError(t, err)
 	if len(yubikeys) == 0 {
@@ -20,17 +29,15 @@ func TestSystemdFido2(t *testing.T) {
 		params = append(params, y.toQemuParams()...)
 	}
 	vm, err := buildVmInstance(t, Opts{
-		disk:       "assets/systemd-fido2.img",
-		kernelArgs: []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
-		params:     params,
-		extraFiles: "fido2-assert",
+		disk:        "assets/systemd-fido2.img",
+		kernelArgs:  []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
+		params:      params,
+		enableFido2: true,
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
-
-	pin := "1111"
-	// there can be multiple Yubikeys, iterate over all "Enter PIN" requests
-	re, err := regexp.Compile(`(Enter PIN for /dev/hidraw|Hello, booster!)`)
+	// there can be multiple Yubikeys, iterate over all "Enter FIDO2 PIN" requests
+	re, err := regexp.Compile(`(Enter FIDO2 PIN for |Hello, booster!)`)
 	require.NoError(t, err)
 	for {
 		matches, err := vm.ConsoleExpectRE(re)
@@ -53,7 +60,6 @@ func TestSystemdTPM2(t *testing.T) {
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
 		params:     params,
-		extraFiles: "fido2-assert",
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
@@ -70,7 +76,6 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 		disk:       "assets/systemd-tpm2-withpin.img",
 		kernelArgs: []string{"rd.luks.uuid=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "root=UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618"},
 		params:     params,
-		extraFiles: "fido2-assert",
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
