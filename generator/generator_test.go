@@ -178,6 +178,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		enableLVM:           o.enableLVM,
 		enableMdraid:        o.enableMdraid,
 		mdraidConfigPath:    o.mdraidConfigPath,
+		crypttabFile:        "/dev/null", // tests run without root; avoid reading /etc/crypttab
 	}
 	if o.vConsoleConfig != "" {
 		conf.enableVirtualConsole = true

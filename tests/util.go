@@ -181,9 +181,11 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 	if opts.modulesDirectory != "" {
 		generatorArgs = append(generatorArgs, "--modules-dir", opts.modulesDirectory)
 	}
-	if opts.crypttabFile != "" {
-		generatorArgs = append(generatorArgs, "--crypttab", opts.crypttabFile)
+	crypttabArg := opts.crypttabFile
+	if crypttabArg == "" {
+		crypttabArg = "/dev/null" // tests run without root; avoid reading /etc/crypttab
 	}
+	generatorArgs = append(generatorArgs, "--crypttab", crypttabArg)
 	generatorArgs = append(generatorArgs, output)
 	cmd := exec.Command(binariesDir+"/generator", generatorArgs...)
 	if testing.Verbose() {
@@ -249,6 +251,7 @@ type GeneratorConfig struct {
 	EnableZfs            bool           `yaml:"enable_zfs"`
 	ZfsImportParams      string         `yaml:"zfs_import_params"`
 	ZfsCachePath         string         `yaml:"zfs_cache_path"`
+	EnableFido2          bool           `yaml:"enable_fido2"`
 }
 
 func generateBoosterConfig(output string, opts Opts) error {
@@ -279,6 +282,7 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.EnableZfs = opts.enableZfs
 	conf.ZfsImportParams = opts.zfsImportParams
 	conf.ZfsCachePath = opts.zfsCachePath
+	conf.EnableFido2 = opts.enableFido2
 	conf.Modules = opts.modules
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
@@ -321,6 +325,7 @@ type Opts struct {
 	zfsImportParams      string
 	zfsCachePath         string // TODO: do we need any of these parameters?
 	crypttabFile         string // path to host crypttab to bundle; overrides /etc/crypttab
+	enableFido2          bool
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
@@ -456,9 +461,6 @@ func compileBinaries(dir string) error {
 	}
 	cmd := exec.Command("go", "build", "-o", dir+"/init", "-tags", "test", raceFlag)
 	cmd.Env = os.Environ()
-	if !israce.Enabled {
-		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
-	}
 	if testing.Verbose() {
 		log.Print("Call 'go build' for init")
 		cmd.Stdout = os.Stdout
@@ -466,6 +468,17 @@ func compileBinaries(dir string) error {
 	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("Cannot build init binary: %v", unwrapExitError(err))
+	}
+
+	// Build fido2plugin.so (best-effort: skipped silently if libfido2 is not installed)
+	pluginCmd := exec.Command("go", "build", "-buildmode=plugin", "-o", dir+"/fido2plugin.so", "./fido2plugin")
+	if testing.Verbose() {
+		log.Print("Call 'go build' for fido2plugin")
+		pluginCmd.Stdout = os.Stdout
+		pluginCmd.Stderr = os.Stderr
+	}
+	if err := pluginCmd.Run(); err != nil && testing.Verbose() {
+		log.Printf("fido2plugin.so build skipped (libfido2 may not be installed): %v", unwrapExitError(err))
 	}
 
 	// Generate initramfs
