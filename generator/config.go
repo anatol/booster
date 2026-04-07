@@ -41,6 +41,7 @@ type UserConfig struct {
 	ZfsCachePath         string `yaml:"zfs_cache_path"`
 	EnablePlymouth       bool   `yaml:"enable_plymouth"`
 	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
+	EnableFido2          bool   `yaml:"enable_fido2"`
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -163,6 +164,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	if conf.crypttabFile == "" {
 		conf.crypttabFile = u.CrypttabPath
 	}
+	conf.enableFido2 = u.EnableFido2
 
 	return &conf, nil
 }
