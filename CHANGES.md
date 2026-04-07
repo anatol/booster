@@ -1,5 +1,11 @@
 Booster - fast and secure initramfs generator
 
+Release 0.11 (TBD)
+  * FIDO2 unlock now uses native go-libfido2 via a plugin instead of the external `fido2-assert` binary.
+    Add `enable_fido2: true` to `/etc/booster.yaml` to opt in. Users with `extra_files: fido2-assert`
+    in their config will continue to work with a deprecation warning — update to `enable_fido2: true`
+    at your convenience.
+
 Release 0.10 (2023, Mar 7)
   * Fixes panic during LUKS volume unseal (#188)
   * Brings support for camelia block cipher (#188)

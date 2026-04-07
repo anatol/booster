@@ -49,6 +49,7 @@ type generatorConfig struct {
 	vconsolePath, localePath string
 
 	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
+	enableFido2  bool
 }
 
 type networkStaticConfig struct {
@@ -124,6 +125,25 @@ func generateInitRamfs(conf *generatorConfig) error {
 			// default path unavailable — crypttab is optional, skip silently
 		} else {
 			return err
+		}
+	}
+
+	for _, f := range conf.extraFiles {
+		if filepath.Base(f) == "fido2-assert" {
+			warning("extra_files: fido2-assert is deprecated — use enable_fido2: true in /etc/booster.yaml instead")
+			conf.enableFido2 = true
+			break
+		}
+	}
+
+	if conf.enableFido2 {
+		pluginPath := filepath.Join(filepath.Dir(conf.initBinary), "fido2plugin.so")
+		content, err := os.ReadFile(pluginPath)
+		if err != nil {
+			return fmt.Errorf("fido2 plugin %s: %v", pluginPath, err)
+		}
+		if err := img.AppendContent("/usr/lib/booster/fido2plugin.so", 0o755, content); err != nil {
+			return fmt.Errorf("fido2 plugin: %v", err)
 		}
 	}
 
