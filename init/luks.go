@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,7 +12,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,6 +31,7 @@ type luksMapping struct {
 	options         []string
 	header          string     // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
+	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
 	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
 	tries         int   // 0 = unlimited keyboard retries; >0 = max attempts
@@ -146,105 +145,91 @@ func isHidRawFido2(devName string) (bool, error) {
 	return false, nil
 }
 
-func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool) ([]byte, error) {
+func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string) ([]byte, error) {
 	usbhidWg.Wait()
 
 	isFido2, err := isHidRawFido2(devName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to check whether %s is a FIDO2 device", devName)
 	}
-
 	if !isFido2 {
 		return nil, fmt.Errorf("HID %s is not a FIDO2 device", devName)
 	}
 
 	info("HID %s supports FIDO, trying it to recover the password", devName)
 
-	var challenge strings.Builder
-	const zeroString = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // 32byte zero string encoded as hex, hex.EncodeToString(make([]byte, 32))
-	challenge.WriteString(zeroString)                                 // client data, an empty string
-	challenge.WriteRune('\n')
-	challenge.WriteString(relyingParty)
-	challenge.WriteRune('\n')
-	challenge.WriteString(credential)
-	challenge.WriteRune('\n')
-	challenge.WriteString(salt)
-	challenge.WriteRune('\n')
+	fido2Mu.Lock()
+	defer fido2Mu.Unlock()
 
-	device := "/dev/" + devName
-	args := []string{"-G", "-h", device}
-	if userPresenceRequired {
-		args = append(args, "-t", "up=true")
+	if plymouthEnabled {
+		plymouthMessage("") // clear "Waiting for FIDO2" now that device is detected and we have the lock
 	}
-	if userVerificationRequired {
-		args = append(args, "-t", "uv=true")
+
+	credID, err := base64.StdEncoding.DecodeString(credential)
+	if err != nil {
+		return nil, fmt.Errorf("invalid credential: %v", err)
 	}
+	saltBytes, err := base64.StdEncoding.DecodeString(salt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid salt: %v", err)
+	}
+
+	var pin string
 	if pinRequired {
-		args = append(args, "-t", "pin=true")
-	}
-
-	cmd := exec.Command("fido2-assert", args...)
-	pipeOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	pipeErr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-	pipeIn, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	if _, err := pipeIn.Write([]byte(challenge.String())); err != nil {
-		return nil, err
-	}
-
-	if pinRequired {
-		// wait till the command requests the pin
-		buff := make([]byte, 500)
-		if _, err := pipeErr.Read(buff); err != nil {
-			return nil, err
-		}
-		// Dealing with Yubikey using command-line tools is getting out of control
-		// TODO: find a way to do the same using libfido2
-		prompt := "Enter PIN for " + device + ":"
-		if strings.HasPrefix(string(buff), prompt) {
-			// fido2-assert tool requests for PIN
-			pin, err := readPassword(prompt, "")
+		prompt := "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
+		if plymouthEnabled {
+			pinBytes, err := plymouthAskPassword(prompt)
+			if err != nil {
+				warning("Plymouth password prompt failed: %v, falling back to console", err)
+				pinBytes, err2 := readPassword(prompt, "")
+				if err2 != nil {
+					return nil, err2
+				}
+				pin = string(pinBytes)
+			} else {
+				pin = string(pinBytes)
+			}
+		} else {
+			pinBytes, err := readPassword(prompt, "")
 			if err != nil {
 				return nil, err
 			}
-			pin = append(pin, '\n')
-			if _, err := pipeIn.Write(pin); err != nil {
-				return nil, err
-			}
+			pin = string(pinBytes)
 		}
 	}
 
-	content, err := io.ReadAll(pipeOut)
-	if err != nil {
-		return nil, err
-	}
-	lines := bytes.Split(content, []byte{'\n'})
-	if len(lines) < 5 {
-		msg, _ := io.ReadAll(pipeErr)
-		msg = bytes.TrimRight(msg, "\n")
-		return nil, fmt.Errorf("%s", string(msg))
+	if pinRequired && pin == "" {
+		return nil, errFido2Skipped
 	}
 
-	// hmac is the 5th line in the output
-	return lines[4], nil
+	notifyTouch := func() {
+		msg := "Please touch the FIDO2 key for " + mappingName
+		if plymouthEnabled {
+			plymouthMessage(msg)
+		} else {
+			console(msg + "\n")
+		}
+	}
+
+	result, err := fido2Assertion("/dev/"+devName, credID, saltBytes, relyingParty, pin, pinRequired, userPresenceRequired, userVerificationRequired, notifyTouch)
+	if err != nil && isFido2PinInvalidError(err) {
+		return nil, errFido2PinInvalid
+	}
+	return result, err
 }
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
 
-func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
+// fido2Mu serializes FIDO2 user interactions (PIN prompt + touch + assertion)
+// across all goroutines. The FIDO2 key can only service one assertion at a time,
+// and concurrent goroutines (e.g. multiple systemd-fido2 tokens or multiple LUKS
+// devices) would otherwise interleave PIN prompts and touch messages.
+var fido2Mu sync.Mutex
+
+var errFido2Skipped = errors.New("FIDO2 skipped by user")
+var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
+
+func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
 		Salt                     string `json:"fido2-salt"`       // base64
@@ -261,14 +246,30 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
 
+	if plymouthEnabled {
+		plymouthMessage("Waiting for FIDO2 security key for " + mappingName + "...")
+	} else {
+		console("Waiting for FIDO2 security key for " + mappingName + "...\n")
+	}
+
+	usbhidWg.Wait()
+
 	dir, err := os.ReadDir("/sys/class/hidraw/")
 	if err != nil {
 		return nil, err
 	}
 
+	if len(dir) == 0 {
+		msg := "No FIDO2 device found for " + mappingName + ", insert security key or wait for passphrase prompt"
+		if plymouthEnabled {
+			plymouthMessage(msg)
+		} else {
+			console(msg + "\n")
+		}
+	}
+
 	go func() {
 		for _, d := range dir {
-			// run it in a separate goroutine to avoid blocking on channel
 			hidrawDevices <- d.Name()
 		}
 	}()
@@ -281,16 +282,51 @@ func recoverSystemdFido2Password(t luks.Token) ([]byte, error) {
 		}
 		seenHidrawDevices[devName] = true
 
-		password, err := recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired)
-		if err != nil {
-			if err != io.EOF {
-				info("%v", err)
+		maxAttempts := 1
+		if node.PinRequired {
+			maxAttempts = 3
+		}
+		var password []byte
+		var err error
+		pinExhausted := false
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName)
+			if err == nil {
+				break
 			}
+			if !errors.Is(err, errFido2PinInvalid) {
+				break
+			}
+			if attempt < maxAttempts-1 {
+				msg := "FIDO2 PIN incorrect, please try again"
+				if plymouthEnabled {
+					plymouthMessage(msg)
+				} else {
+					warning(msg)
+				}
+			} else {
+				pinExhausted = true
+			}
+		}
+
+		if err != nil {
+			if errors.Is(err, errFido2Skipped) || pinExhausted {
+				info("FIDO2 skipped, falling back to passphrase")
+				break
+			}
+			if isFido2PinAuthBlockedError(err) {
+				warning("FIDO2 PIN auth blocked (too many wrong attempts), falling back to passphrase")
+				break
+			}
+			info("%v", err)
 			continue
 		}
 		return password, nil
 	}
 
+	if plymouthEnabled {
+		plymouthMessage("") // clear any FIDO2 status message before keyboard fallback
+	}
 	return nil, fmt.Errorf("no matching fido2 devices available")
 }
 
@@ -333,6 +369,9 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 
 	var authValue []byte
 	if node.Pin {
+		// TODO: route TPM PIN through Plymouth when plymouthEnabled, matching how
+		// FIDO2 PIN and keyboard passphrase are handled (plymouthAskPassword with
+		// console fallback).
 		prompt := fmt.Sprintf("Please enter TPM pin: ")
 		pin, err := readPassword(prompt, "")
 		if err != nil {
@@ -350,6 +389,30 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
 }
 
+func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, t luks.Token, mappingName string) bool {
+	var password []byte
+	var err error
+
+	switch t.Type {
+	case "clevis":
+		password, err = recoverClevisPassword(t, d.Version())
+	case "systemd-fido2":
+		password, err = recoverSystemdFido2Password(t, mappingName)
+	case "systemd-tpm2":
+		password, err = recoverSystemdTPM2Password(t)
+	default:
+		info("token #%d has unknown type: %s", t.ID, t.Type)
+		return false
+	}
+
+	if err != nil {
+		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
+		return false
+	}
+
+	info("recovered password from %s token #%d", t.Type, t.ID)
+	return tryPassphraseAgainstSlots(volumes, done, d, t.Slots, password)
+}
 
 // readKeyfile reads a keyfile at path, skipping offset bytes and reading at most
 // size bytes (0 means read until EOF).
@@ -544,6 +607,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	volumes := make(chan *luks.Volume)
 	done := make(chan struct{})
 	var senderWg sync.WaitGroup
+	var tokenWg sync.WaitGroup
 	var keyboardOnce sync.Once
 
 	// startKeyboard launches the keyboard (or keyfile) unlock goroutine at most once.
@@ -576,61 +640,36 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}
 		t := t
 		senderWg.Add(1)
+		tokenWg.Add(1)
 		go func() {
 			defer senderWg.Done()
-			var password []byte
-			var err error
-			switch t.Type {
-			case "clevis":
-				password, err = recoverClevisPassword(t, d.Version())
-			case "systemd-fido2":
-				password, err = recoverSystemdFido2Password(t)
-			case "systemd-tpm2":
-				password, err = recoverSystemdTPM2Password(t)
-			default:
-				info("token #%d has unknown type: %s", t.ID, t.Type)
-				keyboardOnce.Do(startKeyboard)
-				return
-			}
-			if err != nil {
-				warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
-				keyboardOnce.Do(startKeyboard)
-				return
-			}
-			info("recovered password from %s token #%d", t.Type, t.ID)
-			for _, s := range t.Slots {
-				v, err := d.UnsealVolume(s, password)
-				if err == luks.ErrPassphraseDoesNotMatch {
-					continue
-				} else if err != nil {
-					warning("unlocking slot %v: %v", s, err)
-					continue
-				}
-				info("password from %s token #%d matches", t.Type, t.ID)
-				select {
-				case volumes <- v:
-				case <-done:
-				}
-				return
-			}
-			info("password from %s token #%d does not match", t.Type, t.ID)
-			keyboardOnce.Do(startKeyboard)
+			defer tokenWg.Done()
+			recoverTokenPassword(volumes, done, d, t, mapping.name)
 		}()
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
 	}
 
-	// Start keyboard/keyfile unlock for any slots that have no tokens.
-	var passwordSlots []int
-	for _, s := range availableSlots {
-		if !slotsWithTokens[s] {
-			passwordSlots = append(passwordSlots, s)
+	// Start keyboard/keyfile unlock after all token goroutines finish (or tokenTimeout
+	// elapses). This gives hardware tokens priority over the keyboard prompt, matching
+	// systemd-cryptsetup behavior. senderWg ensures volumes is closed if this goroutine
+	// is the last sender and nobody unlocked.
+	senderWg.Add(1)
+	go func() {
+		defer senderWg.Done()
+		if mapping.tokenTimeout > 0 {
+			waitTimeout(&tokenWg, mapping.tokenTimeout)
+		} else {
+			tokenWg.Wait()
 		}
-	}
-	if len(passwordSlots) > 0 {
+		select {
+		case <-done:
+			return // already unlocked by a token
+		default:
+		}
 		keyboardOnce.Do(startKeyboard)
-	}
+	}()
 
 	v, ok := <-volumes
 	close(done)
@@ -727,9 +766,10 @@ func findOrCreateLuksMapping(uuid UUID) *luksMapping {
 
 	// didn't locate the device make a new one
 	m := &luksMapping{
-		ref:     &deviceRef{refFsUUID, uuid},
-		name:    "luks-" + uuid.toString(),
-		keySlot: -1,
+		ref:          &deviceRef{refFsUUID, uuid},
+		name:         "luks-" + uuid.toString(),
+		keySlot:      -1,
+		tokenTimeout: 30 * time.Second, // systemd default: wait 30s for tokens before also prompting keyboard
 	}
 	luksMappings = append(luksMappings, m)
 

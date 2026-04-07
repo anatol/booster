@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // parsePathWithDeviceRef parses a "path:SPECIFIER=value" string where the
@@ -171,6 +173,8 @@ func getNextParam(params string, index int) (string, string, int) {
 
 func parseParams(params string) error {
 	var luksOptions []string
+	var tokenTimeout time.Duration
+	var tokenTimeoutExplicit bool
 
 	var key, value string
 	i := 0
@@ -239,6 +243,21 @@ func parseParams(params string) error {
 			rootRw = true
 		case "rd.luks.options":
 			for o := range strings.SplitSeq(value, ",") {
+				if strings.HasPrefix(o, "token-timeout=") {
+					d, err := parseTokenTimeout(strings.TrimPrefix(o, "token-timeout="))
+					if err != nil {
+						return fmt.Errorf("invalid token-timeout in rd.luks.options: %v", err)
+					}
+					tokenTimeout = d
+					tokenTimeoutExplicit = true
+					continue
+				}
+				// Accept fido2-device= and tpm2-device= for compatibility with
+				// systemd-cryptsetup conventions. Booster auto-detects enrolled
+				// tokens from the LUKS header so no action is needed.
+				if strings.HasPrefix(o, "fido2-device=") || strings.HasPrefix(o, "tpm2-device=") {
+					continue
+				}
 				flag, ok := rdLuksOptions[o]
 				if !ok {
 					return fmt.Errorf("unknown value in rd.luks.options: %v", o)
@@ -332,11 +351,38 @@ func parseParams(params string) error {
 		}
 	}
 
-	if luksOptions != nil {
-		for i := range luksMappings {
+	for i := range luksMappings {
+		if luksOptions != nil {
 			luksMappings[i].options = luksOptions
+		}
+		if tokenTimeoutExplicit {
+			luksMappings[i].tokenTimeout = tokenTimeout
 		}
 	}
 
 	return nil
+}
+
+// parseTokenTimeout parses a token-timeout value from rd.luks.options.
+// A bare integer (no suffix) is treated as seconds, matching systemd semantics.
+// A value of 0 means wait forever.
+func parseTokenTimeout(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty timeout value")
+	}
+	isAllDigits := true
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			isAllDigits = false
+			break
+		}
+	}
+	if isAllDigits {
+		secs, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(secs) * time.Second, nil
+	}
+	return time.ParseDuration(s)
 }
