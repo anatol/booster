@@ -15,3 +15,7 @@ func isFido2PinInvalidError(err error) bool {
 func isFido2PinAuthBlockedError(err error) bool {
 	return false
 }
+
+func isFido2PinBlockedError(err error) bool {
+	return false
+}

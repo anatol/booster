@@ -63,3 +63,11 @@ func isFido2PinAuthBlockedError(err error) bool {
 	}
 	return fido2plugin.IsFido2PinAuthBlocked(err)
 }
+
+func isFido2PinBlockedError(err error) bool {
+	loadFido2Plugin()
+	if fido2plugin == nil {
+		return false
+	}
+	return fido2plugin.IsFido2PinBlocked(err)
+}
