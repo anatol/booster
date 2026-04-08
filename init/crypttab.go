@@ -125,10 +125,16 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-timeout= value %q", name, opt[16:])
 					}
 					m.keyfileTimeout = d
+				case strings.HasPrefix(opt, "header="):
+					hdrPath, hdrRef, err := parsePathWithDeviceRef(opt[7:], "header")
+					if err != nil {
+						return nil, fmt.Errorf("crypttab: entry %q: %v", name, err)
+					}
+					m.header = hdrPath
+					m.headerDeviceRef = hdrRef
 				case strings.HasPrefix(opt, "fido2-device="),
 					strings.HasPrefix(opt, "tpm2-device="),
-					strings.HasPrefix(opt, "token-timeout="),
-					strings.HasPrefix(opt, "header="):
+					strings.HasPrefix(opt, "token-timeout="):
 					// silently ignored — deferred to follow-up PRs
 				default:
 					debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
