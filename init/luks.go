@@ -566,13 +566,8 @@ func acquireHeader(m *luksMapping) (path string, cleanup func(), err error) {
 	}
 	timeout := time.Duration(config.MountTimeout) * time.Second
 	if m.headerDeviceRef != nil {
-		// Header is a file on a separate filesystem device.
-		mp := "/run/booster/hdrdev-" + m.name
-		unmount, err := mountDeviceReadOnly(m.headerDeviceRef, mp, timeout)
-		if err != nil {
-			return "", nil, err
-		}
-		return filepath.Join(mp, m.header), unmount, nil
+		// Header is a file on a separate filesystem device — use shared acquireFile.
+		return acquireFile(m.headerDeviceRef, "/run/booster/hdrdev-"+m.name, m.header, timeout)
 	}
 	if strings.HasPrefix(m.header, "/dev/") {
 		// Header is a raw block device — wait for it to appear.
