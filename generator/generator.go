@@ -120,12 +120,15 @@ func generateInitRamfs(conf *generatorConfig) error {
 	if !explicitCrypttab {
 		crypttabPath = "/etc/crypttab"
 	}
-	if err := img.appendCrypttab(crypttabPath); err != nil {
+	if hasFido2, err := img.appendCrypttab(crypttabPath); err != nil {
 		if !explicitCrypttab && (os.IsNotExist(err) || os.IsPermission(err)) {
 			// default path unavailable — crypttab is optional, skip silently
 		} else {
 			return err
 		}
+	} else if hasFido2 {
+		// auto-enable fido2 plugin when any crypttab entry uses fido2-device=
+		conf.enableFido2 = true
 	}
 
 	for _, f := range conf.extraFiles {
