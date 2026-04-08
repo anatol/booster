@@ -9,10 +9,9 @@ import (
 )
 
 func TestSystemdFido2(t *testing.T) {
-	// Check prerequisites before starting QEMU or touching hardware.
 	// PIN is read from the environment to avoid hardcoding it in source.
 	// Set BOOSTER_TEST_FIDO2_PIN to the PIN on your FIDO2 device before running.
-	// Tip: use read -s to avoid shell history: read -s BOOSTER_TEST_FIDO2_PIN && sudo -E BOOSTER_TEST_FIDO2_PIN=$BOOSTER_TEST_FIDO2_PIN go test -run TestSystemdFido2
+	// Tip: use read -s to avoid shell history: read -s BOOSTER_TEST_FIDO2_PIN
 	pin := os.Getenv("BOOSTER_TEST_FIDO2_PIN")
 	if pin == "" {
 		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
@@ -24,13 +23,17 @@ func TestSystemdFido2(t *testing.T) {
 		t.Skip("no Yubikeys detected")
 	}
 
+	// Create a fresh LUKS image enrolled against the connected FIDO2 device so
+	// the test works for any device without pre-built assets.
+	luksUUID, fsUUID, imgPath := createFido2LuksImage(t, pin)
+
 	params := make([]string, 0)
 	for _, y := range yubikeys {
 		params = append(params, y.toQemuParams()...)
 	}
 	vm, err := buildVmInstance(t, Opts{
-		disk:        "assets/systemd-fido2.img",
-		kernelArgs:  []string{"rd.luks.uuid=b12cbfef-da87-429f-ac96-7dda7232c189", "root=UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"},
+		disk:        imgPath,
+		kernelArgs:  []string{"rd.luks.uuid=" + luksUUID, "root=UUID=" + fsUUID},
 		params:      params,
 		enableFido2: true,
 	})
@@ -42,12 +45,10 @@ func TestSystemdFido2(t *testing.T) {
 	for {
 		matches, err := vm.ConsoleExpectRE(re)
 		require.NoError(t, err)
-
 		if matches[0] == "Hello, booster!" {
 			break
-		} else {
-			require.NoError(t, vm.ConsoleWrite(pin+"\n"))
 		}
+		require.NoError(t, vm.ConsoleWrite(pin+"\n"))
 	}
 }
 
