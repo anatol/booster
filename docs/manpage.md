@@ -134,6 +134,13 @@ Some parts of booster boot functionality can be modified with kernel boot parame
 Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see **crypttab(5)**).
 Only entries marked with the `x-initrd.attach` option are bundled into the initramfs at image build time. `rd.luks.*` kernel parameters take precedence — if a cmdline parameter already covers a device, its crypttab entry is skipped.
 
+Booster-specific behaviour for selected options:
+ * **keyfile** `/path:UUID=xxx` (or `LABEL=`, `PARTUUID=`, `PARTLABEL=`) — keyfile on a separate device. Booster mounts the device read-only at boot, reads the key, then unmounts. The file is not bundled into the initramfs.
+ * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
+ * **`fido2-device=auto`** — when present the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required.
+ * **`fido2-device=auto`** / **`tpm2-device=auto`** — Booster defers the keyboard passphrase prompt until the token attempt fails or `token-timeout=` elapses (default: 30 s).
+ * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
+
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
