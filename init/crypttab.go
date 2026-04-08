@@ -71,6 +71,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 		}
 
 		skip := false
+		tokenTimeoutExplicit := false
 		for _, opt := range strings.Split(optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if opt == "" {
@@ -132,10 +133,17 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 					}
 					m.header = hdrPath
 					m.headerDeviceRef = hdrRef
-				case strings.HasPrefix(opt, "fido2-device="),
-					strings.HasPrefix(opt, "tpm2-device="),
-					strings.HasPrefix(opt, "token-timeout="):
-					// silently ignored — deferred to follow-up PRs
+				case strings.HasPrefix(opt, "fido2-device="):
+					m.tokenFido2 = true // value ("auto") ignored — booster auto-detects enrolled tokens
+				case strings.HasPrefix(opt, "tpm2-device="):
+					m.tokenTpm2 = true // value ("auto") ignored — booster auto-detects enrolled tokens
+				case strings.HasPrefix(opt, "token-timeout="):
+					d, err := parseTokenTimeout(opt[14:])
+					if err != nil {
+						return nil, fmt.Errorf("crypttab: entry %q: invalid token-timeout= value %q", name, opt[14:])
+					}
+					m.tokenTimeout = d
+					tokenTimeoutExplicit = true
 				default:
 					debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
 				}
@@ -144,6 +152,10 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 
 		if skip {
 			continue
+		}
+
+		if (m.tokenFido2 || m.tokenTpm2) && !tokenTimeoutExplicit {
+			m.tokenTimeout = 30 * time.Second // systemd default: wait 30s for tokens before also prompting keyboard
 		}
 
 		mappings = append(mappings, m)
