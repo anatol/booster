@@ -131,7 +131,29 @@ func (img *Image) appendCrypttab(path string) error {
 			}
 		}
 
-		// header= bundling is handled by pr/crypttab-header; skip here
+		// bundle header file if specified as an absolute path and not on a runtime device
+		for _, opt := range strings.Split(e.optStr, ",") {
+			opt = strings.TrimSpace(opt)
+			if !strings.HasPrefix(opt, "header=") {
+				continue
+			}
+			hdr := opt[7:]
+			if hdr == "" || !filepath.IsAbs(hdr) {
+				break
+			}
+			if isKeyfileOnDevice(hdr) {
+				// header lives on a separate runtime device — nothing to bundle
+				break
+			}
+			if strings.HasPrefix(hdr, "/dev/") {
+				// raw block device — runtime, nothing to bundle
+				break
+			}
+			if err := img.AppendFile(hdr); err != nil {
+				return fmt.Errorf("crypttab: header %s: %v", hdr, err)
+			}
+			break
+		}
 	}
 
 	return nil
