@@ -142,6 +142,16 @@ func plymouthAskPassword(prompt string) ([]byte, error) {
 	return []byte(password), nil
 }
 
+// statusMessage shows msg on the Plymouth splash, or on the console if Plymouth
+// is disabled. Passing an empty string clears the Plymouth message (no-op on console).
+func statusMessage(msg string) {
+	if plymouthEnabled {
+		plymouthMessage(msg)
+	} else if msg != "" {
+		console(msg + "\n")
+	}
+}
+
 // plymouthMessage displays a message on the plymouth splash screen.
 func plymouthMessage(msg string) {
 	if err := exec.Command("plymouth", "display-message", "--text="+msg).Run(); err != nil {

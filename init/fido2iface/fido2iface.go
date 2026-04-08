@@ -9,4 +9,5 @@ type Fido2Plugin interface {
 	Fido2Assertion(devPath string, credID, saltBytes []byte, relyingParty, pin string, pinRequired, userPresenceRequired, userVerificationRequired bool, notifyTouch func()) ([]byte, error)
 	IsFido2PinInvalid(err error) bool
 	IsFido2PinAuthBlocked(err error) bool
+	IsFido2PinBlocked(err error) bool
 }
