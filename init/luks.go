@@ -32,6 +32,8 @@ type luksMapping struct {
 	header          string        // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
+	tokenFido2      bool          // fido2-device= was set in crypttab — attempt FIDO2 token unlock
+	tokenTpm2       bool          // tpm2-device= was set in crypttab — attempt TPM2 token unlock
 
 	keyfileDeviceRef *deviceRef    // non-nil when keyfile is on a separate device
 	keyfileTimeout   time.Duration // device wait timeout for keyfile device (0 = use MountTimeout)
