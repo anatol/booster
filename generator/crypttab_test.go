@@ -49,7 +49,8 @@ func readImageFile(t *testing.T, img *Image, imgPath, name string) []byte {
 
 func TestAppendCrypttabAbsent(t *testing.T) {
 	img, _ := newTestImage(t)
-	require.Error(t, img.appendCrypttab(filepath.Join(t.TempDir(), "no-such-file")))
+	_, err := img.appendCrypttab(filepath.Join(t.TempDir(), "no-such-file"))
+	require.Error(t, err)
 }
 
 func TestAppendCrypttabBundled(t *testing.T) {
@@ -60,7 +61,8 @@ func TestAppendCrypttabBundled(t *testing.T) {
 	), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 }
 
@@ -73,7 +75,8 @@ func TestAppendCrypttabXInitrdAttachRequired(t *testing.T) {
 	), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.False(t, img.contains["/etc/crypttab"])
 }
 
@@ -86,7 +89,8 @@ func TestAppendCrypttabXInitrdAttachStripped(t *testing.T) {
 	), 0o644))
 
 	img, imgPath := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 
 	bundled := string(readImageFile(t, img, imgPath, "/etc/crypttab"))
@@ -107,7 +111,8 @@ func TestAppendCrypttabNoautoSkipped(t *testing.T) {
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 	require.False(t, img.contains[kf])
 }
@@ -123,7 +128,8 @@ func TestAppendCrypttabKeyfileBundled(t *testing.T) {
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains[kf])
 }
 
@@ -135,7 +141,8 @@ func TestAppendCrypttabKeyfileMissing(t *testing.T) {
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, _ := newTestImage(t)
-	require.Error(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.Error(t, err)
 }
 
 func TestAppendCrypttabNoneKeyfileSkipped(t *testing.T) {
@@ -147,7 +154,8 @@ func TestAppendCrypttabNoneKeyfileSkipped(t *testing.T) {
 	), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 }
 
@@ -159,7 +167,8 @@ func TestAppendCrypttabKeyfileOnDeviceNotBundled(t *testing.T) {
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 	require.False(t, img.contains["/keyfile"])
 }
@@ -177,7 +186,8 @@ cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none x-initrd.attach
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, _ := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 }
 
@@ -194,7 +204,8 @@ func TestAppendCrypttabMixedEntries(t *testing.T) {
 	require.NoError(t, os.WriteFile(crypttab, []byte(content), 0o644))
 
 	img, imgPath := newTestImage(t)
-	require.NoError(t, img.appendCrypttab(crypttab))
+	_, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
 	require.True(t, img.contains["/etc/crypttab"])
 
 	bundled := string(readImageFile(t, img, imgPath, "/etc/crypttab"))

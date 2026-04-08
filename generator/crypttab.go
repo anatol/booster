@@ -21,11 +21,13 @@ func isKeyfileOnDevice(kf string) bool {
 
 // appendCrypttab reads path, filters entries marked with x-initrd.attach,
 // and bundles the filtered content plus any referenced keyfiles into the image as
-// /etc/crypttab.  Returns nil if path does not exist.
-func (img *Image) appendCrypttab(path string) error {
+// /etc/crypttab.  Returns hasFido2=true if any kept entry has fido2-device= set
+// (so the caller can auto-enable the fido2 plugin).  Returns nil error if path
+// does not exist.
+func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	type entry struct {
@@ -93,7 +95,7 @@ func (img *Image) appendCrypttab(path string) error {
 	}
 
 	if len(kept) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// write filtered crypttab into image
@@ -103,7 +105,7 @@ func (img *Image) appendCrypttab(path string) error {
 		buf.WriteByte('\n')
 	}
 	if err := img.AppendContent("/etc/crypttab", 0o600, []byte(buf.String())); err != nil {
-		return err
+		return false, err
 	}
 
 	// bundle referenced assets for each kept entry
@@ -116,6 +118,9 @@ func (img *Image) appendCrypttab(path string) error {
 				skip = true
 				break
 			}
+			if strings.HasPrefix(opt, "fido2-device=") {
+				hasFido2 = true
+			}
 		}
 		if skip {
 			continue
@@ -127,7 +132,7 @@ func (img *Image) appendCrypttab(path string) error {
 			if isKeyfileOnDevice(kf) {
 				// keyfile lives on a separate runtime device — nothing to bundle
 			} else if err := img.AppendFile(kf); err != nil {
-				return fmt.Errorf("crypttab: keyfile %s: %v", kf, err)
+				return false, fmt.Errorf("crypttab: keyfile %s: %v", kf, err)
 			}
 		}
 
@@ -150,11 +155,11 @@ func (img *Image) appendCrypttab(path string) error {
 				break
 			}
 			if err := img.AppendFile(hdr); err != nil {
-				return fmt.Errorf("crypttab: header %s: %v", hdr, err)
+				return false, fmt.Errorf("crypttab: header %s: %v", hdr, err)
 			}
 			break
 		}
 	}
 
-	return nil
+	return hasFido2, nil
 }
