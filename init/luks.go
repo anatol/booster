@@ -33,6 +33,9 @@ type luksMapping struct {
 	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
+	keyfileDeviceRef *deviceRef    // non-nil when keyfile is on a separate device
+	keyfileTimeout   time.Duration // device wait timeout for keyfile device (0 = use MountTimeout)
+
 	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
 	tries         int   // 0 = unlimited keyboard retries; >0 = max attempts
 	noFail        bool  // non-fatal unlock failure — boot continues on error
@@ -435,10 +438,33 @@ func readKeyfile(path string, offset, size int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// acquireKeyfilePassword reads the keyfile referenced by mapping, applying any
-// configured offset and size restrictions.
+// acquireFile mounts ref read-only at mountDir and returns filepath.Join(mountDir, filePath)
+// along with a cleanup function. If ref is nil, filePath is returned as-is with a no-op cleanup.
+// This is the shared implementation used by both acquireHeader and acquireKeyfilePassword.
+func acquireFile(ref *deviceRef, mountDir, filePath string, timeout time.Duration) (string, func(), error) {
+	if ref == nil {
+		return filePath, func() {}, nil
+	}
+	unmount, err := mountDeviceReadOnly(ref, mountDir, timeout)
+	if err != nil {
+		return "", func() {}, err
+	}
+	return filepath.Join(mountDir, filePath), unmount, nil
+}
+
+// acquireKeyfilePassword resolves the keyfile path (mounting a separate device if needed),
+// reads the file applying any configured offset and size, then releases the mount.
 func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
-	return readKeyfile(mapping.keyfile, mapping.keyfileOffset, mapping.keyfileSize)
+	timeout := mapping.keyfileTimeout
+	if timeout == 0 {
+		timeout = time.Duration(config.MountTimeout) * time.Second
+	}
+	path, cleanup, err := acquireFile(mapping.keyfileDeviceRef, "/run/booster/keydev-"+mapping.name, mapping.keyfile, timeout)
+	defer cleanup()
+	if err != nil {
+		return nil, fmt.Errorf("keyfile device for %s: %v", mapping.name, err)
+	}
+	return readKeyfile(path, mapping.keyfileOffset, mapping.keyfileSize)
 }
 
 func recoverKeyfilePassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mapping *luksMapping) {

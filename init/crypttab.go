@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // parseCrypttab reads /etc/crypttab from the image and returns LUKS mappings.
@@ -61,7 +62,12 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 
 		// none/- means interactive passphrase
 		if keyfile != "" && keyfile != "none" && keyfile != "-" {
-			m.keyfile = keyfile
+			kfPath, kfRef, err := parsePathWithDeviceRef(keyfile, "keyfile")
+			if err != nil {
+				return nil, fmt.Errorf("crypttab: entry %q: %v", name, err)
+			}
+			m.keyfile = kfPath
+			m.keyfileDeviceRef = kfRef
 		}
 
 		skip := false
@@ -113,11 +119,16 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-size= value %q", name, opt[13:])
 					}
 					m.keyfileSize = v
+				case strings.HasPrefix(opt, "keyfile-timeout="):
+					d, err := parseCrypttabDuration(opt[16:])
+					if err != nil {
+						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-timeout= value %q", name, opt[16:])
+					}
+					m.keyfileTimeout = d
 				case strings.HasPrefix(opt, "fido2-device="),
 					strings.HasPrefix(opt, "tpm2-device="),
 					strings.HasPrefix(opt, "token-timeout="),
-					strings.HasPrefix(opt, "header="),
-					strings.HasPrefix(opt, "keyfile-timeout="):
+					strings.HasPrefix(opt, "header="):
 					// silently ignored — deferred to follow-up PRs
 				default:
 					debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
@@ -135,6 +146,16 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 		return nil, err
 	}
 	return mappings, nil
+}
+
+// parseCrypttabDuration parses a duration string for crypttab options such as
+// keyfile-timeout=. Accepts a bare integer (treated as seconds) or any string
+// accepted by time.ParseDuration (e.g. "30s", "2m").
+func parseCrypttabDuration(s string) (time.Duration, error) {
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return time.Duration(n) * time.Second, nil
+	}
+	return time.ParseDuration(s)
 }
 
 // luksMatchExists reports whether luksMappings already contains an entry for ref,
