@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -141,5 +143,178 @@ func TestCrypttabCmdlinePrecedence(t *testing.T) {
 
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cmdroot:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+const (
+	keyfileDevLuksUUID   = "7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f"
+	keyfileDevFsUUID     = "a3d8e2c1-4f7b-4e9c-b2a1-6d5f3c8e1a7b"
+	keyfileDevKeydevUUID = "f1e2d3c4-b5a6-4789-8abc-def123456789"
+)
+
+// TestCrypttabKeyfileDevice verifies that booster can unlock a LUKS2 volume
+// whose keyfile lives on a separate block device configured via the crypttab
+// keyfile field (/keyfile:UUID=<keydev>).  The key device is presented as a
+// second virtio disk; no passphrase prompt is expected.
+func TestCrypttabKeyfileDevice(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.keyfile_device.img"))
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID="+keyfileDevLuksUUID+" /keyfile:UUID="+keyfileDevKeydevUUID+" x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.keyfile_device.img",
+		params:       []string{"-drive", "file=assets/luks2.keyfile_device.keydev.img,if=virtio,format=raw"},
+		kernelArgs:   []string{"root=UUID=" + keyfileDevFsUUID},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestCrypttabHeader verifies that booster can unlock a LUKS2 volume with a
+// detached header referenced via the crypttab header= option.  The generator
+// bundles the header file into the initramfs automatically.
+func TestCrypttabHeader(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+
+	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
+	require.NoError(t, err)
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID="+detachedHeaderLuksUUID+" none header="+headerPath+",x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.detached_header.img",
+		kernelArgs:   []string{"root=UUID=" + detachedHeaderFsUUID},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestCrypttabFido2 verifies that a crypttab entry with fido2-device=auto
+// causes the generator to auto-bundle fido2plugin.so and the init to attempt
+// FIDO2 token unlock before falling back to keyboard.
+//
+// Requires a physical FIDO2 device and BOOSTER_TEST_FIDO2_PIN to be set.
+// A fresh LUKS image is created for each run enrolling the connected device,
+// so the test works for any FIDO2 device without pre-built assets.
+func TestCrypttabFido2(t *testing.T) {
+	pin := os.Getenv("BOOSTER_TEST_FIDO2_PIN")
+	if pin == "" {
+		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
+	}
+
+	yubikeys, err := detectYubikeys()
+	require.NoError(t, err)
+	if len(yubikeys) == 0 {
+		t.Skip("no Yubikeys detected")
+	}
+
+	if !fileExists(binariesDir + "/fido2plugin.so") {
+		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
+	}
+
+	luksUUID, fsUUID, imgPath := createFido2LuksImage(t, pin)
+
+	params := make([]string, 0)
+	for _, y := range yubikeys {
+		params = append(params, y.toQemuParams()...)
+	}
+
+	// The crypttab entry specifies fido2-device=auto; the generator auto-detects
+	// this and bundles fido2plugin.so without needing enable_fido2: true in config.
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID="+luksUUID+" none fido2-device=auto,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         imgPath,
+		params:       params,
+		kernelArgs:   []string{"root=UUID=" + fsUUID},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	re, err := regexp.Compile(`(Enter FIDO2 PIN for |Hello, booster!)`)
+	require.NoError(t, err)
+	for {
+		matches, err := vm.ConsoleExpectRE(re)
+		require.NoError(t, err)
+		if matches[0] == "Hello, booster!" {
+			break
+		}
+		require.NoError(t, vm.ConsoleWrite(pin+"\n"))
+	}
+}
+
+// TestCrypttabFido2NoDevice verifies that when fido2-device=auto is set in
+// crypttab and the LUKS volume has a FIDO2 token enrolled but no physical key
+// is present, init waits token-timeout seconds then falls back to the keyboard
+// passphrase prompt.
+//
+// Uses systemd-fido2-nodev.img which has a fake systemd-fido2 token with a
+// random credential — it will never match any real device, so no hardware is
+// required.  The default token-timeout of 30s applies.
+func TestCrypttabFido2NoDevice(t *testing.T) {
+	if !fileExists(binariesDir + "/fido2plugin.so") {
+		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
+	}
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=a6cdb03e-ad77-440a-8a93-28ad97de3b00 none fido2-device=auto,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/systemd-fido2-nodev.img",
+		kernelArgs:   []string{"root=UUID=0cb4665f-65a0-4acc-9710-05163af16f19"},
+		crypttabFile: crypttabPath,
+		// tokenTimeout defaults to 30s; allow enough time for that plus boot
+		vmTimeout: 90 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// No FIDO2 device is present, so init waits token-timeout then falls back.
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("567\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestCrypttabTPM2 verifies that a crypttab entry with tpm2-device=auto causes
+// the init to attempt TPM2 token unlock.  Uses the swtpm software emulator.
+func TestCrypttabTPM2(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90 none tpm2-device=auto,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/systemd-tpm2.img",
+		params:       params,
+		kernelArgs:   []string{"root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }

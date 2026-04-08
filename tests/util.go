@@ -100,6 +100,27 @@ func startTangd() (*tang.NativeServer, []string, error) {
 	return tangd, []string{"-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port)}, nil
 }
 
+// createFido2LuksImage creates a temporary LUKS2 image with a FIDO2 token
+// enrolled against the currently-connected FIDO2 device.  The image is written
+// to t.TempDir() and cleaned up automatically when the test finishes.
+//
+// The returned luksUUID and fsUUID should be threaded through to the crypttab
+// entry and kernel args of the QEMU VM so they match the generated image.
+func createFido2LuksImage(t *testing.T, pin string) (luksUUID, fsUUID, imgPath string) {
+	t.Helper()
+	luksUUID = "b12cbfef-da87-429f-ac96-7dda7232c189"
+	fsUUID = "bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23"
+	imgPath = filepath.Join(t.TempDir(), "fido2.img")
+	require.NoError(t, shell("generators/systemd_fido2.sh",
+		"OUTPUT="+imgPath,
+		"LUKS_UUID="+luksUUID,
+		"FS_UUID="+fsUUID,
+		"LUKS_PASSWORD=567",
+		"FIDO2_PIN="+pin,
+	))
+	return
+}
+
 func waitForFile(filename string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
@@ -314,6 +335,7 @@ type Opts struct {
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
 	mountTimeout         int // in seconds
+	vmTimeout            time.Duration // QEMU VM timeout; 0 = use default (40s)
 	appendAllModAliases  bool
 	extraFiles           string
 	stripBinaries        bool
@@ -417,12 +439,16 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 		require.NoError(t, shell("generators/iso.sh", env...))
 	}
 
+	vmTimeout := opts.vmTimeout
+	if vmTimeout == 0 {
+		vmTimeout = 40 * time.Second
+	}
 	options := vmtest.QemuOptions{
 		Params:          params,
 		OperatingSystem: vmtest.OS_LINUX,
 		Disks:           disks,
 		Verbose:         testing.Verbose(),
-		Timeout:         40 * time.Second,
+		Timeout:         vmTimeout,
 	}
 	if isoFile != "" {
 		options.CdRom = isoFile

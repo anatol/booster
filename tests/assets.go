@@ -32,6 +32,13 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=781780d2-bf67-4a17-9ca8-fd22336c1b2e",
 		"HEADER_OUTPUT=assets/luks2.detached_header.hdr",
 	}},
+	// luks2.keyfile_device.img and its companion keydev are both created by a single generator run.
+	"luks2.keyfile_device.img": {"luks_keyfile_device.sh", []string{
+		"LUKS_UUID=7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f",
+		"FS_UUID=a3d8e2c1-4f7b-4e9c-b2a1-6d5f3c8e1a7b",
+		"KEYDEV_UUID=f1e2d3c4-b5a6-4789-8abc-def123456789",
+		"KEYDEV_OUTPUT=assets/luks2.keyfile_device.keydev.img",
+	}},
 	// luks2.detached_header.hdrdev.img: small ext4 device containing luks2.detached_header.hdr
 	// at /root.hdr.  Used by TestLUKS2DetachedHeaderCmdlineOnDevice to exercise the
 	// rd.luks.header=UUID=/root.hdr:UUID=<devuuid> cmdline path (headerDeviceRef != nil).
@@ -50,7 +57,14 @@ var assetGenerators = map[string]assetGenerator{
 	"archlinux.btrfs.raw":       {"archlinux_btrfs.sh", []string{"LUKS_PASSWORD=hello"}},
 	"voidlinux.img":             {"voidlinux.sh", nil},
 	"alpinelinux.img":           {"alpinelinux.sh", nil},
-	"systemd-fido2.img":         {"systemd_fido2.sh", []string{"LUKS_UUID=b12cbfef-da87-429f-ac96-7dda7232c189", "FS_UUID=bb351f0d-07f2-4fe4-bc53-d6ae39fa1c23", "LUKS_PASSWORD=567", "FIDO2_PIN=" + os.Getenv("BOOSTER_TEST_FIDO2_PIN")}}, // to regenerate: delete assets/systemd-fido2.img and run with BOOSTER_TEST_FIDO2_PIN=<pin> in the environment
+	// systemd-fido2-nodev.img: LUKS2 with a fake systemd-fido2 token injected
+	// directly into the header (random credential — never matches a real device).
+	// Used to test the token-timeout fallback path without physical FIDO2 hardware.
+	"systemd-fido2-nodev.img": {"luks_fido2_nodev.sh", []string{
+		"LUKS_UUID=a6cdb03e-ad77-440a-8a93-28ad97de3b00",
+		"FS_UUID=0cb4665f-65a0-4acc-9710-05163af16f19",
+		"LUKS_PASSWORD=567",
+	}},
 	"systemd-tpm2.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
 	"systemd-tpm2-withpin.img":  {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
 	"systemd-recovery.img":      {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},

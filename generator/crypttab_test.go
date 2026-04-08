@@ -214,6 +214,48 @@ func TestAppendCrypttabMixedEntries(t *testing.T) {
 	require.Contains(t, bundled, "33333333")
 }
 
+// fido2-device= in a kept entry must cause hasFido2=true.
+func TestAppendCrypttabFido2Detected(t *testing.T) {
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	require.NoError(t, os.WriteFile(crypttab, []byte(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none fido2-device=auto,x-initrd.attach\n",
+	), 0o644))
+
+	img, _ := newTestImage(t)
+	hasFido2, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
+	require.True(t, hasFido2)
+}
+
+// fido2-device= in an entry without x-initrd.attach must not set hasFido2.
+func TestAppendCrypttabFido2NotDetectedWithoutXInitrd(t *testing.T) {
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	require.NoError(t, os.WriteFile(crypttab, []byte(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none fido2-device=auto\n",
+	), 0o644))
+
+	img, _ := newTestImage(t)
+	hasFido2, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
+	require.False(t, hasFido2)
+}
+
+// An entry without fido2-device= must leave hasFido2 false.
+func TestAppendCrypttabNoFido2(t *testing.T) {
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	require.NoError(t, os.WriteFile(crypttab, []byte(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none x-initrd.attach\n",
+	), 0o644))
+
+	img, _ := newTestImage(t)
+	hasFido2, err := img.appendCrypttab(crypttab)
+	require.NoError(t, err)
+	require.False(t, hasFido2)
+}
+
 func TestIsKeyfileOnDeviceUUID(t *testing.T) {
 	require.True(t, isKeyfileOnDevice("/keyfile:UUID=f1e2d3c4-b5a6-4789-8abc-def123456789"))
 }
