@@ -57,10 +57,10 @@ func TestCrypttabKeyfileOffsetSize(t *testing.T) {
 	require.NoError(t, os.WriteFile(keyfilePath, []byte("PADDINGx1234"), 0o600))
 
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
-	require.NoError(t, os.WriteFile(crypttabPath, []byte(fmt.Sprintf(
+	require.NoError(t, os.WriteFile(crypttabPath, fmt.Appendf(nil,
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 %s keyfile-offset=8,keyfile-size=4,x-initrd.attach\n",
 		keyfilePath,
-	)), 0o644))
+	), 0o644))
 
 	vm, err := buildVmInstance(t, Opts{
 		disk:         "assets/luks2.img",

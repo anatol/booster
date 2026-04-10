@@ -65,7 +65,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 		}
 
 		skip := false
-		for _, opt := range strings.Split(optStr, ",") {
+		for opt := range strings.SplitSeq(optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if opt == "" {
 				continue

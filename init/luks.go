@@ -29,8 +29,8 @@ type luksMapping struct {
 	name            string
 	keyfile         string
 	options         []string
-	header          string     // detached LUKS header path (empty = embedded header)
-	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
+	header          string        // detached LUKS header path (empty = embedded header)
+	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
 	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
@@ -612,15 +612,13 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	// startKeyboard launches the keyboard (or keyfile) unlock goroutine at most once.
 	startKeyboard := func() {
-		senderWg.Add(1)
-		go func() {
-			defer senderWg.Done()
+		senderWg.Go(func() {
 			if mapping.keyfile != "" {
 				recoverKeyfilePassword(volumes, done, d, availableSlots, mapping)
 			} else {
 				requestKeyboardPassword(volumes, done, d, availableSlots, mapping.name, mapping.tries)
 			}
-		}()
+		})
 	}
 
 	// Watcher: close volumes once all senders are done so the receiver unblocks.
@@ -655,9 +653,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// elapses). This gives hardware tokens priority over the keyboard prompt, matching
 	// systemd-cryptsetup behavior. senderWg ensures volumes is closed if this goroutine
 	// is the last sender and nobody unlocked.
-	senderWg.Add(1)
-	go func() {
-		defer senderWg.Done()
+	senderWg.Go(func() {
 		if mapping.tokenTimeout > 0 {
 			waitTimeout(&tokenWg, mapping.tokenTimeout)
 		} else {
@@ -669,7 +665,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		default:
 		}
 		keyboardOnce.Do(startKeyboard)
-	}()
+	})
 
 	v, ok := <-volumes
 	close(done)

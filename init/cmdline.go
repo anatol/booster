@@ -15,15 +15,15 @@ import (
 // ref. Otherwise path == raw and ref == nil.
 // fieldName is used only in error messages (e.g. "keyfile", "header").
 func parsePathWithDeviceRef(raw, fieldName string) (path string, ref *deviceRef, err error) {
-	if idx := strings.Index(raw, ":"); idx >= 0 {
-		right := raw[idx+1:]
+	if before, after, ok := strings.Cut(raw, ":"); ok {
+		right := after
 		if strings.HasPrefix(right, "UUID=") || strings.HasPrefix(right, "LABEL=") ||
 			strings.HasPrefix(right, "PARTUUID=") || strings.HasPrefix(right, "PARTLABEL=") {
 			ref, err = parseDeviceRef(right)
 			if err != nil {
 				return "", nil, fmt.Errorf("%s device ref %q: %v", fieldName, right, err)
 			}
-			return raw[:idx], ref, nil
+			return before, ref, nil
 		}
 	}
 	return raw, nil, nil
@@ -243,8 +243,8 @@ func parseParams(params string) error {
 			rootRw = true
 		case "rd.luks.options":
 			for o := range strings.SplitSeq(value, ",") {
-				if strings.HasPrefix(o, "token-timeout=") {
-					d, err := parseTokenTimeout(strings.TrimPrefix(o, "token-timeout="))
+				if after, ok := strings.CutPrefix(o, "token-timeout="); ok {
+					d, err := parseTokenTimeout(after)
 					if err != nil {
 						return fmt.Errorf("invalid token-timeout in rd.luks.options: %v", err)
 					}

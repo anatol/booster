@@ -10,11 +10,11 @@ import (
 // isKeyfileOnDevice reports whether kf is a keyfile-on-device specifier of the
 // form "/path:UUID=xxx", "/path:LABEL=xxx", "/path:PARTUUID=xxx", or "/path:PARTLABEL=xxx".
 func isKeyfileOnDevice(kf string) bool {
-	idx := strings.Index(kf, ":")
-	if idx < 0 {
+	_, after, ok := strings.Cut(kf, ":")
+	if !ok {
 		return false
 	}
-	r := kf[idx+1:]
+	r := after
 	return strings.HasPrefix(r, "UUID=") || strings.HasPrefix(r, "LABEL=") ||
 		strings.HasPrefix(r, "PARTUUID=") || strings.HasPrefix(r, "PARTLABEL=")
 }
@@ -36,7 +36,7 @@ func (img *Image) appendCrypttab(path string) error {
 
 	var kept []entry
 
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
@@ -58,7 +58,7 @@ func (img *Image) appendCrypttab(path string) error {
 		// check for x-initrd.attach and build a cleaned options string
 		hasXInitrd := false
 		var cleanOpts []string
-		for _, opt := range strings.Split(optStr, ",") {
+		for opt := range strings.SplitSeq(optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if opt == "" {
 				continue
@@ -110,7 +110,7 @@ func (img *Image) appendCrypttab(path string) error {
 	for _, e := range kept {
 		// skip asset bundling for entries that won't be processed as LUKS
 		skip := false
-		for _, opt := range strings.Split(e.optStr, ",") {
+		for opt := range strings.SplitSeq(e.optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if opt == "noauto" || opt == "swap" || opt == "tmp" || opt == "plain" || opt == "bitlk" || opt == "tcrypt" {
 				skip = true
