@@ -106,6 +106,13 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 					// timed out waiting for tpm
 					return nil, err
 				}
+			} else if strings.Contains(err.Error(), "USB error") {
+				// USB device not yet ready (e.g. YubiKey still enumerating).
+				if time.Now().After(deadline) {
+					return nil, fmt.Errorf("timeout waiting for USB device")
+				}
+				time.Sleep(500 * time.Millisecond)
+				continue
 			} else if !errors.As(err, &netError) {
 				return nil, err
 			}
