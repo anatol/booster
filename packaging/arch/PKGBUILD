@@ -13,7 +13,6 @@ makedepends=(git go ruby-ronn-ng libfido2)
 optdepends=(
   'busybox: to enable emergency shell at the boot time'
   'yubikey-personalization: for clevis Yubikey challenge-response support'
-  'libfido2: for systemd-enroll with FIDO2'
   'systemd-ukify: for generating UKIs'
   'binutils: to strip kernel modules'
 )
@@ -41,7 +40,7 @@ build() {
       -ldflags "-linkmode external -extldflags \"${LDFLAGS}\""
 
   cd ../init
-  go build -trimpath -mod=readonly -modcacherw
+  CGO_ENABLED=1 go build -trimpath -mod=readonly -modcacherw
 
   cd fido2plugin
   CGO_ENABLED=1 CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}" \
