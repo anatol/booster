@@ -73,6 +73,14 @@ var passphraseCache struct {
 	passwords [][]byte
 }
 
+// keyboardMu serializes keyboard password prompts across concurrent luksOpen calls.
+// Without this, two devices unlocked simultaneously (e.g. root + swap LUKS, or
+// btrfs RAID1 members) both check passphraseCache before either has stored a
+// successful password, causing a double prompt. Holding the mutex ensures the
+// second device re-checks the cache after the first has finished prompting and
+// stored its passphrase.
+var keyboardMu sync.Mutex
+
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
 var rdLuksOptions = map[string]string{
 	"discard":                luks.FlagAllowDiscards,
@@ -511,10 +519,42 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 	// plymouthd is still starting, causing the graphical prompt to fail.
 	waitForPlymouthInit()
 
+	// Bail early if the device was already unlocked by a token goroutine.
+	select {
+	case <-done:
+		return
+	default:
+	}
+
 	// Fast path: try passwords that already unlocked another volume this boot
 	// (e.g. two LUKS members of a btrfs RAID1 with the same passphrase).
 	passphraseCache.Lock()
 	cached := make([][]byte, len(passphraseCache.passwords))
+	copy(cached, passphraseCache.passwords)
+	passphraseCache.Unlock()
+
+	for _, pw := range cached {
+		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
+			return
+		}
+	}
+
+	// Serialize prompts across concurrent luksOpen calls. A second device whose
+	// keyboard goroutine starts while the first device is prompting will block
+	// here, then re-check the cache after the first device succeeds and releases
+	// the lock — avoiding a double prompt for shared passphrases (issue #306).
+	keyboardMu.Lock()
+	defer keyboardMu.Unlock()
+
+	// Re-check after acquiring the lock: another device may have just unlocked.
+	select {
+	case <-done:
+		return
+	default:
+	}
+
+	passphraseCache.Lock()
+	cached = make([][]byte, len(passphraseCache.passwords))
 	copy(cached, passphraseCache.passwords)
 	passphraseCache.Unlock()
 
