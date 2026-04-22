@@ -68,6 +68,24 @@ var assetGenerators = map[string]assetGenerator{
 	"systemd-tpm2.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
 	"systemd-tpm2-withpin.img":  {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
 	"systemd-recovery.img":      {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
+	// luks2.shared_pass.img: GPT disk with two LUKS2 partitions sharing the same
+	// passphrase.  Partition 1 has no inner filesystem; partition 2 has ext4.
+	// Used by TestPassphraseCache to verify single-prompt unlock (issue #306).
+	"luks2.shared_pass.img": {"luks_shared_pass.sh", []string{
+		"LUKS_UUID1=a4c8e2f6-1b3d-4678-9ace-0f2468ace024",
+		"LUKS_UUID2=b5d9f307-2c4e-4789-ab1f-1e3579bdf135",
+		"FS_UUID=c6ea04b8-3d5f-4890-bc2e-2f468ace0246",
+		"LUKS_PASSWORD=1234",
+	}},
+	// luks2.btrfs_raid1.img: GPT disk with two LUKS2 partitions each wrapping a
+	// btrfs RAID1 member, both sharing the same passphrase.
+	// Used by TestLuksBtrfsRaid1 to verify single-prompt unlock of LUKS-on-btrfs.
+	"luks2.btrfs_raid1.img": {"luks_btrfs_raid1.sh", []string{
+		"LUKS_UUID1=d7fb15c9-4e6a-4901-cd3f-3a579bdf1357",
+		"LUKS_UUID2=e8ac26da-5f7b-4012-de40-4b68ace02468",
+		"FS_UUID=f9bd37eb-607c-4123-ef51-5c79bdf13579",
+		"LUKS_PASSWORD=1234",
+	}},
 	"swap.raw":                  {"swap.sh", nil},
 	"zfs.img":                   {"zfs.sh", nil},
 	"zfs_encrypted.img":         {"zfs.sh", []string{"ZFS_PASSPHRASE=encrypted"}},
