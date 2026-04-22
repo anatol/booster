@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -82,6 +83,73 @@ func TestLoadableCryptoModule(t *testing.T) {
 	defer vm.Shutdown()
 
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+const (
+	sharedPassLuksUUID1 = "a4c8e2f6-1b3d-4678-9ace-0f2468ace024"
+	sharedPassLuksUUID2 = "b5d9f307-2c4e-4789-ab1f-1e3579bdf135"
+	sharedPassFsUUID    = "c6ea04b8-3d5f-4890-bc2e-2f468ace0246"
+
+	luksRaid1LuksUUID1 = "d7fb15c9-4e6a-4901-cd3f-3a579bdf1357"
+	luksRaid1LuksUUID2 = "e8ac26da-5f7b-4012-de40-4b68ace02468"
+	luksRaid1FsUUID    = "f9bd37eb-607c-4123-ef51-5c79bdf13579"
+)
+
+// TestPassphraseCache verifies that when two LUKS devices share the same
+// passphrase (the root+data scenario from issue #306) the user is prompted
+// exactly once and the second device unlocks automatically from the in-memory
+// passphrase cache.
+//
+// The root filesystem lives inside the second LUKS partition so that if a
+// spurious second prompt appears and goes unanswered, root never mounts and
+// the test times out — giving a reliable regression signal.
+func TestPassphraseCache(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.shared_pass.img"))
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptextra UUID="+sharedPassLuksUUID1+" none x-initrd.attach\n"+
+			"cryptroot  UUID="+sharedPassLuksUUID2+" none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.shared_pass.img",
+		kernelArgs:   []string{"root=UUID=" + sharedPassFsUUID},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLuksBtrfsRaid1 verifies that a btrfs RAID1 volume whose two members are
+// each wrapped in LUKS2 boots with a single passphrase prompt.  Both LUKS
+// devices must be unlocked before btrfs can assemble, so if the passphrase
+// cache fails to supply the second device's key the root never mounts and the
+// test times out.
+func TestLuksBtrfsRaid1(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1.img"))
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"luks-btrfs1 UUID="+luksRaid1LuksUUID1+" none x-initrd.attach\n"+
+			"luks-btrfs2 UUID="+luksRaid1LuksUUID2+" none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.btrfs_raid1.img",
+		kernelArgs:   []string{"root=UUID=" + luksRaid1FsUUID},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
