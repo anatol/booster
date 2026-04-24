@@ -55,15 +55,18 @@ For usage instructions please see booster manpage using `man booster` or the sam
 The project consists of 3 components:
  * `init` binary that runs as a part of your machine boot process. It is going to be the very first user process run at your machine.
  * `generator` tool that creates ramfs image with all components needed to boot the computer
- * `integration_tests` tests that involve all components and use QEMU to boot from a generated image
+ * `tests` package that contains integration tests which boot generated images in QEMU
 
 These components use standard Golang tooling. To build any part do `go build`, to run tests do `go test`.
 
 ### Run tests
- ```bash
-cd {init,generator,integration_tests}
-go test -v
- ```
+```bash
+go test ./...
+```
+
+For quicker iteration, the main unit-test coverage lives in `./generator` and `./init`.
+The `./tests` package contains QEMU-based integration tests and depends on the host
+having the required boot and virtualization tooling installed.
 
 ### Credits
 Work on this project has been started as a part of Twitter's hack week. Huge thanks to my employer for its support
