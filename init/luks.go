@@ -768,13 +768,17 @@ func luksOpen(dev string, mapping *luksMapping) error {
 				}
 			}()
 		} else {
-			// Non-priority token (or no priority mode): fire-and-forget w.r.t. keyboard timing.
+			// Non-priority token: fire-and-forget w.r.t. keyboard *timing*, but
+			// close done on success so the waiter never races to start the keyboard
+			// after a successful token unlock.
 			senderWg.Add(1)
 			tokenWg.Add(1)
 			go func() {
 				defer senderWg.Done()
 				defer tokenWg.Done()
-				recoverTokenPassword(volumes, done, d, t, mapping.name)
+				if recoverTokenPassword(volumes, done, d, t, mapping.name) {
+					closeDone.Do(func() { close(done) })
+				}
 			}()
 		}
 		for _, s := range t.Slots {
