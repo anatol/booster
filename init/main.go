@@ -1057,13 +1057,18 @@ func boost() error {
 		return err
 	}
 
-	// Merge /etc/crypttab entries for devices not already covered by rd.luks.* params.
-	// rd.luks.* kernel parameters take precedence over crypttab.
+	// Merge /etc/crypttab entries with cmdline-derived mappings.
+	// rd.luks.* kernel parameters take precedence for device ref and name;
+	// crypttab supplies security options (fido2-device=, tpm2-device=, keyfile,
+	// header, tries, …) that rd.luks.* cannot express. When both sources cover
+	// the same device, merge rather than discard the crypttab entry.
 	if ctMappings, err := parseCrypttab(); err != nil {
 		warning("crypttab: %v", err)
 	} else {
 		for _, cm := range ctMappings {
-			if !luksMatchExists(cm.ref) {
+			if existing := findLuksMapping(cm.ref); existing != nil {
+				mergeCrypttabOptions(existing, cm)
+			} else {
 				luksMappings = append(luksMappings, cm)
 			}
 		}
