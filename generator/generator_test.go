@@ -525,10 +525,32 @@ func TestStripBinaries(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.zst")
 }
 
+func TestVirtualConsoleFontMap(t *testing.T) {
+	// Regression test for https://github.com/anatol/booster/issues/207:
+	// FONT_MAP files (e.g. 8859-2) live in consoletrans/, not consolefonts/.
+	// The generator must find and bundle the map file and set FontMapFile
+	// (not FontFile) in the init config so setfont receives it via -m.
+	opts := options{
+		vConsoleConfig: "KEYMAP=us\nFONT=lat1-10\nFONT_MAP=8859-2\nFONT_UNIMAP=cp437\n",
+		localeConfig:   "LANG=en_US.UTF-8\n",
+		unpackImage:    true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.map")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
+
+	cfg := readGeneratedInitConfig(t, opts.workDir)
+	require.Equal(t, "/console/font", cfg.VirtualConsole.FontFile)
+	require.Equal(t, "/console/font.map", cfg.VirtualConsole.FontMapFile)
+	require.Equal(t, "/console/font.unimap", cfg.VirtualConsole.FontUnicodeFile)
+}
+
 func TestEnableVirtualConsole(t *testing.T) {
 	opts := options{
 		universal:      true,
-		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
+		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\n",
 		localeConfig:   "LANG=en_US.UTF-8\n",
 		unpackImage:    true,
 	}
@@ -537,13 +559,12 @@ func TestEnableVirtualConsole(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/setfont")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/keymap")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
 }
 
 func TestEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
 	opts := options{
 		universal:      true,
-		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\nFONT_UNIMAP=GohaClassic-14\n",
+		vConsoleConfig: "KEYMAP=us\nKEYMAP_TOGGLE=de\nFONT=lat1-10\n",
 		unpackImage:    true,
 	}
 	createTestInitRamfs(t, &opts)
@@ -551,7 +572,6 @@ func TestEnableVirtualConsoleWithoutLocaleConf(t *testing.T) {
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/bin/setfont")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/keymap")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font")
-	checkFileExistence(t, opts.workDir+"/image.unpacked/console/font.unimap")
 
 	cfg := readGeneratedInitConfig(t, opts.workDir)
 	require.Equal(t, true, cfg.VirtualConsole.Utf)
