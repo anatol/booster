@@ -367,16 +367,10 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	privateSize := binary.BigEndian.Uint16(blob[:2])
-	blob = blob[2:]
-	private := blob[:privateSize]
-	blob = blob[privateSize:]
-
-	publcSize := binary.BigEndian.Uint16(blob[:2])
-	blob = blob[2:]
-	public := blob[:publcSize]
-	blob = blob[publcSize:]
+	private, public, err := parseSystemdTPM2Blob(blob)
+	if err != nil {
+		return nil, err
+	}
 
 	if node.PolicyHash == "" {
 		return nil, fmt.Errorf("empty policy hash")
@@ -415,6 +409,28 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(base64.StdEncoding.EncodeToString(password)), nil
+}
+
+func parseSystemdTPM2Blob(blob []byte) (private, public []byte, err error) {
+	if len(blob) < 2 {
+		return nil, nil, fmt.Errorf("invalid TPM2 blob: missing private section size")
+	}
+	privateSize := int(binary.BigEndian.Uint16(blob[:2]))
+	blob = blob[2:]
+	if len(blob) < privateSize+2 {
+		return nil, nil, fmt.Errorf("invalid TPM2 blob: truncated private section")
+	}
+	private = blob[:privateSize]
+	blob = blob[privateSize:]
+
+	publicSize := int(binary.BigEndian.Uint16(blob[:2]))
+	blob = blob[2:]
+	if len(blob) < publicSize {
+		return nil, nil, fmt.Errorf("invalid TPM2 blob: truncated public section")
+	}
+	public = blob[:publicSize]
+
+	return private, public, nil
 }
 
 func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, t luks.Token, mappingName string) bool {

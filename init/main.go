@@ -71,6 +71,9 @@ func readEfiVar(name, uuid string) (uint32, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	if len(data) < 4 {
+		return 0, nil, fmt.Errorf("efi variable %s is truncated", name)
+	}
 
 	attribute := binary.LittleEndian.Uint32(data[:4])
 	data = data[4:]
@@ -83,7 +86,7 @@ var (
 	seenDevices       = make(set) // devices that are already seen by the system, the devices might be fully processed or processing right now
 	processingDevices = make(map[string]*sync.WaitGroup)
 
-	processedBlkInfos []*blkInfo               // append-only; protected by devicesMutex
+	processedBlkInfos []*blkInfo // append-only; protected by devicesMutex
 	deviceReadyCond   = sync.NewCond(&devicesMutex)
 
 	// pendingDevices accumulates format=="" block devices that could not be
