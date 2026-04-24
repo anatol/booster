@@ -27,8 +27,10 @@ func consoleSetFont(c *VirtualConsole) error {
 	if c.FontUnicodeFile != "" {
 		args = append(args, "-u", c.FontUnicodeFile)
 	}
-	err := exec.Command("setfont", args...).Run()
-	return unwrapExitError(err)
+	if err := exec.Command("setfont", args...).Run(); err != nil {
+		warning("setfont: %v (continuing without custom font)", unwrapExitError(err))
+	}
+	return nil
 }
 
 func loadKmap(fd uintptr, file string) error {
