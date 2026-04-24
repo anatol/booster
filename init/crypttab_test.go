@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -244,12 +245,101 @@ func TestParseCrypttabXInitrdAttachIgnored(t *testing.T) {
 	}
 }
 
-// fido2-device= is silently ignored — deferred to pr/crypttab-fido2.
-func TestParseCrypttabFido2DeviceIgnored(t *testing.T) {
+func TestParseCrypttabFido2Device(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none fido2-device=auto\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))
 	require.NoError(t, err)
 	require.Len(t, mappings, 1)
+	require.True(t, mappings[0].tokenFido2)
+	require.Equal(t, 30*time.Second, mappings[0].tokenTimeout)
+}
+
+func TestParseCrypttabTpm2Device(t *testing.T) {
+	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tpm2-device=auto\n"
+	mappings, err := parseCrypttabReader(strings.NewReader(input))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.True(t, mappings[0].tokenTpm2)
+	require.Equal(t, 30*time.Second, mappings[0].tokenTimeout)
+}
+
+func TestFindLuksMapping(t *testing.T) {
+	uuid1, _ := parseUUID("ab6d7d78-b816-4495-928d-766d6607035e")
+	uuid2, _ := parseUUID("7843d77f-cdd6-4289-a4de-a708c4aacede")
+	m1 := &luksMapping{ref: &deviceRef{format: refFsUUID, data: uuid1}, name: "one"}
+	m2 := &luksMapping{ref: &deviceRef{format: refFsUUID, data: uuid2}, name: "two"}
+	orig := luksMappings
+	defer func() { luksMappings = orig }()
+
+	luksMappings = []*luksMapping{m1, m2}
+	require.Equal(t, m1, findLuksMapping(m1.ref))
+	require.Equal(t, m2, findLuksMapping(m2.ref))
+
+	uuid3, _ := parseUUID("7f28c723-fd6b-4640-bc94-9366edd8880d")
+	require.Nil(t, findLuksMapping(&deviceRef{format: refFsUUID, data: uuid3}))
+}
+
+func TestMergeCrypttabOptions(t *testing.T) {
+	dst := &luksMapping{name: "cmdline-name", keySlot: -1, tokenTimeout: 30 * time.Second}
+	src := &luksMapping{
+		tokenFido2:  true,
+		tokenTpm2:   false,
+		tries:       3,
+		tokenTimeout: 45 * time.Second,
+	}
+	mergeCrypttabOptions(dst, src)
+	require.True(t, dst.tokenFido2)
+	require.False(t, dst.tokenTpm2)
+	require.Equal(t, 3, dst.tries)
+	require.Equal(t, 45*time.Second, dst.tokenTimeout)
+	require.Equal(t, "cmdline-name", dst.name) // name must not be overwritten
+}
+
+func TestMergeCrypttabOptionsDstWins(t *testing.T) {
+	dst := &luksMapping{keyfile: "/cmdline/key", keySlot: 2, tries: 5, header: "/cmdline/hdr"}
+	src := &luksMapping{keyfile: "/crypttab/key", keySlot: 1, tries: 9, header: "/crypttab/hdr"}
+	mergeCrypttabOptions(dst, src)
+	require.Equal(t, "/cmdline/key", dst.keyfile)  // cmdline keyfile wins
+	require.Equal(t, 2, dst.keySlot)               // cmdline key-slot wins
+	require.Equal(t, 5, dst.tries)                 // cmdline tries wins
+	require.Equal(t, "/cmdline/hdr", dst.header)   // cmdline header wins
+}
+
+// Regression test: rd.luks.name on the kernel cmdline must not suppress
+// fido2-device= / tpm2-device= options from crypttab for the same UUID.
+// Before the fix, the cmdline mapping silently dropped crypttab security
+// options, leaving tokenFido2=false and causing a spurious passphrase prompt
+// after a successful FIDO2 PIN+touch unlock.
+func TestRdLuksNamePreservesCrypttabFido2(t *testing.T) {
+	const uuidStr = "ab6d7d78-b816-4495-928d-766d6607035e"
+	orig := luksMappings
+	defer func() { luksMappings = orig }()
+
+	luksMappings = nil
+	require.NoError(t, parseParams(
+		"rd.luks.name="+uuidStr+"=cryptroot root=/dev/mapper/cryptroot",
+	))
+	require.Len(t, luksMappings, 1)
+	require.Equal(t, "cryptroot", luksMappings[0].name)
+	require.False(t, luksMappings[0].tokenFido2, "tokenFido2 should be false before crypttab merge")
+
+	// Simulate the crypttab merge loop from boost().
+	ctInput := "cryptroot UUID=" + uuidStr + " none fido2-device=auto\n"
+	ctMappings, err := parseCrypttabReader(strings.NewReader(ctInput))
+	require.NoError(t, err)
+	for _, cm := range ctMappings {
+		if existing := findLuksMapping(cm.ref); existing != nil {
+			mergeCrypttabOptions(existing, cm)
+		} else {
+			luksMappings = append(luksMappings, cm)
+		}
+	}
+
+	require.Len(t, luksMappings, 1, "should still be one mapping, not two")
+	m := luksMappings[0]
+	require.Equal(t, "cryptroot", m.name, "cmdline name must be preserved")
+	require.True(t, m.tokenFido2, "fido2-device= from crypttab must be merged in")
+	require.Equal(t, 30*time.Second, m.tokenTimeout, "token timeout must be set for FIDO2")
 }
 
 // header= is silently ignored — deferred to pr/crypttab-header.

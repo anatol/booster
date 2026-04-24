@@ -176,15 +176,50 @@ func parseCrypttabDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// luksMatchExists reports whether luksMappings already contains an entry for ref,
-// allowing rd.luks.* kernel parameters to take precedence over crypttab.
-func luksMatchExists(ref *deviceRef) bool {
+// findLuksMapping returns the existing luksMapping for ref, or nil if not found.
+func findLuksMapping(ref *deviceRef) *luksMapping {
 	for _, m := range luksMappings {
 		if deviceRefEqual(m.ref, ref) {
-			return true
+			return m
 		}
 	}
-	return false
+	return nil
+}
+
+// mergeCrypttabOptions merges security-relevant options from a crypttab entry (src)
+// into a cmdline-derived mapping (dst). dst's ref and name are preserved; crypttab
+// supplies token flags, keyfile, header, and other unlock options that rd.luks.*
+// params cannot express.
+func mergeCrypttabOptions(dst, src *luksMapping) {
+	if src.tokenFido2 {
+		dst.tokenFido2 = true
+	}
+	if src.tokenTpm2 {
+		dst.tokenTpm2 = true
+	}
+	// Adopt crypttab's token timeout when the cmdline mapping still has the
+	// default (30 s) and the crypttab entry carries an explicit value.
+	if src.tokenTimeout > 0 && src.tokenTimeout != dst.tokenTimeout {
+		dst.tokenTimeout = src.tokenTimeout
+	}
+	if dst.keyfile == "" && src.keyfile != "" {
+		dst.keyfile = src.keyfile
+		dst.keyfileDeviceRef = src.keyfileDeviceRef
+		dst.keyfileOffset = src.keyfileOffset
+		dst.keyfileSize = src.keyfileSize
+		dst.keyfileTimeout = src.keyfileTimeout
+	}
+	if dst.keySlot == -1 && src.keySlot != -1 {
+		dst.keySlot = src.keySlot
+	}
+	if dst.tries == 0 && src.tries != 0 {
+		dst.tries = src.tries
+	}
+	if dst.header == "" && src.header != "" {
+		dst.header = src.header
+		dst.headerDeviceRef = src.headerDeviceRef
+	}
+	dst.options = append(dst.options, src.options...)
 }
 
 // deviceRefEqual reports whether two deviceRefs refer to the same device.
