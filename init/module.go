@@ -52,12 +52,27 @@ func readAliases() error {
 
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		line := s.Text()
-		parts := strings.Split(line, " ")
-		aliases = append(aliases, alias{parts[0], parts[1]})
+		a, ok, err := parseAliasLine(s.Text())
+		if err != nil {
+			return err
+		}
+		if ok {
+			aliases = append(aliases, a)
+		}
 	}
 
 	return s.Err()
+}
+
+func parseAliasLine(line string) (alias, bool, error) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return alias{}, false, nil
+	}
+	if len(fields) != 2 {
+		return alias{}, false, errors.New("invalid alias line")
+	}
+	return alias{pattern: fields[0], module: fields[1]}, true, nil
 }
 
 // loadModuleUnlocked asynchronously loads specified modules
@@ -87,9 +102,10 @@ func loadModuleUnlocked(wg *sync.WaitGroup, modules ...string) {
 		delete(loadingModules, mod)
 		loadedModules[mod] = true
 
-		// post deps are loaded independently if finit() call successful or not
+		// Post dependencies are best-effort follow-up loads. They run after the
+		// parent module finishes so they never block the main dependency chain.
 		var postDepsWg sync.WaitGroup
-		if deps, ok := config.ModuleDependencies[mod]; ok {
+		if deps, ok := config.ModulePostDependencies[mod]; ok {
 			loadModuleUnlocked(&postDepsWg, deps...)
 		}
 	}
