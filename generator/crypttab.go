@@ -137,7 +137,7 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 		}
 
 		// bundle header file if specified as an absolute path and not on a runtime device
-		for _, opt := range strings.Split(e.optStr, ",") {
+		for opt := range strings.SplitSeq(e.optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if !strings.HasPrefix(opt, "header=") {
 				continue
