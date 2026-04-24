@@ -13,8 +13,31 @@ import (
 	"strings"
 )
 
-// path to console fonts, adjust it to your distro (e.g. Fedora uses /usr/lib/kbd/consolefonts path for it)
-var consolefontsDir = "/usr/share/kbd/consolefonts/"
+// kbdBaseDir is the root of the kbd data tree. Arch/Debian/openSUSE/Alpine use
+// /usr/share/kbd; Fedora/RHEL use /usr/lib/kbd. Probe at startup so the generator
+// works on any distro without configuration.
+var kbdBaseDir = func() string {
+	for _, d := range []string{"/usr/share/kbd", "/usr/lib/kbd"} {
+		if _, err := os.Stat(filepath.Join(d, "consolefonts")); err == nil {
+			return d
+		}
+	}
+	return "/usr/share/kbd"
+}()
+
+var (
+	consolefontsDir = filepath.Join(kbdBaseDir, "consolefonts")
+	consoletransDir = filepath.Join(kbdBaseDir, "consoletrans")
+	unimapsDir      = filepath.Join(kbdBaseDir, "unimaps")
+)
+
+// Suffix lists mirror kbd's kfont_context defaults (src/libkfont/context.c).
+// kbdfile_find resolves a name by trying name+suffix for each suffix in order.
+var (
+	consolefontsSuffixes = []string{"", ".psfu", ".psf", ".cp", ".fnt"}
+	consoletransSuffixes = []string{"", ".trans", "_to_uni.trans", ".acm"}
+	unimapsSuffixes      = []string{"", ".uni", ".sfm"}
+)
 
 func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*VirtualConsole, error) {
 	debug("enabling virtual console")
@@ -62,7 +85,7 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 			return nil, err
 		}
 
-		blob, err := readFontFile(font)
+		blob, err := findKbdFile(consolefontsDir, font, consolefontsSuffixes)
 		if err != nil {
 			return nil, err
 		}
@@ -72,23 +95,23 @@ func (img *Image) enableVirtualConsole(vConsolePath, localePath string) (*Virtua
 		}
 
 		if m, ok := vprop["FONT_MAP"]; ok {
-			blob, err := readFontFile(m)
+			blob, err := findKbdFile(consoletransDir, m, consoletransSuffixes)
 			if err != nil {
 				return nil, err
 			}
-			conf.FontFile = "/console/font.map"
-			if err := img.AppendContent(conf.FontFile, 0o644, blob); err != nil {
+			conf.FontMapFile = "/console/font.map"
+			if err := img.AppendContent(conf.FontMapFile, 0o644, blob); err != nil {
 				return nil, err
 			}
 		}
 
 		if u, ok := vprop["FONT_UNIMAP"]; ok {
-			blob, err := readFontFile(u)
+			blob, err := findKbdFile(unimapsDir, u, unimapsSuffixes)
 			if err != nil {
 				return nil, err
 			}
-			conf.FontFile = "/console/font.unimap"
-			if err := img.AppendContent(conf.FontFile, 0o644, blob); err != nil {
+			conf.FontUnicodeFile = "/console/font.unimap"
+			if err := img.AppendContent(conf.FontUnicodeFile, 0o644, blob); err != nil {
 				return nil, err
 			}
 		}
@@ -116,37 +139,36 @@ func loadKeymap(keymap, keymapToggle string, isUtf bool) ([]byte, error) {
 	return blob, err
 }
 
-func readFontFile(font string) (blob []byte, err error) {
-	entries, err := os.ReadDir(consolefontsDir)
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range entries {
-		name := d.Name()
-		if strings.HasPrefix(name, font+".") {
-			fileName := filepath.Join(consolefontsDir, name)
-			debug("font %s matched to file %s", font, fileName)
-			blob, err := os.ReadFile(fileName)
+func readFontFile(font string) ([]byte, error) {
+	return findKbdFile(consolefontsDir, font, consolefontsSuffixes)
+}
+
+// findKbdFile locates a kbd data file by trying name+suffix combinations in dir,
+// mirroring how setfont's kbdfile_find resolves files. Gzip-compressed variants
+// are transparently decompressed.
+func findKbdFile(dir, name string, suffixes []string) ([]byte, error) {
+	for _, suffix := range suffixes {
+		for _, comp := range []string{"", ".gz"} {
+			path := filepath.Join(dir, name+suffix+comp)
+			blob, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			debug("kbd file '%s' matched to %s", name, path)
+			if comp != ".gz" {
+				return blob, nil
+			}
+			gz, err := gzip.NewReader(bytes.NewReader(blob))
 			if err != nil {
 				return nil, err
 			}
-
-			if strings.HasSuffix(name, ".gz") {
-				// unpack the archive
-				gz, err := gzip.NewReader(bytes.NewReader(blob))
-				if err != nil {
-					return nil, err
-				}
-				defer gz.Close()
-
-				blob, err = io.ReadAll(gz)
-				if err != nil {
-					return nil, err
-				}
+			blob, err = io.ReadAll(gz)
+			gz.Close()
+			if err != nil {
+				return nil, err
 			}
-
 			return blob, nil
 		}
 	}
-	return nil, fmt.Errorf("unable to find file for specified font '%s'", font)
+	return nil, fmt.Errorf("unable to find file for specified font '%s'", name)
 }
