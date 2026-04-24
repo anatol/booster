@@ -81,6 +81,11 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 	filter = filter && !k.universal // filtering works only if we in host (non-universal) mode
 
 	for _, m := range mods {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			return fmt.Errorf("invalid empty module name or pattern")
+		}
+
 		activate := true
 		if m[0] == '-' {
 			m = m[1:]
@@ -144,12 +149,12 @@ func (k *Kmod) activateModules(filter, failIfMissing bool, mods ...string) error
 			for _, mod := range mods {
 				if activate {
 					if !k.requiredModules[mod] {
-						debug("activate module %s", mods)
+						debug("activate module %s", mod)
 						k.requiredModules[mod] = true
 					}
 				} else {
 					if k.requiredModules[mod] {
-						debug("deactivate module %s", mods)
+						debug("deactivate module %s", mod)
 						delete(k.requiredModules, mod)
 					}
 				}

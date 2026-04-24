@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
@@ -13,6 +14,46 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
+
+var initializedNetworkState struct {
+	sync.Mutex
+	ifnames []string
+}
+
+func rememberInitializedInterface(ifname string) {
+	initializedNetworkState.Lock()
+	defer initializedNetworkState.Unlock()
+
+	for _, known := range initializedNetworkState.ifnames {
+		if known == ifname {
+			return
+		}
+	}
+	initializedNetworkState.ifnames = append(initializedNetworkState.ifnames, ifname)
+}
+
+func initializedInterfaces() []string {
+	initializedNetworkState.Lock()
+	defer initializedNetworkState.Unlock()
+
+	return append([]string(nil), initializedNetworkState.ifnames...)
+}
+
+func parseDNSServers(raw string) ([]net.IP, error) {
+	var ips []net.IP
+	for _, server := range strings.Split(raw, ",") {
+		server = strings.TrimSpace(server)
+		if server == "" {
+			continue
+		}
+		ip := net.ParseIP(server)
+		if ip == nil {
+			return nil, fmt.Errorf("Unable to parse IP address for DNS server: %v", server)
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
+}
 
 func runDhcp(ifname string) error {
 	dhcp := client4.NewClient()
@@ -69,7 +110,7 @@ func runDhcp(ifname string) error {
 }
 
 func shutdownNetwork() {
-	for _, ifname := range initializedIfnames {
+	for _, ifname := range initializedInterfaces() {
 		debug("shutting down network interface %s", ifname)
 		link, err := netlink.LinkByName(ifname)
 		if err != nil {
@@ -89,8 +130,6 @@ func shutdownNetwork() {
 		_ = netlink.LinkSetDown(link)
 	}
 }
-
-var initializedIfnames []string
 
 func initializeNetworkInterface(ifname string) error {
 	link, err := netlink.LinkByName(ifname)
@@ -117,7 +156,7 @@ func initializeNetworkInterface(ifname string) error {
 	if err := netlink.LinkSetUp(link); err != nil {
 		return err
 	}
-	initializedIfnames = append(initializedIfnames, ifname)
+	rememberInitializedInterface(ifname)
 
 	timeout := time.After(20 * time.Second)
 	debug("%s waiting interface to be UP", ifname)
@@ -164,14 +203,9 @@ linkReadinessLoop:
 		}
 
 		if c.DNSServers != "" {
-			servers := strings.Split(c.DNSServers, ",")
-			ips := make([]net.IP, 0)
-			for _, s := range servers {
-				ip := net.ParseIP(s)
-				if ip == nil {
-					return fmt.Errorf("Unable to parse IP address for DNS server: %v", s)
-				}
-				ips = append(ips, ip)
+			ips, err := parseDNSServers(c.DNSServers)
+			if err != nil {
+				return err
 			}
 			if err := writeResolvConf(ips); err != nil {
 				return err

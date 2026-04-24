@@ -44,6 +44,18 @@ type UserConfig struct {
 	EnableFido2          bool   `yaml:"enable_fido2"`
 }
 
+func parseCommaList(raw string) []string {
+	var values []string
+	for value := range strings.SplitSeq(raw, ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	return values
+}
+
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
 // (as if empty file is specified).
 // once the user config is parsed, flags values are applied on top of it.
@@ -75,41 +87,34 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		} else {
 			conf.networkConfigType = netStatic
 			conf.networkStaticConfig = &networkStaticConfig{
-				n.IP, n.Gateway, n.DNSServers,
+				ip:         n.IP,
+				gateway:    n.Gateway,
+				dnsServers: strings.Join(parseCommaList(n.DNSServers), ","),
 			}
 		}
 
-		if u.Network.Interfaces != "" {
-			// get MAC addresses for the specified interface names
-			for i := range strings.SplitSeq(u.Network.Interfaces, ",") {
-				// user can either provide the mac addr itself
-				if hwAddr, err := net.ParseMAC(i); err == nil {
-					conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, hwAddr)
-					continue
-				}
-
-				// or a network interface
-				ifc, err := net.InterfaceByName(i)
-				if err != nil {
-					return nil, fmt.Errorf("invalid network interface: %s", i)
-				}
-				// TODO: or maybe instead of resolving it to MAC address here we should compute predictable interface names
-				// in init? See the algorithm https://github.com/systemd/systemd/blob/main/src/udev/udev-builtin-net_id.c
-				conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
+		// Resolve interface selectors to MAC addresses at build time so the
+		// initramfs is independent from naming policy inside early userspace.
+		for _, iface := range parseCommaList(u.Network.Interfaces) {
+			if hwAddr, err := net.ParseMAC(iface); err == nil {
+				conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, hwAddr)
+				continue
 			}
+
+			ifc, err := net.InterfaceByName(iface)
+			if err != nil {
+				return nil, fmt.Errorf("invalid network interface: %s", iface)
+			}
+			// TODO: or maybe instead of resolving it to MAC address here we should compute predictable interface names
+			// in init? See the algorithm https://github.com/systemd/systemd/blob/main/src/udev/udev-builtin-net_id.c
+			conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
 		}
 	}
 	conf.universal = u.Universal || opts.BuildCommand.Universal
-	if u.Modules != "" {
-		conf.modules = strings.Split(u.Modules, ",")
-	}
-	if u.ModulesForceLoad != "" {
-		conf.modulesForceLoad = strings.Split(u.ModulesForceLoad, ",")
-	}
+	conf.modules = parseCommaList(u.Modules)
+	conf.modulesForceLoad = parseCommaList(u.ModulesForceLoad)
 	conf.compression = u.Compression
-	if u.ExtraFiles != "" {
-		conf.extraFiles = strings.Split(u.ExtraFiles, ",")
-	}
+	conf.extraFiles = parseCommaList(u.ExtraFiles)
 	if u.MountTimeout != "" {
 		timeout, err := time.ParseDuration(u.MountTimeout)
 		if err != nil {
