@@ -64,6 +64,7 @@ type options struct {
 	vConsoleConfig, localeConfig string
 	enableMdraid                 bool
 	mdraidConfigPath             string
+	enableFido2                  bool
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -162,8 +163,17 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		compression = "none"
 	}
 
+	initBinary := "/usr/bin/false"
+	if o.enableFido2 {
+		// fido2plugin.so is read from the same directory as the init binary.
+		// Create dummy stand-ins in the work directory so the generator can find them.
+		initBinary = wd + "/init"
+		require.NoError(t, os.WriteFile(initBinary, []byte("dummy"), 0o755))
+		require.NoError(t, os.WriteFile(wd+"/fido2plugin.so", []byte("dummy"), 0o755))
+	}
+
 	conf := generatorConfig{
-		initBinary:          "/usr/bin/false",
+		initBinary:          initBinary,
 		compression:         compression,
 		universal:           o.universal,
 		kernelVersion:       "matestkernel",
@@ -178,6 +188,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		enableLVM:           o.enableLVM,
 		enableMdraid:        o.enableMdraid,
 		mdraidConfigPath:    o.mdraidConfigPath,
+		enableFido2:         o.enableFido2,
 		crypttabFile:        "/dev/null", // tests run without root; avoid reading /etc/crypttab
 	}
 	if o.vConsoleConfig != "" {
@@ -413,6 +424,24 @@ pci:v*d*sv*sd*bc0Csc03i30* cbc`
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/whiteheat.fw.zst")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/usbdux_firmware.bin.zst")
 	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/firmware/rtw88/rtw8723d_fw.bin.zst")
+}
+
+func TestFido2HostModeIncludesUsbHid(t *testing.T) {
+	// Regression test for https://github.com/anatol/booster/issues/277.
+	// In host-specific mode, usbhid and hid_generic must be included when
+	// enable_fido2 is set, even if no USB HID device was connected at build time
+	// (i.e. neither module appears in the host's loaded-module list).
+	opts := options{
+		universal:        false,
+		prepareModulesAt: []string{"kernel/drivers/hid/usbhid.ko", "kernel/drivers/hid/hid_generic.ko"},
+		hostModules:      []string{}, // no USB HID modules loaded at build time
+		enableFido2:      true,
+		unpackImage:      true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/modules/usbhid.ko")
+	checkFileExistence(t, opts.workDir+"/image.unpacked/usr/lib/modules/hid_generic.ko")
 }
 
 func TestExtraFiles(t *testing.T) {

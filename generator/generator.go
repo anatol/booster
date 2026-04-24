@@ -292,6 +292,16 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 	}
 
+	if conf.enableFido2 {
+		// FIDO2 security keys are USB HID devices. In host-specific mode,
+		// usbhid and hid_generic may be absent if no USB HID device is
+		// connected at build time. Include them unconditionally so the key
+		// is recognized when plugged in during the passphrase prompt.
+		if err := kmod.activateModules(false, false, "usbhid", "hid_generic"); err != nil {
+			return err
+		}
+	}
+
 	if err := kmod.resolveDependencies(); err != nil {
 		return err
 	}
