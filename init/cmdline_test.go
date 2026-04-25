@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 func TestParseParamsInvalidLuksOptions(t *testing.T) {
@@ -199,4 +200,37 @@ func TestParseParamsInvalidTokenTimeout(t *testing.T) {
 	luksMappings = nil
 
 	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=notaduration"))
+}
+
+func TestMountFlagsRoRw(t *testing.T) {
+	reset := func() {
+		rootReadOnly = nil
+		rootFlags = ""
+		rootAutodiscoveryMountFlags = 0
+	}
+
+	reset()
+	flags, _ := mountFlags()
+	require.Zero(t, flags&unix.MS_RDONLY, "neither ro nor rw: should default to rw")
+
+	reset()
+	require.NoError(t, parseParams("ro"))
+	flags, _ = mountFlags()
+	require.NotZero(t, flags&unix.MS_RDONLY, "ro alone: should be read-only")
+
+	reset()
+	require.NoError(t, parseParams("rw"))
+	flags, _ = mountFlags()
+	require.Zero(t, flags&unix.MS_RDONLY, "rw alone: should be read-write")
+
+	// last param wins
+	reset()
+	require.NoError(t, parseParams("ro rw"))
+	flags, _ = mountFlags()
+	require.Zero(t, flags&unix.MS_RDONLY, "ro rw: rw is last, should be read-write")
+
+	reset()
+	require.NoError(t, parseParams("rw ro"))
+	flags, _ = mountFlags()
+	require.NotZero(t, flags&unix.MS_RDONLY, "rw ro: ro is last, should be read-only")
 }

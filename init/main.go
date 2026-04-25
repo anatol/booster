@@ -42,9 +42,9 @@ var (
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags
 	activeEfiEspGUID            UUID    // partition that was used as Efi system partition last time
 
-	rootFsType     string
-	rootFlags      string
-	rootRo, rootRw bool
+	rootFsType   string
+	rootFlags    string
+	rootReadOnly *bool // nil = not set; true = ro, false = rw; last cmdline param wins
 
 	zfsDataset string
 
@@ -651,11 +651,12 @@ func waitForBtrfsDevicesReady(dev string) error {
 
 func mountFlags() (uintptr, string) {
 	rootMountFlags, options := sunderMountFlags(rootFlags, rootAutodiscoveryMountFlags)
-	if rootRo {
-		rootMountFlags |= unix.MS_RDONLY
-	}
-	if rootRw {
-		rootMountFlags &^= unix.MS_RDONLY
+	if rootReadOnly != nil {
+		if *rootReadOnly {
+			rootMountFlags |= unix.MS_RDONLY
+		} else {
+			rootMountFlags &^= unix.MS_RDONLY
+		}
 	}
 	return rootMountFlags, options
 }

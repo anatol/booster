@@ -238,9 +238,11 @@ func parseParams(params string) error {
 		case "rootflags":
 			rootFlags = value
 		case "ro":
-			rootRo = true
+			b := true
+			rootReadOnly = &b
 		case "rw":
-			rootRw = true
+			b := false
+			rootReadOnly = &b
 		case "rd.luks.options":
 			for o := range strings.SplitSeq(value, ",") {
 				if after, ok := strings.CutPrefix(o, "token-timeout="); ok {
