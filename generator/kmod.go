@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -290,91 +291,110 @@ func readBuiltinModinfo(dir string, propName string) (map[string][]string, error
 	return result, nil
 }
 
-func (k *Kmod) addModulesToImage(img *Image) error {
-	var wg sync.WaitGroup
-	modNum := len(k.requiredModules)
-	errCh := make(chan error, modNum)
+type modContent struct {
+	content []byte
+	fws     []string
+	err     error
+}
 
-	unpackModule := func(modName string) {
-		defer wg.Done()
-
-		p, ok := k.nameToPathMapping.forward[modName]
-		if !ok {
-			errCh <- fmt.Errorf("unable to find module file for %s", modName)
-		}
-
-		modulePath := filepath.Join(k.hostModulesDir, p)
-
-		f, err := os.Open(modulePath)
-		if err != nil {
-			errCh <- fmt.Errorf("%s: %v", modulePath, err)
-			return
-		}
-		defer f.Close()
-
-		var r io.Reader
-		ext := filepath.Ext(p)
-		switch ext {
-		case ".ko":
-			r = f
-		case ".xz":
-			r, err = xz.NewReader(f, 0)
-		case ".zst":
-			r, err = zstd.NewReader(f)
-		case ".lz4":
-			r, err = newLz4Reader(f)
-		case ".gz":
-			r, err = gzip.NewReader(f)
-		default:
-			err = fmt.Errorf("unknown module compression format: %s", ext)
-		}
-		if err != nil {
-			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
-			return
-		}
-
-		content, err := io.ReadAll(r)
-		if err != nil {
-			errCh <- fmt.Errorf("unpacking module %s: %v", modName, err)
-			return
-		}
-
-		if err := img.AppendContent(imageModulesDir+modName+".ko", 0o644, content); err != nil {
-			errCh <- err
-			return
-		}
-
-		ef, err := elf.NewFile(bytes.NewReader(content))
-		if err != nil {
-			errCh <- err
-			return
-		}
-
-		fws, err := readModuleFirmwareRequirements(ef)
-		if err != nil {
-			errCh <- err
-			return
-		}
-
-		if err := img.appendFirmwareFiles(modName, fws); err != nil {
-			errCh <- err
-			return
-		}
+func (k *Kmod) readModuleContent(modName string) modContent {
+	p, ok := k.nameToPathMapping.forward[modName]
+	if !ok {
+		return modContent{err: fmt.Errorf("unable to find module file for %s", modName)}
 	}
 
+	modulePath := filepath.Join(k.hostModulesDir, p)
+	f, err := os.Open(modulePath)
+	if err != nil {
+		return modContent{err: fmt.Errorf("%s: %v", modulePath, err)}
+	}
+	defer f.Close()
+
+	var r io.Reader
+	ext := filepath.Ext(p)
+	switch ext {
+	case ".ko":
+		r = f
+	case ".xz":
+		r, err = xz.NewReader(f, 0)
+	case ".zst":
+		r, err = zstd.NewReader(f)
+	case ".lz4":
+		r, err = newLz4Reader(f)
+	case ".gz":
+		r, err = gzip.NewReader(f)
+	default:
+		err = fmt.Errorf("unknown module compression format: %s", ext)
+	}
+	if err != nil {
+		return modContent{err: fmt.Errorf("unpacking module %s: %v", modName, err)}
+	}
+
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return modContent{err: fmt.Errorf("unpacking module %s: %v", modName, err)}
+	}
+
+	ef, err := elf.NewFile(bytes.NewReader(content))
+	if err != nil {
+		return modContent{err: err}
+	}
+
+	fws, err := readModuleFirmwareRequirements(ef)
+	if err != nil {
+		return modContent{err: err}
+	}
+
+	return modContent{content: content, fws: fws}
+}
+
+func (k *Kmod) addModulesToImage(img *Image) error {
 	builtinFw, err := readBuiltinModinfo(k.hostModulesDir, "firmware")
 	if err != nil {
 		return err
 	}
 
+	// Separate builtin and loadable modules, both sorted for deterministic output.
+	var builtinMods, loadableMods []string
 	for modName := range k.requiredModules {
 		if k.builtinModules[modName] {
-			if err := img.appendFirmwareFiles(modName, builtinFw[modName]); err != nil {
-				return err
-			}
+			builtinMods = append(builtinMods, modName)
 		} else {
-			wg.Add(1)
-			go unpackModule(modName)
+			loadableMods = append(loadableMods, modName)
+		}
+	}
+	slices.Sort(builtinMods)
+	slices.Sort(loadableMods)
+
+	for _, modName := range builtinMods {
+		if err := img.appendFirmwareFiles(modName, builtinFw[modName]); err != nil {
+			return err
+		}
+	}
+
+	// Read and decompress all loadable modules in parallel, then flush to the
+	// CPIO in sorted order so the image is reproducible across builds.
+	results := make([]modContent, len(loadableMods))
+	var wg sync.WaitGroup
+	for i, modName := range loadableMods {
+		wg.Add(1)
+		go func(i int, modName string) {
+			defer wg.Done()
+			results[i] = k.readModuleContent(modName)
+		}(i, modName)
+	}
+	wg.Wait()
+
+	for i, modName := range loadableMods {
+		r := results[i]
+		if r.err != nil {
+			return r.err
+		}
+		if err := img.AppendContent(imageModulesDir+modName+".ko", 0o644, r.content); err != nil {
+			return err
+		}
+		if err := img.appendFirmwareFiles(modName, r.fws); err != nil {
+			return err
 		}
 	}
 
@@ -384,14 +404,7 @@ func (k *Kmod) addModulesToImage(img *Image) error {
 		}
 	}
 
-	wg.Wait()
-
-	select {
-	case err := <-errCh:
-		return err // return the first error in the channel
-	default:
-		return nil
-	}
+	return nil
 }
 
 func (k *Kmod) scanModulesDir() error {
