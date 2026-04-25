@@ -596,3 +596,71 @@ func TestLookupFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/usr/bin/echo", path)
 }
+
+// TestDeterministicImage verifies that two builds with identical inputs produce
+// byte-for-byte identical images. This guards against map iteration order and
+// goroutine scheduling introducing non-determinism in the CPIO entry order or
+// the booster.alias file.
+func TestDeterministicImage(t *testing.T) {
+	t.Parallel()
+	prepareAssets(t)
+
+	wd := t.TempDir()
+	modulesDir := filepath.Join(wd, "modules")
+	require.NoError(t, os.Mkdir(modulesDir, 0o755))
+
+	// Several modules with overlapping aliases (same pattern → multiple modules)
+	// to exercise both the alias sort and the CPIO module ordering.
+	mods := []string{
+		"kernel/crypto/aes.ko",
+		"kernel/crypto/cbc.ko",
+		"kernel/crypto/chacha20.ko",
+		"kernel/fs/ext4.ko",
+		"kernel/fs/btrfs.ko",
+	}
+	for _, mod := range mods {
+		loc := filepath.Join(modulesDir, mod)
+		require.NoError(t, os.MkdirAll(filepath.Dir(loc), 0o755))
+		require.NoError(t, exec.Command("cp", "assets/test_module.ko", loc).Run())
+	}
+
+	aliases := []alias{
+		{"crypto_aes", "aes"},
+		{"crypto_aes", "cbc"},       // same pattern, two modules
+		{"crypto_chacha20", "chacha20"},
+		{"crypto_chacha20", "cbc"},  // same pattern, two modules
+		{"fs_ext4", "ext4"},
+		{"fs_btrfs", "btrfs"},
+	}
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", generateAliasesFile(aliases), 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	newConf := func(output string) *generatorConfig {
+		return &generatorConfig{
+			initBinary:          "/usr/bin/false",
+			compression:         "none",
+			universal:           true,
+			kernelVersion:       "matestkernel",
+			modulesDir:          modulesDir,
+			output:              output,
+			readDeviceAliases:   func() (set, error) { return make(set), nil },
+			readHostModules:     func(string) (set, error) { return make(set), nil },
+			readModprobeOptions: func() (map[string]string, error) { return nil, nil },
+			crypttabFile:        "/dev/null",
+		}
+	}
+
+	img1 := filepath.Join(wd, "image1.img")
+	img2 := filepath.Join(wd, "image2.img")
+	require.NoError(t, generateInitRamfs(newConf(img1)))
+	require.NoError(t, generateInitRamfs(newConf(img2)))
+
+	b1, err := os.ReadFile(img1)
+	require.NoError(t, err)
+	b2, err := os.ReadFile(img2)
+	require.NoError(t, err)
+	require.Equal(t, b1, b2, "image must be byte-for-byte identical across builds")
+}
