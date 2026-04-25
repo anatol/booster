@@ -431,7 +431,7 @@ func lookupPath(binary string) (string, error) {
 		return f, nil
 	}
 
-	return "", os.ErrNotExist
+	return "", fmt.Errorf("cannot find binary %q in PATH", binary)
 }
 
 func findFwFile(fw string) (string, error) {
