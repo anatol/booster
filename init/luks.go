@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
+	"github.com/google/go-tpm/tpmutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -353,11 +353,13 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 
 func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 	var node struct {
-		Blob       string `json:"tpm2-blob"` // base64
+		Blob       string `json:"tpm2-blob"`        // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
 		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
-		PolicyHash string `json:"tpm2-policy-hash"` // base64
+		PolicyHash string `json:"tpm2-policy-hash"` // hex
 		Pin        bool   `json:"tpm2-pin"`
+		Salt       string `json:"tpm2_salt"`         // base64 random salt; systemd v255+ PIN tokens
+		Srk        string `json:"tpm2_srk"`          // base64 IESYS bytes; systemd v252+ tokens
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
@@ -400,11 +402,26 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 			return nil, err
 		}
 
-		hash := sha256.Sum256(pin)
-		authValue = hash[:]
+		var salt []byte
+		if node.Salt != "" {
+			salt, err = base64.StdEncoding.DecodeString(node.Salt)
+			if err != nil {
+				return nil, fmt.Errorf("tpm2_salt: %v", err)
+			}
+		}
+		authValue = tpm2PINAuthValue(pin, salt)
 	}
 
-	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue)
+	var srkHandle tpmutil.Handle
+	if node.Srk != "" {
+		srkBytes, err := base64.StdEncoding.DecodeString(node.Srk)
+		if err != nil {
+			return nil, fmt.Errorf("tpm2_srk: %v", err)
+		}
+		srkHandle = extractSRKHandle(srkBytes)
+	}
+
+	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
 	if err != nil {
 		return nil, err
 	}
