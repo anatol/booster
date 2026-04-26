@@ -2,6 +2,7 @@ package tests
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
 	"testing"
 
@@ -76,6 +77,55 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-tpm2-withpin.img",
 		kernelArgs: []string{"rd.luks.uuid=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "root=UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Please enter TPM pin:"))
+	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSystemdTPM2SRK tests unlock of a LUKS2 volume enrolled with systemd-cryptenroll
+// v252+, which provisions a persistent SRK at handle 0x81000001 and records it as
+// tpm2_srk in the token JSON. Booster must use that handle rather than deriving a
+// transient primary, otherwise tpm2.Load returns an integrity check failure.
+func TestSystemdTPM2SRK(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-srk.img",
+		kernelArgs: []string{"rd.luks.uuid=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "root=UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSystemdTPM2LegacyPin tests unlock of a LUKS2 volume whose systemd-tpm2
+// token was enrolled with a v252–254 era systemd-cryptenroll: the token has
+// tpm2_srk (persistent SRK) but no tpm2_salt, so PIN auth uses the pre-v255
+// convention authValue = SHA256_trimmed(pin) rather than the PBKDF2 path.
+// The image is generated with raw tpm2-tools to be independent of the installed
+// systemd version.  The test is skipped when tpm2-tools are not available.
+func TestSystemdTPM2LegacyPin(t *testing.T) {
+	if _, err := exec.LookPath("tpm2_create"); err != nil {
+		t.Skip("tpm2-tools not installed; skipping legacy-pin backward-compat test")
+	}
+
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-legacy-pin.img",
+		kernelArgs: []string{"rd.luks.uuid=1e8a6049-18a7-48df-a4f6-edc80650e19f", "root=UUID=b0d4b4c2-cef2-43b5-a063-e3379a49f79c"},
 		params:     params,
 	})
 	require.NoError(t, err)
