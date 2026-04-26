@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/google/go-tpm/legacy/tpm2"
 	"github.com/google/go-tpm/tpmutil"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 var defaultSymScheme = &tpm2.SymScheme{
@@ -58,7 +62,45 @@ func tpmAwaitReady() bool {
 	return !timedOut
 }
 
-func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte) ([]byte, error) {
+// extractSRKHandle parses the Intel TSS2 IESYS_RESOURCE_SERIALIZE format that
+// systemd uses to store the SRK reference in LUKS2 token JSON (tpm2_srk field).
+// Layout: magic[4] version[2] handle[4] ... Falls back to 0x81000001, which is
+// systemd's standard persistent SRK handle, on any parse failure.
+func extractSRKHandle(srk []byte) tpmutil.Handle {
+	const iesysMagic = 0x69657379
+	if len(srk) >= 10 && binary.BigEndian.Uint32(srk[0:4]) == iesysMagic {
+		if h := binary.BigEndian.Uint32(srk[6:10]); h != 0 {
+			return tpmutil.Handle(h)
+		}
+	}
+	return tpmutil.Handle(0x81000001)
+}
+
+// tpm2PINAuthValue derives the TPM2 authValue from a PIN, matching systemd's convention.
+//
+// systemd v255+ ("salted PIN"): authValue = SHA256_trimmed(base64(PBKDF2-HMAC-SHA256(pin, salt, 10000, 32)))
+// Older tokens (no salt):       authValue = SHA256_trimmed(pin)
+//
+// Trailing zero bytes are trimmed per TPM2 spec Part 1 "HMAC Computation" authValue Note 2.
+func tpm2PINAuthValue(pin, salt []byte) []byte {
+	var input []byte
+	if len(salt) > 0 {
+		dk := pbkdf2.Key(pin, salt, 10000, 32, sha256.New)
+		b64 := base64.StdEncoding.EncodeToString(dk)
+		input = []byte(b64)
+	} else {
+		input = pin
+	}
+	h := sha256.Sum256(input)
+	auth := h[:]
+	// Trim trailing zero bytes
+	for len(auth) > 0 && auth[len(auth)-1] == 0 {
+		auth = auth[:len(auth)-1]
+	}
+	return auth
+}
+
+func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte, srkHandle tpmutil.Handle) ([]byte, error) {
 	tpmAwaitReady()
 
 	dev, err := openTPM()
@@ -73,22 +115,30 @@ func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyH
 	}
 	defer tpm2.FlushContext(dev, sessHandle)
 
-	srkTemplate := tpm2.Public{
-		Type:          tpm2.AlgECC,
-		NameAlg:       tpm2.AlgSHA256,
-		Attributes:    tpm2.FlagStorageDefault,
-		AuthPolicy:    nil,
-		ECCParameters: defaultECCParams,
-		RSAParameters: defaultRSAParams,
+	var parent tpmutil.Handle
+	if srkHandle != 0 {
+		// Use the persistent SRK provisioned by systemd-tpm2-setup (systemd v252+ tokens).
+		// Do not FlushContext on a persistent handle — that would evict it from the TPM.
+		parent = srkHandle
+	} else {
+		// Legacy path: derive a transient primary from the well-known ECC template.
+		// Used for tokens created by systemd pre-v252 that have no tpm2_srk field.
+		srkTemplate := tpm2.Public{
+			Type:          tpm2.AlgECC,
+			NameAlg:       tpm2.AlgSHA256,
+			Attributes:    tpm2.FlagStorageDefault,
+			AuthPolicy:    nil,
+			ECCParameters: defaultECCParams,
+			RSAParameters: defaultRSAParams,
+		}
+		parent, _, err = tpm2.CreatePrimary(dev, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", srkTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("clevis.go/tpm2: can't create primary key: %v", err)
+		}
+		defer tpm2.FlushContext(dev, parent)
 	}
 
-	srkHandle, _, err := tpm2.CreatePrimary(dev, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", srkTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("clevis.go/tpm2: can't create primary key: %v", err)
-	}
-	defer tpm2.FlushContext(dev, srkHandle)
-
-	objectHandle, _, err := tpm2.Load(dev, srkHandle, "", public, private)
+	objectHandle, _, err := tpm2.Load(dev, parent, "", public, private)
 	if err != nil {
 		return nil, fmt.Errorf("clevis.go/tpm2: unable to load data: %v", err)
 	}
