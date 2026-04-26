@@ -65,8 +65,14 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=0cb4665f-65a0-4acc-9710-05163af16f19",
 		"LUKS_PASSWORD=567",
 	}},
-	"systemd-tpm2.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
-	"systemd-tpm2-withpin.img":  {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	"systemd-tpm2.img":              {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
+	"systemd-tpm2-withpin.img":      {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	"systemd-tpm2-srk.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
+	// systemd-tpm2-legacy-pin.img: v252-254 format token — tpm2_srk present but
+	// no tpm2_salt, PIN auth via SHA256(pin) without PBKDF2.  Generated with
+	// raw tpm2-tools rather than systemd-cryptenroll to be independent of the
+	// installed systemd version.  Requires tpm2-tools; test skips if absent.
+	"systemd-tpm2-legacy-pin.img":   {"systemd_tpm2_legacy_pin.sh", []string{"LUKS_UUID=1e8a6049-18a7-48df-a4f6-edc80650e19f", "FS_UUID=b0d4b4c2-cef2-43b5-a063-e3379a49f79c", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654"}},
 	"systemd-recovery.img":      {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
 	// luks2.shared_pass.img: GPT disk with two LUKS2 partitions sharing the same
 	// passphrase.  Partition 1 has no inner filesystem; partition 2 has ext4.
