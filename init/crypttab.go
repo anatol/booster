@@ -134,9 +134,9 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 					m.header = hdrPath
 					m.headerDeviceRef = hdrRef
 				case strings.HasPrefix(opt, "fido2-device="):
-					m.tokenFido2 = true // value ("auto") ignored — booster auto-detects enrolled tokens
+					// accepted for compatibility; token detection uses LUKS2 header
 				case strings.HasPrefix(opt, "tpm2-device="):
-					m.tokenTpm2 = true // value ("auto") ignored — booster auto-detects enrolled tokens
+					// accepted for compatibility; token detection uses LUKS2 header
 				case strings.HasPrefix(opt, "token-timeout="):
 					d, err := parseTokenTimeout(opt[14:])
 					if err != nil {
@@ -188,15 +188,8 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 
 // mergeCrypttabOptions merges security-relevant options from a crypttab entry (src)
 // into a cmdline-derived mapping (dst). dst's ref and name are preserved; crypttab
-// supplies token flags, keyfile, header, and other unlock options that rd.luks.*
-// params cannot express.
+// supplies keyfile, header, and other unlock options that rd.luks.* params cannot express.
 func mergeCrypttabOptions(dst, src *luksMapping) {
-	if src.tokenFido2 {
-		dst.tokenFido2 = true
-	}
-	if src.tokenTpm2 {
-		dst.tokenTpm2 = true
-	}
 	// Adopt crypttab's token timeout when the cmdline mapping still has the
 	// default (30 s) and the crypttab entry carries an explicit value.
 	if src.tokenTimeout > 0 && src.tokenTimeout != dst.tokenTimeout {

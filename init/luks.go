@@ -32,8 +32,6 @@ type luksMapping struct {
 	header          string        // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
-	tokenFido2      bool          // fido2-device= was set in crypttab — parsed for compatibility; priority now derived from LUKS2 header
-	tokenTpm2       bool          // tpm2-device= was set in crypttab — parsed for compatibility; priority now derived from LUKS2 header
 
 	keyfileDeviceRef *deviceRef    // non-nil when keyfile is on a separate device
 	keyfileTimeout   time.Duration // device wait timeout for keyfile device (0 = use MountTimeout)
@@ -738,18 +736,6 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	var tokenWg sync.WaitGroup
 	var keyboardOnce sync.Once
 
-	// priorityTypes holds token types that should delay the keyboard prompt.
-	// When non-empty, keyboard unlock is deferred until these tokens finish
-	// (or tokenTimeout elapses), matching systemd-cryptsetup fido2-device= behavior.
-	priorityTypes := make(map[string]bool)
-	if mapping.tokenFido2 {
-		priorityTypes["systemd-fido2"] = true
-	}
-	if mapping.tokenTpm2 {
-		priorityTypes["systemd-tpm2"] = true
-	}
-	hasPriority := len(priorityTypes) > 0
-
 	// startKeyboard launches the keyboard (or keyfile) unlock goroutine at most once.
 	startKeyboard := func(checkSlots []int) {
 		keyboardOnce.Do(func() {
@@ -763,61 +749,46 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		})
 	}
 
-	slotsWithTokens := make(map[int]bool)
 	tokens, err := d.Tokens()
 	if err != nil {
 		return err
 	}
+
+	slotsWithTokens := make(map[int]bool)
 	for _, t := range tokens {
 		if t.Type == "systemd-recovery" {
 			continue // skipped: entered via keyboard later
 		}
 		t := t
-		if hasPriority && priorityTypes[t.Type] {
-			// Priority token: track in tokenWg so keyboard waits for it.
-			senderWg.Add(1)
-			tokenWg.Add(1)
-			go func() {
-				defer senderWg.Done()
-				defer tokenWg.Done()
-				if recoverTokenPassword(volumes, done, d, t, mapping.name) {
-					closeDone.Do(func() { close(done) })
-				}
-			}()
-		} else {
-			// Non-priority token: fire-and-forget w.r.t. keyboard *timing*, but
-			// close done on success so the waiter never races to start the keyboard
-			// after a successful token unlock.
-			senderWg.Add(1)
-			tokenWg.Add(1)
-			go func() {
-				defer senderWg.Done()
-				defer tokenWg.Done()
-				if recoverTokenPassword(volumes, done, d, t, mapping.name) {
-					closeDone.Do(func() { close(done) })
-				}
-			}()
-		}
+		senderWg.Add(1)
+		tokenWg.Add(1)
+		go func() {
+			defer senderWg.Done()
+			defer tokenWg.Done()
+			if recoverTokenPassword(volumes, done, d, t, mapping.name) {
+				closeDone.Do(func() { close(done) })
+			}
+		}()
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
 	}
 
-	// checkSlotsWithPassword = slots not covered by any token; these are tried by
-	// the keyboard/keyfile goroutine.  When hasPriority is false we pass all
-	// available slots so the keyboard can try token slots too (existing behavior).
-	var checkSlotsWithPassword []int
-	if hasPriority {
+	// Keyboard always skips slots claimed by any token: a typed passphrase will never
+	// unseal a slot enrolled for a hardware credential (TPM2, FIDO2, clevis).
+	// Fall back to all slots only when every slot is token-owned (no dedicated
+	// passphrase slot exists).
+	checkSlotsWithPassword := availableSlots
+	if len(slotsWithTokens) > 0 {
+		var filtered []int
 		for _, s := range availableSlots {
 			if !slotsWithTokens[s] {
-				checkSlotsWithPassword = append(checkSlotsWithPassword, s)
+				filtered = append(filtered, s)
 			}
 		}
-		if len(checkSlotsWithPassword) == 0 {
-			checkSlotsWithPassword = availableSlots
+		if len(filtered) > 0 {
+			checkSlotsWithPassword = filtered
 		}
-	} else {
-		checkSlotsWithPassword = availableSlots
 	}
 
 	// Start keyboard/keyfile unlock after all token goroutines finish (or tokenTimeout
