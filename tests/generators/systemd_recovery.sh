@@ -21,11 +21,12 @@ err() {
 LUKS_DEV_NAME=luks-booster-recover
 
 truncate --size 40M "${OUTPUT}"
-lodev=$(sudo losetup -f --show "${OUTPUT}")
+lodev=$(sudo losetup -f --show "${OUTPUT}" | grep -m1 '^/dev/')
 sudo cryptsetup luksFormat --uuid "${LUKS_UUID}" --type luks2 "${lodev}" <<< "${LUKS_PASSWORD}"
 
 printf '%s' "${LUKS_PASSWORD}" > assets/cryptenroll.passphrase
-recovery_key=$(sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --recovery-key "${lodev}")
+recovery_key=$(sudo CREDENTIALS_DIRECTORY="$(pwd)/assets" systemd-cryptenroll --recovery-key "${lodev}" \
+  | sed 's/\x1b\[[0-9;]*m//g' | grep -m1 '^[a-z0-9]')
 printf '%s' "${recovery_key}" > assets/systemd.recovery.key
 
 sudo cryptsetup open "${lodev}" "${LUKS_DEV_NAME}" <<< "${LUKS_PASSWORD}"
@@ -36,4 +37,4 @@ sudo chown "${USER}" "${dir}"
 mkdir "${dir}/sbin"
 cp assets/init "${dir}/sbin/init"
 
-sudo cryptsetup -v luksKillSlot "${lodev}" 0
+sudo cryptsetup -v luksKillSlot "${lodev}" 0 <<< "${recovery_key}"
