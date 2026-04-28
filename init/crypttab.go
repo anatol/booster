@@ -154,7 +154,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			continue
 		}
 
-		if (m.tokenFido2 || m.tokenTpm2) && !tokenTimeoutExplicit {
+		if !tokenTimeoutExplicit {
 			m.tokenTimeout = 30 * time.Second // systemd default: wait 30s for tokens before also prompting keyboard
 		}
 
