@@ -245,6 +245,26 @@ func TestParseCrypttabXInitrdAttachIgnored(t *testing.T) {
 	}
 }
 
+// Any LUKS entry gets the 30s default token-timeout, not just those with
+// fido2-device= or tpm2-device=. LUKS2 volumes may carry tokens enrolled
+// via systemd-cryptenroll without crypttab flags.
+func TestParseCrypttabDefaultTokenTimeout(t *testing.T) {
+	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none\n"
+	mappings, err := parseCrypttabReader(strings.NewReader(input))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Equal(t, 30*time.Second, mappings[0].tokenTimeout)
+}
+
+// Explicit token-timeout= in crypttab overrides the default.
+func TestParseCrypttabExplicitTokenTimeout(t *testing.T) {
+	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none token-timeout=60\n"
+	mappings, err := parseCrypttabReader(strings.NewReader(input))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Equal(t, 60*time.Second, mappings[0].tokenTimeout)
+}
+
 func TestParseCrypttabFido2Device(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none fido2-device=auto\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))
