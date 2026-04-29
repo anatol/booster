@@ -128,7 +128,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     * **Initramfs file** — an absolute path (e.g. `/etc/luks/root.hdr`) to a header file bundled into the initramfs at build time via `extra_files`.
     * **Raw block device** — a device path (e.g. `/dev/sdb`) where the LUKS header begins at byte offset 0. Booster waits for the device to appear and passes it directly to cryptsetup without mounting.
     * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
- * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`. `token-timeout=<duration>` sets how long to wait for hardware tokens (FIDO2, TPM2) before also prompting for a keyboard passphrase. Accepts a decimal number followed by a unit (`s`, `m`, `h`), or a bare integer treated as seconds. Default (0) is to wait for all tokens to complete before prompting.
+ * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`. `token-timeout=<duration>` sets how long to wait for hardware tokens (FIDO2, TPM2) before also prompting for a keyboard passphrase. Accepts a decimal number followed by a unit (`s`, `m`, `h`), or a bare integer treated as seconds. Default is 30 s.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
 
 Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see **crypttab(5)**).
@@ -138,7 +138,7 @@ Booster-specific behaviour for selected options:
  * **keyfile** `/path:UUID=xxx` (or `LABEL=`, `PARTUUID=`, `PARTLABEL=`) — keyfile on a separate device. Booster mounts the device read-only at boot, reads the key, then unmounts. The file is not bundled into the initramfs.
  * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
  * **`fido2-device=auto`** — when present the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required.
- * **`fido2-device=auto`** / **`tpm2-device=auto`** — Booster defers the keyboard passphrase prompt until the token attempt fails or `token-timeout=` elapses (default: 30 s).
+ * **`fido2-device=auto`** / **`tpm2-device=auto`** — accepted for compatibility. Booster detects enrolled tokens directly from the LUKS2 header, so these flags are no longer required to activate token-aware behaviour. The keyboard passphrase prompt is deferred for any LUKS2 volume that has enrolled tokens until the token attempt completes or `token-timeout=` elapses.
  * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
 
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
