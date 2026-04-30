@@ -253,6 +253,7 @@ var fido2Mu sync.Mutex
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
+var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
 func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
@@ -349,7 +350,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 	return nil, errFido2FallbackToKeyboard
 }
 
-func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
+func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"`        // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
@@ -382,34 +383,6 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 
 	bank := parsePCRBank(node.PCRBank)
 
-	var authValue []byte
-	if node.Pin {
-		prompt := "Please enter TPM pin: "
-		var pin []byte
-		var err error
-		if plymouthEnabled {
-			pin, err = plymouthAskPassword(prompt)
-			if err != nil {
-				warning("Plymouth password prompt failed: %v, falling back to console", err)
-				pin, err = readPassword(prompt, "")
-			}
-		} else {
-			pin, err = readPassword(prompt, "")
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		var salt []byte
-		if node.Salt != "" {
-			salt, err = base64.StdEncoding.DecodeString(node.Salt)
-			if err != nil {
-				return nil, fmt.Errorf("tpm2_salt: %v", err)
-			}
-		}
-		authValue = tpm2PINAuthValue(pin, salt)
-	}
-
 	var srkHandle tpmutil.Handle
 	if node.Srk != "" {
 		srkBytes, err := base64.StdEncoding.DecodeString(node.Srk)
@@ -419,11 +392,56 @@ func recoverSystemdTPM2Password(t luks.Token) ([]byte, error) {
 		srkHandle = extractSRKHandle(srkBytes)
 	}
 
-	password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
-	if err != nil {
+	var salt []byte
+	if node.Salt != "" {
+		var err error
+		salt, err = base64.StdEncoding.DecodeString(node.Salt)
+		if err != nil {
+			return nil, fmt.Errorf("tpm2_salt: %v", err)
+		}
+	}
+
+	maxAttempts := 1
+	if node.Pin {
+		maxAttempts = 3
+	}
+	promptPrefix := ""
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var authValue []byte
+		if node.Pin {
+			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
+			var pin []byte
+			var err error
+			if plymouthEnabled {
+				pin, err = plymouthAskPassword(prompt)
+				if err != nil {
+					warning("Plymouth password prompt failed: %v, falling back to console", err)
+					pin, err = readPassword(prompt, "")
+				}
+			} else {
+				pin, err = readPassword(prompt, "")
+			}
+			if err != nil {
+				return nil, err
+			}
+			if len(pin) == 0 {
+				statusMessage("TPM2 PIN skipped")
+				return nil, errTPM2Skipped
+			}
+			authValue = tpm2PINAuthValue(pin, salt)
+		}
+
+		password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
+		if err == nil {
+			return []byte(base64.StdEncoding.EncodeToString(password)), nil
+		}
+		if node.Pin && attempt < maxAttempts-1 {
+			promptPrefix = "TPM2 PIN incorrect — "
+			continue
+		}
 		return nil, err
 	}
-	return []byte(base64.StdEncoding.EncodeToString(password)), nil
+	return nil, fmt.Errorf("TPM2 PIN incorrect")
 }
 
 func parseSystemdTPM2Blob(blob []byte) (private, public []byte, err error) {
@@ -458,7 +476,7 @@ func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luk
 	case "systemd-fido2":
 		password, err = recoverSystemdFido2Password(t, mappingName)
 	case "systemd-tpm2":
-		password, err = recoverSystemdTPM2Password(t)
+		password, err = recoverSystemdTPM2Password(t, mappingName)
 	default:
 		info("token #%d has unknown type: %s", t.ID, t.Type)
 		return false
@@ -466,6 +484,9 @@ func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luk
 
 	if errors.Is(err, errFido2FallbackToKeyboard) {
 		return false // intentional fallback; message already logged in recoverSystemdFido2Password
+	}
+	if errors.Is(err, errTPM2Skipped) {
+		return false // intentional fallback; message already shown in recoverSystemdTPM2Password
 	}
 	if err != nil {
 		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)

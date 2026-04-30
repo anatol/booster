@@ -67,6 +67,10 @@ var assetGenerators = map[string]assetGenerator{
 	}},
 	"systemd-tpm2.img":              {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
 	"systemd-tpm2-withpin.img":      {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	// systemd-tpm2-pin-passphrase.img: LUKS2 with both a TPM2+PIN token and a
+	// passphrase slot.  Used to test empty-PIN skip (falls through to passphrase)
+	// and PIN exhaustion (3 wrong tries → passphrase fallback).
+	"systemd-tpm2-pin-passphrase.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=f3e4d5c6-b7a8-4901-c234-d5e6f7a8b9c0", "FS_UUID=a4b5c6d7-e8f9-4012-d345-e6f7a8b9c0d1", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654", "KEEP_PASSPHRASE_SLOT=1"}},
 	// systemd-tpm2-nopcr-pin.img: TPM2+PIN token enrolled without PCR binding.
 	// Exercises the policyPCRSession path where len(pcrs)==0 so only PolicyPassword
 	// is applied (no PolicyPCR call).  Regression test for the bug where an empty

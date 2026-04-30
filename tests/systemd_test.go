@@ -82,7 +82,7 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	require.NoError(t, vm.ConsoleExpect("Please enter TPM pin:"))
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
 	require.NoError(t, vm.ConsoleWrite("foo654\n"))
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
@@ -108,6 +108,76 @@ func TestSystemdTPM2NoPcrPin(t *testing.T) {
 
 	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
 	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestSystemdTPM2PinSkip(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-pin-passphrase.img",
+		kernelArgs: []string{"rd.luks.uuid=f3e4d5c6-b7a8-4901-c234-d5e6f7a8b9c0", "root=UUID=a4b5c6d7-e8f9-4012-d345-e6f7a8b9c0d1"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// Empty PIN skips the TPM2 token and falls through to passphrase prompt.
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
+	require.NoError(t, vm.ConsoleWrite("\n"))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
+	require.NoError(t, vm.ConsoleWrite("567\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestSystemdTPM2PinRetry(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-withpin.img",
+		kernelArgs: []string{"rd.luks.uuid=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "root=UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// Wrong PIN on first attempt; correct PIN on retry.
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
+	require.NoError(t, vm.ConsoleWrite("wrongpin\n"))
+	require.NoError(t, vm.ConsoleExpect("TPM2 PIN incorrect"))
+	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestSystemdTPM2PinExhausted(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-pin-passphrase.img",
+		kernelArgs: []string{"rd.luks.uuid=f3e4d5c6-b7a8-4901-c234-d5e6f7a8b9c0", "root=UUID=a4b5c6d7-e8f9-4012-d345-e6f7a8b9c0d1"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// Three wrong PINs exhaust the token; booster falls back to passphrase.
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
+	require.NoError(t, vm.ConsoleWrite("bad1\n"))
+	require.NoError(t, vm.ConsoleExpect("TPM2 PIN incorrect"))
+	require.NoError(t, vm.ConsoleWrite("bad2\n"))
+	require.NoError(t, vm.ConsoleExpect("TPM2 PIN incorrect"))
+	require.NoError(t, vm.ConsoleWrite("bad3\n"))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
+	require.NoError(t, vm.ConsoleWrite("567\n"))
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
@@ -155,7 +225,7 @@ func TestSystemdTPM2LegacyPin(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	require.NoError(t, vm.ConsoleExpect("Please enter TPM pin:"))
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
 	require.NoError(t, vm.ConsoleWrite("foo654\n"))
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))

@@ -73,7 +73,7 @@ sudo chown "${USER}" "${dir}"
 mkdir "${dir}/sbin"
 cp assets/init "${dir}/sbin/init"
 
-if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
+if [ "${CRYPTENROLL_TPM2_PIN}" != "" ] && [ "${KEEP_PASSPHRASE_SLOT}" != "1" ]; then
   sudo cryptsetup -v luksKillSlot "${lodev}" 0
 fi
 
