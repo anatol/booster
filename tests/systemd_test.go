@@ -88,6 +88,30 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestSystemdTPM2NoPcrPin tests unlock of a LUKS2 volume whose TPM2+PIN token
+// was enrolled without PCR binding (--tpm2-pcrs="").  The policy digest only
+// covers PolicyPassword; a previous bug caused policyPCRSession to call
+// PolicyPCR with an empty selection even when len(pcrs)==0, which mutated the
+// digest and made the unseal fail regardless of PIN correctness.
+func TestSystemdTPM2NoPcrPin(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-nopcr-pin.img",
+		kernelArgs: []string{"rd.luks.uuid=d9ef7bf3-b4f8-4271-9f3c-df63d457fcc6", "root=UUID=6abcf123-4182-452b-9c87-a769dc344e3b"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
+	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 // TestSystemdTPM2SRK tests unlock of a LUKS2 volume enrolled with systemd-cryptenroll
 // v252+, which provisions a persistent SRK at handle 0x81000001 and records it as
 // tpm2_srk in the token JSON. Booster must use that handle rather than deriving a

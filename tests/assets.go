@@ -67,6 +67,11 @@ var assetGenerators = map[string]assetGenerator{
 	}},
 	"systemd-tpm2.img":              {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
 	"systemd-tpm2-withpin.img":      {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	// systemd-tpm2-nopcr-pin.img: TPM2+PIN token enrolled without PCR binding.
+	// Exercises the policyPCRSession path where len(pcrs)==0 so only PolicyPassword
+	// is applied (no PolicyPCR call).  Regression test for the bug where an empty
+	// PCR selection still mutated the policy digest, causing auth failure.
+	"systemd-tpm2-nopcr-pin.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=d9ef7bf3-b4f8-4271-9f3c-df63d457fcc6", "FS_UUID=6abcf123-4182-452b-9c87-a769dc344e3b", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654", "CRYPTENROLL_TPM2_PCRS="}},
 	"systemd-tpm2-srk.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
 	// systemd-tpm2-legacy-pin.img: v252-254 format token — tpm2_srk present but
 	// no tpm2_salt, PIN auth via SHA256(pin) without PBKDF2.  Generated with

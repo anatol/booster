@@ -183,14 +183,14 @@ func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, algo tpm2.Algorithm, e
 		return tpm2.HandleNull, nil, fmt.Errorf("unable to start session: %v", err)
 	}
 
-	pcrSelection := tpm2.PCRSelection{
-		Hash: algo,
-		PCRs: pcrs,
-	}
-
-	// An empty expected digest means that digest verification is skipped.
-	if err := tpm2.PolicyPCR(dev, sessHandle, nil, pcrSelection); err != nil {
-		return tpm2.HandleNull, nil, fmt.Errorf("unable to bind PCRs to auth policy: %v", err)
+	if len(pcrs) > 0 {
+		pcrSelection := tpm2.PCRSelection{
+			Hash: algo,
+			PCRs: pcrs,
+		}
+		if err := tpm2.PolicyPCR(dev, sessHandle, nil, pcrSelection); err != nil {
+			return tpm2.HandleNull, nil, fmt.Errorf("unable to bind PCRs to auth policy: %v", err)
+		}
 	}
 
 	if usePassword {

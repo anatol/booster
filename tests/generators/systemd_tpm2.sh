@@ -47,6 +47,10 @@ printf '%s' "${LUKS_PASSWORD}" > assets/cryptenroll.passphrase
 # it looks like edk2 extends PCR 0-7 so let's use some other PCR outside of this range.
 # Pass SWTPM env vars explicitly so systemd-cryptenroll uses our TCP swtpm rather
 # than any real hardware TPM that may be present on the host.
+# CRYPTENROLL_TPM2_PCRS controls PCR binding. Defaults to 10+13; set to empty
+# string to enroll without PCR binding (tests the no-PCR policy path).
+PCRS_FLAG="--tpm2-pcrs=${CRYPTENROLL_TPM2_PCRS:-10+13}"
+
 if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
   # cryptenroll.new-tpm2-pin is the credential name for setting a new PIN during enrollment
   printf '%s' "${CRYPTENROLL_TPM2_PIN}" > assets/cryptenroll.new-tpm2-pin
@@ -54,11 +58,11 @@ if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
   # Pass the full TCTI string directly so cryptenroll cannot fall back to /dev/tpm0.
   sudo env CREDENTIALS_DIRECTORY="$(pwd)/assets" \
     systemd-cryptenroll --tpm2-device="swtpm:host=localhost,port=2321" \
-    --tpm2-pcrs=10+13 --tpm2-with-pin=true "${lodev}"
+    "${PCRS_FLAG}" --tpm2-with-pin=true "${lodev}"
 else
   sudo env CREDENTIALS_DIRECTORY="$(pwd)/assets" \
     systemd-cryptenroll --tpm2-device="swtpm:host=localhost,port=2321" \
-    --tpm2-pcrs=10+13 "${lodev}"
+    "${PCRS_FLAG}" "${lodev}"
 fi
 
 sudo cryptsetup open --disable-external-tokens --type luks2 "${lodev}" "${LUKS_DEV_NAME}" <<< "${LUKS_PASSWORD}"
