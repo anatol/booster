@@ -30,7 +30,7 @@ func TestArchLinuxExt4(t *testing.T) {
 				kernelVersion: ver,
 				modules:       "e1000",
 				compression:   compression,
-				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				params:        []string{"-net", "user,hostfwd=tcp:127.0.0.1:10022-:22", "-net", "nic"},
 				disks:         []vmtest.QemuDisk{{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller}},
 				// If you need more debug logs append kernel args: "systemd.log_level=debug", "udev.log-priority=debug", "systemd.log_target=console", "log_buf_len=8M"
 				kernelArgs: []string{"root=" + ext4RootDevice, "rw"},
@@ -53,7 +53,7 @@ func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 				kernelVersion: ver,
 				modules:       "e1000",
 				compression:   compression,
-				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				params:        []string{"-net", "user,hostfwd=tcp:127.0.0.1:10022-:22", "-net", "nic"},
 				disk:          "assets/archlinux.btrfs.raw",
 				kernelArgs:    []string{"rd.luks.uuid=724151bb-84be-493c-8e32-53e123c8351b", "root=UUID=15700169-8c12-409d-8781-37afa98442a8", "rootflags=subvol=@", "rw", "nmi_watchdog=0", "kernel.unprivileged_userns_clone=0", "net.core.bpf_jit_harden=2", "apparmor=1", "lsm=lockdown,yama,apparmor", "systemd.unified_cgroup_hierarchy=1", "add_efi_memmap"},
 			},
@@ -126,7 +126,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 				kernelVersion: ver,
 				modules:       "e1000",
 				compression:   compression,
-				params:        []string{"-net", "user,hostfwd=tcp::10022-:22", "-net", "nic"},
+				params:        []string{"-net", "user,hostfwd=tcp:127.0.0.1:10022-:22", "-net", "nic"},
 				disks: []vmtest.QemuDisk{
 					{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller},
 					{Path: "assets/swap.raw", Format: "raw"},

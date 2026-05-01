@@ -142,7 +142,7 @@ func TestRemoteUnlock(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:          "assets/luks2.clevis.remote.img",
 		enableNetwork: true,
-		params:        []string{"-nic", "user,id=n1,hostfwd=tcp::34551-:34551"},
+		params:        []string{"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:34551-:34551"},
 		kernelArgs:    []string{"rd.luks.uuid=f2473f71-9a61-4b16-ae54-8f942b2daf22", "root=UUID=7acb3a9e-9b51-4aa2-9965-e41ae8467d8a"},
 	})
 	require.NoError(t, err)
