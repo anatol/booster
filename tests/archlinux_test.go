@@ -2,6 +2,7 @@ package tests
 
 import (
 	"testing"
+	"time"
 
 	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
@@ -76,7 +77,7 @@ func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := ssh.Dial("tcp", ":10022", config)
+	conn, err := dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -142,7 +143,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			}
 
-			conn, err := ssh.Dial("tcp", ":10022", config)
+			conn, err := dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
 			require.NoError(t, err)
 			defer conn.Close()
 
@@ -168,7 +169,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 
 			require.NoError(t, vm2.ConsoleExpect("PM: Image loading done"))
 
-			conn, err = ssh.Dial("tcp", ":10022", config)
+			conn, err = dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
 			require.NoError(t, err)
 			defer conn.Close()
 
