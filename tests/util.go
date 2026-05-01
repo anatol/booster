@@ -151,6 +151,25 @@ func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	return string(out)
 }
 
+func dialSSHWithRetry(addr string, config *ssh.ClientConfig, timeout time.Duration) (*ssh.Client, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+
+	for {
+		conn, err := ssh.Dial("tcp", addr, config)
+		if err == nil {
+			return conn, nil
+		}
+
+		lastErr = err
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for ssh at %s: %w", addr, lastErr)
+		}
+
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func shell(script string, env ...string) error {
 	sh := exec.Command("bash", "-o", "errexit", script)
 	sh.Env = append(os.Environ(), env...)
