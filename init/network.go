@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,8 @@ func rememberInitializedInterface(ifname string) {
 	initializedNetworkState.Lock()
 	defer initializedNetworkState.Unlock()
 
-	for _, known := range initializedNetworkState.ifnames {
-		if known == ifname {
-			return
-		}
+	if slices.Contains(initializedNetworkState.ifnames, ifname) {
+		return
 	}
 	initializedNetworkState.ifnames = append(initializedNetworkState.ifnames, ifname)
 }
@@ -41,7 +40,7 @@ func initializedInterfaces() []string {
 
 func parseDNSServers(raw string) ([]net.IP, error) {
 	var ips []net.IP
-	for _, server := range strings.Split(raw, ",") {
+	for server := range strings.SplitSeq(raw, ",") {
 		server = strings.TrimSpace(server)
 		if server == "" {
 			continue
