@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,4 +109,39 @@ func TestFromUnicode16(t *testing.T) {
 	check([]byte{0x31, 0x00}, binary.LittleEndian, "1")
 	check([]byte{0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x04, 0x0, 0x0, 0x0, 0x0}, binary.LittleEndian, "привет")
 	check([]byte{0x04, 0x3f, 0x04, 0x40, 0x04, 0x38, 0x04, 0x32, 0x04, 0x35, 0x04, 0x42, 0x0, 0x0}, binary.BigEndian, "привет")
+}
+
+func TestSafePathComponent(t *testing.T) {
+	require.Equal(t, "root", safePathComponent("root"))
+	require.Equal(t, "crypt_root-1", safePathComponent("crypt/root-1"))
+	require.Equal(t, ".._.", safePathComponent("../."))
+	require.Equal(t, "unnamed", safePathComponent(""))
+}
+
+func TestResolvePathInRootRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	_, err := resolvePathInRoot(root, "../escape")
+	require.Error(t, err)
+}
+
+func TestResolvePathInRootRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Symlink("/tmp", filepath.Join(root, "pivot")))
+
+	target := filepath.Join("/tmp", "booster-resolve-test-file")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
+	t.Cleanup(func() { _ = os.Remove(target) })
+
+	_, err := resolvePathInRoot(root, "pivot/booster-resolve-test-file")
+	require.Error(t, err)
+}
+
+func TestResolvePathInRootResolvesInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "keys"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "keys", "root.key"), []byte("secret"), 0o600))
+
+	path, err := resolvePathInRoot(root, "/keys/root.key")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(root, "keys", "root.key"), path)
 }

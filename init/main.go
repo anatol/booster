@@ -240,7 +240,7 @@ func probeHeaderOnDevice(m *luksMapping) (path string, cleanup func()) {
 	if hdrDev == nil || !hdrDev.isFs {
 		return "", noop
 	}
-	mp := "/run/booster/hdrdev-probe-" + m.name
+	mp := "/run/booster/hdrdev-probe-" + safePathComponent(m.name)
 	if err := os.MkdirAll(mp, 0o700); err != nil {
 		return "", noop
 	}
@@ -249,7 +249,13 @@ func probeHeaderOnDevice(m *luksMapping) (path string, cleanup func()) {
 		_ = os.Remove(mp)
 		return "", noop
 	}
-	return filepath.Join(mp, m.header), func() {
+	path, err := resolvePathInRoot(mp, m.header)
+	if err != nil {
+		_ = unix.Unmount(mp, unix.MNT_DETACH)
+		_ = os.Remove(mp)
+		return "", noop
+	}
+	return path, func() {
 		_ = unix.Unmount(mp, unix.MNT_DETACH)
 		_ = os.Remove(mp)
 	}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -173,4 +174,66 @@ func unwrapExitError(err error) error {
 		return fmt.Errorf("%v: %v", err, string(exitErr.Stderr))
 	}
 	return err
+}
+
+func safePathComponent(s string) string {
+	if s == "" {
+		return "unnamed"
+	}
+
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+
+	if b.Len() == 0 {
+		return "unnamed"
+	}
+	return b.String()
+}
+
+// resolvePathInRoot resolves inputPath as a path inside rootDir.
+// It prevents ".." traversal and symlink pivots that would escape rootDir.
+func resolvePathInRoot(rootDir, inputPath string) (string, error) {
+	if inputPath == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+
+	cleaned := filepath.Clean(inputPath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe relative path %q", inputPath)
+	}
+	if filepath.IsAbs(cleaned) {
+		cleaned = strings.TrimPrefix(cleaned, string(filepath.Separator))
+		if cleaned == "" {
+			return "", fmt.Errorf("path %q points to root directory", inputPath)
+		}
+	}
+
+	joined := filepath.Join(rootDir, cleaned)
+	resolved, err := filepath.EvalSymlinks(joined)
+	if err != nil {
+		return "", err
+	}
+
+	rel, err := filepath.Rel(rootDir, resolved)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes %s via symlink", inputPath, rootDir)
+	}
+
+	return resolved, nil
 }

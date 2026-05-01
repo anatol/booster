@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -518,7 +517,8 @@ func readKeyfile(path string, offset, size int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// acquireFile mounts ref read-only at mountDir and returns filepath.Join(mountDir, filePath)
+// acquireFile mounts ref read-only at mountDir and returns a resolved file path
+// constrained to mountDir.
 // along with a cleanup function. If ref is nil, filePath is returned as-is with a no-op cleanup.
 // This is the shared implementation used by both acquireHeader and acquireKeyfilePassword.
 func acquireFile(ref *deviceRef, mountDir, filePath string, timeout time.Duration) (string, func(), error) {
@@ -529,7 +529,12 @@ func acquireFile(ref *deviceRef, mountDir, filePath string, timeout time.Duratio
 	if err != nil {
 		return "", func() {}, err
 	}
-	return filepath.Join(mountDir, filePath), unmount, nil
+	resolved, err := resolvePathInRoot(mountDir, filePath)
+	if err != nil {
+		unmount()
+		return "", func() {}, err
+	}
+	return resolved, unmount, nil
 }
 
 // acquireKeyfilePassword resolves the keyfile path (mounting a separate device if needed),
@@ -539,7 +544,7 @@ func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
 	if timeout == 0 {
 		timeout = time.Duration(config.MountTimeout) * time.Second
 	}
-	path, cleanup, err := acquireFile(mapping.keyfileDeviceRef, "/run/booster/keydev-"+mapping.name, mapping.keyfile, timeout)
+	path, cleanup, err := acquireFile(mapping.keyfileDeviceRef, "/run/booster/keydev-"+safePathComponent(mapping.name), mapping.keyfile, timeout)
 	defer cleanup()
 	if err != nil {
 		return nil, fmt.Errorf("keyfile device for %s: %v", mapping.name, err)
@@ -692,7 +697,7 @@ func acquireHeader(m *luksMapping) (path string, cleanup func(), err error) {
 	timeout := time.Duration(config.MountTimeout) * time.Second
 	if m.headerDeviceRef != nil {
 		// Header is a file on a separate filesystem device — use shared acquireFile.
-		return acquireFile(m.headerDeviceRef, "/run/booster/hdrdev-"+m.name, m.header, timeout)
+		return acquireFile(m.headerDeviceRef, "/run/booster/hdrdev-"+safePathComponent(m.name), m.header, timeout)
 	}
 	if strings.HasPrefix(m.header, "/dev/") {
 		// Header is a raw block device — wait for it to appear.
