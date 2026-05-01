@@ -2,11 +2,13 @@ package main
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cavaliergopher/cpio"
 	"github.com/klauspost/compress/zstd"
@@ -16,6 +18,78 @@ import (
 var errStop = fmt.Errorf("Stop Processing")
 
 type processCpioEntryFn func(header *cpio.Header, reader *cpio.Reader) error
+
+func resolveUnpackPath(baseDir, archivePath string) (string, error) {
+	cleaned := filepath.Clean(archivePath)
+	if cleaned == "." || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe archive path %q", archivePath)
+	}
+
+	out := filepath.Join(baseDir, cleaned)
+	rel, err := filepath.Rel(baseDir, out)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe archive path %q", archivePath)
+	}
+
+	return out, nil
+}
+
+func ensureDirNoSymlink(baseDir, targetDir string) error {
+	rel, err := filepath.Rel(baseDir, targetDir)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path escapes unpack root: %s", targetDir)
+	}
+
+	current := baseDir
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+
+		info, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				if err := os.Mkdir(current, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink in unpack path: %s", current)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path component is not a directory: %s", current)
+		}
+	}
+
+	return nil
+}
+
+func ensurePathNotSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write via symlink path: %s", path)
+	}
+	return nil
+}
 
 func processImage(file string, fn processCpioEntryFn) error {
 	input, err := os.Open(file)
@@ -88,16 +162,25 @@ func processImage(file string, fn processCpioEntryFn) error {
 }
 
 func runUnpack() error {
-	dir := opts.UnpackCommand.Args.OutputDir
+	dir, err := filepath.Abs(opts.UnpackCommand.Args.OutputDir)
+	if err != nil {
+		return err
+	}
 	fn := func(hdr *cpio.Header, r *cpio.Reader) error {
-		out := filepath.Join(dir, hdr.Name)
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		out, err := resolveUnpackPath(dir, hdr.Name)
+		if err != nil {
+			return err
+		}
+		if err := ensureDirNoSymlink(dir, filepath.Dir(out)); err != nil {
 			return err
 		}
 		m := hdr.Mode & 0o770000
 		switch m {
 		case cpio.TypeDir:
-			if err := os.Mkdir(out, 0o755); err != nil {
+			if err := ensurePathNotSymlink(out); err != nil {
+				return err
+			}
+			if err := os.Mkdir(out, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 				return err
 			}
 		case cpio.TypeSymlink:
@@ -112,12 +195,18 @@ func runUnpack() error {
 			fallthrough
 		case cpio.TypeFifo:
 			// for device files create an empty regular file
+			if err := ensurePathNotSymlink(out); err != nil {
+				return err
+			}
 			f, err := os.Create(out)
 			if err != nil {
 				return err
 			}
 			f.Close()
 		case cpio.TypeReg:
+			if err := ensurePathNotSymlink(out); err != nil {
+				return err
+			}
 			fout, err := os.Create(out)
 			if err != nil {
 				return err
