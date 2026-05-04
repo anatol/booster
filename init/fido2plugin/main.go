@@ -151,3 +151,18 @@ func (f *fido2Impl) IsFido2WrongDevice(err error) bool {
 func (f *fido2Impl) IsFido2PinRequired(err error) bool {
 	return errors.Is(err, libfido2.ErrPinRequired)
 }
+
+// IsFido2TouchTimeout reports whether the user did not touch the FIDO2 device
+// in time. libfido2 has two distinct codes for this — device-side timeout vs
+// host-side wait expiry — and we treat both the same:
+//   - FIDO_ERR_ACTION_TIMEOUT      (0x3a / 58) → ErrActionTimeout (mapped sentinel)
+//   - FIDO_ERR_USER_ACTION_TIMEOUT (0x2f / 47) → unmapped, generic error string
+func (f *fido2Impl) IsFido2TouchTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, libfido2.ErrActionTimeout) {
+		return true
+	}
+	return strings.Contains(err.Error(), "libfido2 error 47")
+}

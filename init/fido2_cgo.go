@@ -87,3 +87,11 @@ func isFido2PinRequiredError(err error) bool {
 	}
 	return fido2plugin.IsFido2PinRequired(err)
 }
+
+func isFido2TouchTimeoutError(err error) bool {
+	loadFido2Plugin()
+	if fido2plugin == nil {
+		return false
+	}
+	return fido2plugin.IsFido2TouchTimeout(err)
+}
