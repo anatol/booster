@@ -79,3 +79,11 @@ func isFido2WrongDeviceError(err error) bool {
 	}
 	return fido2plugin.IsFido2WrongDevice(err)
 }
+
+func isFido2PinRequiredError(err error) bool {
+	loadFido2Plugin()
+	if fido2plugin == nil {
+		return false
+	}
+	return fido2plugin.IsFido2PinRequired(err)
+}

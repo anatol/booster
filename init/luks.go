@@ -225,6 +225,9 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if err != nil && isFido2WrongDeviceError(err) {
 		return nil, errFido2WrongDevice
 	}
+	if err != nil && isFido2PinRequiredError(err) {
+		return nil, errFido2PinNeeded
+	}
 	if err == nil {
 		statusMessage("")
 	}
@@ -242,6 +245,7 @@ var fido2Mu sync.Mutex
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
 var errFido2WrongDevice = errors.New("FIDO2 device does not have our credential")
+var errFido2PinNeeded = errors.New("FIDO2 device requires PIN we did not supply")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
@@ -295,26 +299,39 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 		}
 		seenHidrawDevices[devName] = true
 
+		// pinRequired starts from credential metadata but may be flipped on if
+		// the device returns FIDO_ERR_PIN_REQUIRED — i.e. metadata said no PIN
+		// but the token has had one set since enrollment (firmware update,
+		// policy change). On the flip we re-prompt without consuming an attempt.
+		pinRequired := node.PinRequired
 		maxAttempts := 1
-		if node.PinRequired {
+		if pinRequired {
 			maxAttempts = 3
 		}
 		var password []byte
 		var err error
 		pinExhausted := false
 		promptPrefix := ""
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
+		attempt := 0
+		for attempt < maxAttempts {
+			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
 			if err == nil {
 				break
+			}
+			if errors.Is(err, errFido2PinNeeded) && !pinRequired {
+				pinRequired = true
+				maxAttempts = 3
+				promptPrefix = "FIDO2 token requires PIN — "
+				continue
 			}
 			if !errors.Is(err, errFido2PinInvalid) {
 				break
 			}
-			if attempt < maxAttempts-1 {
-				promptPrefix = "FIDO2 PIN incorrect — "
-			} else {
+			attempt++
+			if attempt >= maxAttempts {
 				pinExhausted = true
+			} else {
+				promptPrefix = "FIDO2 PIN incorrect — "
 			}
 		}
 
