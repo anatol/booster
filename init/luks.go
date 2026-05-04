@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -769,6 +770,11 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	if err != nil {
 		return err
 	}
+
+	// Sort ascending by token ID. d.Tokens() iterates a Go map so its return
+	// order is randomised every boot; without the sort the user can't predict
+	// which token (TPM2 vs FIDO2 vs clevis) tries to unlock first.
+	sort.Slice(tokens, func(i, j int) bool { return tokens[i].ID < tokens[j].ID })
 
 	slotsWithTokens := make(map[int]bool)
 	for _, t := range tokens {
