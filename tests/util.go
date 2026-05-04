@@ -64,13 +64,17 @@ func startSwtpm() (*os.Process, []string, error) {
 		return nil, nil, err
 	}
 
-	_ = os.Remove("assets/tpm2/.lock")
-	_ = os.Remove("assets/swtpm-sock") // sometimes process crashes and leaves this file
-	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
+	stateDir, err := os.MkdirTemp("", "booster-swtpm-")
+	if err != nil {
+		return nil, nil, err
+	}
+	statePath := filepath.Join(stateDir, "tpm2-00.permall")
+	sockPath := filepath.Join(stateDir, "swtpm-sock")
+	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", statePath); err != nil {
 		return nil, nil, err
 	}
 
-	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
+	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir="+stateDir, "--tpm2", "--ctrl", "type=unixio,path="+sockPath, "--flags", "not-need-init")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -80,11 +84,11 @@ func startSwtpm() (*os.Process, []string, error) {
 	}
 
 	// wait till swtpm really starts
-	if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
+	if err := waitForFile(sockPath, 5*time.Second); err != nil {
 		return nil, nil, err
 	}
 
-	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=" + sockPath, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {
@@ -398,11 +402,15 @@ func isOverlayCandidate(path string) bool {
 
 func createQcow2Overlay(workDir string, idx int, backingPath, backingFormat string) (string, error) {
 	overlayPath := filepath.Join(workDir, fmt.Sprintf("overlay-%03d.qcow2", idx))
+	absBackingPath, err := filepath.Abs(backingPath)
+	if err != nil {
+		return "", fmt.Errorf("unable to resolve backing path %s: %w", backingPath, err)
+	}
 	format := backingFormat
 	if format == "" {
 		format = "raw"
 	}
-	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", format, "-b", backingPath, overlayPath)
+	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", format, "-b", absBackingPath, overlayPath)
 	if testing.Verbose() {
 		log.Printf("Create qemu overlay: %s", cmd.String())
 		cmd.Stdout = os.Stdout
