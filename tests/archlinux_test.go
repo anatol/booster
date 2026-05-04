@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,6 +64,10 @@ func TestArchLinuxBtrfSubvolumes(t *testing.T) {
 }
 
 func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
+	sshPort, err := getFreeTCPPort()
+	require.NoError(t, err)
+	opts.params = []string{"-net", fmt.Sprintf("user,hostfwd=tcp:127.0.0.1:%d-:22", sshPort), "-net", "nic"}
+
 	vm, err := buildVmInstance(t, opts)
 	require.NoError(t, err)
 	defer vm.Shutdown()
@@ -77,7 +82,7 @@ func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
+	conn, err := dialSSHWithRetry(fmt.Sprintf("127.0.0.1:%d", sshPort), config, 120*time.Second)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -126,13 +131,15 @@ func TestArchLinuxHibernate(t *testing.T) {
 				kernelVersion: ver,
 				modules:       "e1000",
 				compression:   compression,
-				params:        []string{"-net", "user,hostfwd=tcp:127.0.0.1:10022-:22", "-net", "nic"},
 				disks: []vmtest.QemuDisk{
 					{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller},
 					{Path: "assets/swap.raw", Format: "raw"},
 				},
 				kernelArgs: []string{"root=" + ext4RootDevice, "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f", "rw"},
 			}
+			sshPort, err := getFreeTCPPort()
+			require.NoError(t, err)
+			opts.params = []string{"-net", fmt.Sprintf("user,hostfwd=tcp:127.0.0.1:%d-:22", sshPort), "-net", "nic"}
 
 			vm, err := buildVmInstance(t, opts)
 			require.NoError(t, err)
@@ -143,7 +150,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			}
 
-			conn, err := dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
+			conn, err := dialSSHWithRetry(fmt.Sprintf("127.0.0.1:%d", sshPort), config, 120*time.Second)
 			require.NoError(t, err)
 			defer conn.Close()
 
@@ -163,13 +170,16 @@ func TestArchLinuxHibernate(t *testing.T) {
 			require.NoError(t, vm.ConsoleExpect("PM: Image saving done"))
 
 			// wakeing it up
+			sshPort2, err := getFreeTCPPort()
+			require.NoError(t, err)
+			opts.params = []string{"-net", fmt.Sprintf("user,hostfwd=tcp:127.0.0.1:%d-:22", sshPort2), "-net", "nic"}
 			vm2, err := buildVmInstance(t, opts)
 			require.NoError(t, err)
 			defer vm2.Shutdown()
 
 			require.NoError(t, vm2.ConsoleExpect("PM: Image loading done"))
 
-			conn, err = dialSSHWithRetry("127.0.0.1:10022", config, 60*time.Second)
+			conn, err = dialSSHWithRetry(fmt.Sprintf("127.0.0.1:%d", sshPort2), config, 120*time.Second)
 			require.NoError(t, err)
 			defer conn.Close()
 
