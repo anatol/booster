@@ -100,8 +100,21 @@ func (f *fido2Impl) Fido2Assertion(devPath string, credID, saltBytes []byte, rel
 	return []byte(base64.StdEncoding.EncodeToString(res.assertion.HMACSecret)), nil
 }
 
+// IsFido2PinInvalid covers the user-typed-the-wrong-PIN family of CTAP errors.
+// All three should consume a PIN attempt and re-prompt; without 51 and 63 the
+// caller treats them as opaque errors and never retries the PIN.
+//   - FIDO_ERR_PIN_INVALID      (0x31 / 49) → ErrPinInvalid (mapped sentinel)
+//   - FIDO_ERR_PIN_AUTH_INVALID (0x33 / 51) → unmapped, generic error string
+//   - FIDO_ERR_UV_INVALID       (0x3f / 63) → unmapped, generic error string
 func (f *fido2Impl) IsFido2PinInvalid(err error) bool {
-	return errors.Is(err, libfido2.ErrPinInvalid)
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, libfido2.ErrPinInvalid) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "libfido2 error 51") || strings.Contains(msg, "libfido2 error 63")
 }
 
 func (f *fido2Impl) IsFido2PinAuthBlocked(err error) bool {
