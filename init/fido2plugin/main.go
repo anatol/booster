@@ -129,3 +129,12 @@ func (f *fido2Impl) IsFido2WrongDevice(err error) bool {
 	}
 	return errors.Is(err, libfido2.ErrNoCredentials) || errors.Is(err, libfido2.ErrInvalidCredential)
 }
+
+// IsFido2PinRequired reports whether the device says it requires a PIN that
+// we did not supply. Hits when credential metadata says no PIN is required
+// but the token has had one set since enrollment (firmware update, policy
+// change). Caller should re-prompt with PIN entry enabled.
+//   - FIDO_ERR_PIN_REQUIRED (0x36 / 54) → ErrPinRequired
+func (f *fido2Impl) IsFido2PinRequired(err error) bool {
+	return errors.Is(err, libfido2.ErrPinRequired)
+}

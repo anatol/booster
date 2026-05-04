@@ -11,4 +11,5 @@ type Fido2Plugin interface {
 	IsFido2PinAuthBlocked(err error) bool
 	IsFido2PinBlocked(err error) bool
 	IsFido2WrongDevice(err error) bool
+	IsFido2PinRequired(err error) bool
 }
