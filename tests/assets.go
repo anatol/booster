@@ -47,16 +47,16 @@ var assetGenerators = map[string]assetGenerator{
 		"HDRDEV_UUID=e2d8f1a3-7b4c-4e9d-a1b2-3c4d5e6f7a8b",
 		"HEADER_INPUT=assets/luks2.detached_header.hdr",
 	}},
-	"gpt.img":                   {"gpt.sh", []string{"FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}},
-	"gpt_4ksector.img":          {"gpt_4ksector.sh", nil},
-	"lvm.img":                   {"lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
-	"mdraid_raid1.img":          {"mdraid_raid1.sh", []string{"FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}},
-	"mdraid_raid5.img":          {"mdraid_raid5.sh", []string{"FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}},
-	"btrfs_raid0.img":           {"btrfs_raid0.sh", []string{"FS_UUID=5eaa0c1c-e1dc-4be7-9b03-9f1ed5a87289"}},
-	"archlinux.ext4.raw":        {"archlinux_ext4.sh", nil},
-	"archlinux.btrfs.raw":       {"archlinux_btrfs.sh", []string{"LUKS_PASSWORD=hello"}},
-	"voidlinux.img":             {"voidlinux.sh", nil},
-	"alpinelinux.img":           {"alpinelinux.sh", nil},
+	"gpt.img":             {"gpt.sh", []string{"FS_UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1", "FS_LABEL=newpart"}},
+	"gpt_4ksector.img":    {"gpt_4ksector.sh", nil},
+	"lvm.img":             {"lvm.sh", []string{"FS_UUID=74c9e30c-506f-4106-9f61-a608466ef29c", "FS_LABEL=lvmr00t"}},
+	"mdraid_raid1.img":    {"mdraid_raid1.sh", []string{"FS_UUID=98b1a905-3c72-42f0-957a-6c23b303b1fd", "FS_LABEL=boosmdraid"}},
+	"mdraid_raid5.img":    {"mdraid_raid5.sh", []string{"FS_UUID=e62c7dc0-5728-4571-b475-7745de2eef1e", "FS_LABEL=boosmdraid"}},
+	"btrfs_raid0.img":     {"btrfs_raid0.sh", []string{"FS_UUID=5eaa0c1c-e1dc-4be7-9b03-9f1ed5a87289"}},
+	"archlinux.ext4.raw":  {"archlinux_ext4.sh", nil},
+	"archlinux.btrfs.raw": {"archlinux_btrfs.sh", []string{"LUKS_PASSWORD=hello"}},
+	"voidlinux.img":       {"voidlinux.sh", nil},
+	"alpinelinux.img":     {"alpinelinux.sh", nil},
 	// systemd-fido2-nodev.img: LUKS2 with a fake systemd-fido2 token injected
 	// directly into the header (random credential — never matches a real device).
 	// Used to test the token-timeout fallback path without physical FIDO2 hardware.
@@ -65,8 +65,8 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=0cb4665f-65a0-4acc-9710-05163af16f19",
 		"LUKS_PASSWORD=567",
 	}},
-	"systemd-tpm2.img":              {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
-	"systemd-tpm2-withpin.img":      {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	"systemd-tpm2.img":         {"systemd_tpm2.sh", []string{"LUKS_UUID=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "FS_UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "LUKS_PASSWORD=567"}},
+	"systemd-tpm2-withpin.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=8bb97618-7ef4-4c93-b4f7-f2cb17cf7da1", "FS_UUID=26dbbe17-9af9-4322-bb5f-c1d74a40e618", "LUKS_PASSWORD=9999", "CRYPTENROLL_TPM2_PIN=foo654"}},
 	// systemd-tpm2-pin-passphrase.img: LUKS2 with both a TPM2+PIN token and a
 	// passphrase slot.  Used to test empty-PIN skip (falls through to passphrase)
 	// and PIN exhaustion (3 wrong tries → passphrase fallback).
@@ -76,13 +76,13 @@ var assetGenerators = map[string]assetGenerator{
 	// is applied (no PolicyPCR call).  Regression test for the bug where an empty
 	// PCR selection still mutated the policy digest, causing auth failure.
 	"systemd-tpm2-nopcr-pin.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=d9ef7bf3-b4f8-4271-9f3c-df63d457fcc6", "FS_UUID=6abcf123-4182-452b-9c87-a769dc344e3b", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654", "CRYPTENROLL_TPM2_PCRS="}},
-	"systemd-tpm2-srk.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
+	"systemd-tpm2-srk.img":       {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
 	// systemd-tpm2-legacy-pin.img: v252-254 format token — tpm2_srk present but
 	// no tpm2_salt, PIN auth via SHA256(pin) without PBKDF2.  Generated with
 	// raw tpm2-tools rather than systemd-cryptenroll to be independent of the
 	// installed systemd version.  Requires tpm2-tools; test skips if absent.
-	"systemd-tpm2-legacy-pin.img":   {"systemd_tpm2_legacy_pin.sh", []string{"LUKS_UUID=1e8a6049-18a7-48df-a4f6-edc80650e19f", "FS_UUID=b0d4b4c2-cef2-43b5-a063-e3379a49f79c", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654"}},
-	"systemd-recovery.img":      {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
+	"systemd-tpm2-legacy-pin.img": {"systemd_tpm2_legacy_pin.sh", []string{"LUKS_UUID=1e8a6049-18a7-48df-a4f6-edc80650e19f", "FS_UUID=b0d4b4c2-cef2-43b5-a063-e3379a49f79c", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654"}},
+	"systemd-recovery.img":        {"systemd_recovery.sh", []string{"LUKS_UUID=62020168-58b9-4095-a3d0-176403353d20", "FS_UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24", "LUKS_PASSWORD=2211"}},
 	// luks2.shared_pass.img: GPT disk with two LUKS2 partitions sharing the same
 	// passphrase.  Partition 1 has no inner filesystem; partition 2 has ext4.
 	// Used by TestPassphraseCache to verify single-prompt unlock (issue #306).
@@ -101,9 +101,9 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=f9bd37eb-607c-4123-ef51-5c79bdf13579",
 		"LUKS_PASSWORD=1234",
 	}},
-	"swap.raw":                  {"swap.sh", nil},
-	"zfs.img":                   {"zfs.sh", nil},
-	"zfs_encrypted.img":         {"zfs.sh", []string{"ZFS_PASSPHRASE=encrypted"}},
+	"swap.raw":          {"swap.sh", nil},
+	"zfs.img":           {"zfs.sh", nil},
+	"zfs_encrypted.img": {"zfs.sh", []string{"ZFS_PASSPHRASE=encrypted"}},
 
 	// non-images
 	"tpm2/tpm2-00.permall.pristine": {"swtpm.sh", nil},

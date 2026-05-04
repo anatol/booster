@@ -120,7 +120,7 @@ func initPlymouth() {
 //   - plymouth.debug                                 → live output to /dev/tty1
 //   - plymouth.debug=stream:/run/plymouth/debug.log  → live output to file
 //   - plymouth.debug=file:/run/plymouth/debug.log    → buffer dumped to file at exit
-//                                                      (live output still goes to /dev/tty1)
+//     (live output still goes to /dev/tty1)
 func getPlymouthdArgs() []string {
 	return []string{
 		"--mode=boot",

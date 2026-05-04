@@ -13,7 +13,7 @@ import (
 func iesysBytes(handle uint32) []byte {
 	b := make([]byte, 10)
 	binary.BigEndian.PutUint32(b[0:4], 0x69657379) // magic
-	binary.BigEndian.PutUint16(b[4:6], 1)           // version
+	binary.BigEndian.PutUint16(b[4:6], 1)          // version
 	binary.BigEndian.PutUint32(b[6:10], handle)
 	return b
 }

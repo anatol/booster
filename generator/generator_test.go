@@ -626,9 +626,9 @@ func TestDeterministicImage(t *testing.T) {
 
 	aliases := []alias{
 		{"crypto_aes", "aes"},
-		{"crypto_aes", "cbc"},       // same pattern, two modules
+		{"crypto_aes", "cbc"}, // same pattern, two modules
 		{"crypto_chacha20", "chacha20"},
-		{"crypto_chacha20", "cbc"},  // same pattern, two modules
+		{"crypto_chacha20", "cbc"}, // same pattern, two modules
 		{"fs_ext4", "ext4"},
 		{"fs_btrfs", "btrfs"},
 	}

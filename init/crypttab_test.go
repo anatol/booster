@@ -315,10 +315,10 @@ func TestMergeCrypttabOptionsDstWins(t *testing.T) {
 	dst := &luksMapping{keyfile: "/cmdline/key", keySlot: 2, tries: 5, header: "/cmdline/hdr"}
 	src := &luksMapping{keyfile: "/crypttab/key", keySlot: 1, tries: 9, header: "/crypttab/hdr"}
 	mergeCrypttabOptions(dst, src)
-	require.Equal(t, "/cmdline/key", dst.keyfile)  // cmdline keyfile wins
-	require.Equal(t, 2, dst.keySlot)               // cmdline key-slot wins
-	require.Equal(t, 5, dst.tries)                 // cmdline tries wins
-	require.Equal(t, "/cmdline/hdr", dst.header)   // cmdline header wins
+	require.Equal(t, "/cmdline/key", dst.keyfile) // cmdline keyfile wins
+	require.Equal(t, 2, dst.keySlot)              // cmdline key-slot wins
+	require.Equal(t, 5, dst.tries)                // cmdline tries wins
+	require.Equal(t, "/cmdline/hdr", dst.header)  // cmdline header wins
 }
 
 // rd.luks.name= on the kernel cmdline creates a mapping before crypttab is parsed.

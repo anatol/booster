@@ -351,13 +351,13 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 
 func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
-		Blob       string `json:"tpm2-blob"`        // base64
+		Blob       string `json:"tpm2-blob"` // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
 		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
 		PolicyHash string `json:"tpm2-policy-hash"` // hex
 		Pin        bool   `json:"tpm2-pin"`
-		Salt       string `json:"tpm2_salt"`         // base64 random salt; systemd v255+ PIN tokens
-		Srk        string `json:"tpm2_srk"`          // base64 IESYS bytes; systemd v252+ tokens
+		Salt       string `json:"tpm2_salt"` // base64 random salt; systemd v255+ PIN tokens
+		Srk        string `json:"tpm2_srk"`  // base64 IESYS bytes; systemd v252+ tokens
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err

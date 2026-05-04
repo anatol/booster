@@ -234,4 +234,3 @@ func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
-

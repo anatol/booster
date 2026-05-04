@@ -334,7 +334,7 @@ type Opts struct {
 	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
-	mountTimeout         int // in seconds
+	mountTimeout         int           // in seconds
 	vmTimeout            time.Duration // QEMU VM timeout; 0 = use default (40s)
 	appendAllModAliases  bool
 	extraFiles           string
