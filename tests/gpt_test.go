@@ -8,6 +8,7 @@ import (
 )
 
 func TestGptPath(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/sda3"},
@@ -19,6 +20,7 @@ func TestGptPath(t *testing.T) {
 }
 
 func TestGptUUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=UUID=e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
@@ -30,6 +32,7 @@ func TestGptUUID(t *testing.T) {
 }
 
 func TestGptLABEL(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=LABEL=newpart"},
@@ -41,6 +44,7 @@ func TestGptLABEL(t *testing.T) {
 }
 
 func TestGptPARTUUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
@@ -52,6 +56,7 @@ func TestGptPARTUUID(t *testing.T) {
 }
 
 func TestGptPARTLABEL(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTLABEL=раздел3"},
@@ -63,6 +68,7 @@ func TestGptPARTLABEL(t *testing.T) {
 }
 
 func TestGptPARTNROFF(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=PARTUUID=78073a8b-bdf6-48cc-918e-edb926b25f64/PARTNROFF=2"},
@@ -74,6 +80,7 @@ func TestGptPARTNROFF(t *testing.T) {
 }
 
 func TestGptByUUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-uuid/e5404205-ac6a-4e94-bb3b-14433d0af7d1"},
@@ -85,6 +92,7 @@ func TestGptByUUID(t *testing.T) {
 }
 
 func TestGptByLABEL(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-label/newpart"},
@@ -96,6 +104,7 @@ func TestGptByLABEL(t *testing.T) {
 }
 
 func TestGptByPARTUUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partuuid/1b8e9701-59a6-49f4-8c31-b97c99cd52cf"},
@@ -107,6 +116,7 @@ func TestGptByPARTUUID(t *testing.T) {
 }
 
 func TestGptByPARTLABEL(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=/dev/disk/by-partlabel/раздел3"},
@@ -118,6 +128,7 @@ func TestGptByPARTLABEL(t *testing.T) {
 }
 
 func TestGptWwid(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=WWID=scsi-QEMU_QEMU_HARDDISK_-0:0-part3"},
@@ -129,6 +140,7 @@ func TestGptWwid(t *testing.T) {
 }
 
 func TestGptHwpath(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/gpt.img",
 		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-2:0:0:0-part3"},
@@ -140,6 +152,7 @@ func TestGptHwpath(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryExt4(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		containsESP: true,
 		kernelArgs:  []string{"console=ttyS0,115200", "ignore_loglevel"},
@@ -152,6 +165,7 @@ func TestGptRootAutodiscoveryExt4(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryLUKS(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"ENABLE_LUKS=1"},
@@ -166,6 +180,7 @@ func TestGptRootAutodiscoveryLUKS(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryNoAuto(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=63"},
@@ -180,6 +195,7 @@ func TestGptRootAutodiscoveryNoAuto(t *testing.T) {
 }
 
 func TestGptRootAutodiscoveryReadOnly(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		containsESP:   true,
 		scriptEnvvars: []string{"GPT_ATTR=60"},
@@ -193,6 +209,7 @@ func TestGptRootAutodiscoveryReadOnly(t *testing.T) {
 }
 
 func TestGpt4kSector(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt_4ksector.img", Format: "raw", DeviceParams: []string{"physical_block_size=4096", "logical_block_size=4096"}}},
 		kernelArgs: []string{"root=PARTUUID=d4699213-6e73-41d5-ad81-3daf5dfcecfb"},

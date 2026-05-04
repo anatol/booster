@@ -7,6 +7,7 @@ import (
 )
 
 func TestLVMPath(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",
@@ -19,6 +20,7 @@ func TestLVMPath(t *testing.T) {
 }
 
 func TestLVMUUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		enableLVM:  true,
 		disk:       "assets/lvm.img",

@@ -23,6 +23,7 @@ import (
 // A fresh LUKS image is created for each run enrolling the connected device,
 // so the test works for any FIDO2 device without pre-built assets.
 func TestCrypttabFido2(t *testing.T) {
+	t.Parallel()
 	pin := os.Getenv("BOOSTER_TEST_FIDO2_PIN")
 	if pin == "" {
 		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
@@ -82,6 +83,7 @@ func TestCrypttabFido2(t *testing.T) {
 // random credential — it will never match any real device, so no hardware is
 // required.  The default token-timeout of 30s applies.
 func TestCrypttabFido2NoDevice(t *testing.T) {
+	t.Parallel()
 	if !fileExists(binariesDir + "/fido2plugin.so") {
 		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
 	}
@@ -117,6 +119,7 @@ func TestCrypttabFido2NoDevice(t *testing.T) {
 // recoverSystemdFido2Password. Without the ctx-aware primitives that log can
 // never fire and the goroutine leaks.
 func TestCtxAwareFido2CancelOnFallback(t *testing.T) {
+	t.Parallel()
 	if !fileExists(binariesDir + "/fido2plugin.so") {
 		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
 	}
@@ -159,6 +162,7 @@ func TestCtxAwareFido2CancelOnFallback(t *testing.T) {
 // required since cryptsetup doesn't need root for token JSON metadata mutation
 // on a user-owned LUKS file).
 func TestCtxAwareFido2CancelMultiToken(t *testing.T) {
+	t.Parallel()
 	if !fileExists(binariesDir + "/fido2plugin.so") {
 		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
 	}
