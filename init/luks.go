@@ -570,6 +570,24 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, done <-chan struct{}, d l
 	requestKeyboardPassword(volumes, done, d, checkSlots, mapping.name, mapping.tries)
 }
 
+// tryCachedPassphrases snapshots passphraseCache and tries each entry against
+// checkSlots. Returns true if any unlocked the volume — caller should return
+// without prompting. The snapshot avoids holding passphraseCache.Lock across
+// the (potentially slow) UnsealVolume calls.
+func tryCachedPassphrases(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int) bool {
+	passphraseCache.Lock()
+	cached := make([][]byte, len(passphraseCache.passwords))
+	copy(cached, passphraseCache.passwords)
+	passphraseCache.Unlock()
+
+	for _, pw := range cached {
+		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
+			return true
+		}
+	}
+	return false
+}
+
 func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
@@ -585,15 +603,8 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 
 	// Fast path: try passwords that already unlocked another volume this boot
 	// (e.g. two LUKS members of a btrfs RAID1 with the same passphrase).
-	passphraseCache.Lock()
-	cached := make([][]byte, len(passphraseCache.passwords))
-	copy(cached, passphraseCache.passwords)
-	passphraseCache.Unlock()
-
-	for _, pw := range cached {
-		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
-			return
-		}
+	if tryCachedPassphrases(volumes, done, d, checkSlots) {
+		return
 	}
 
 	// Serialize prompts across concurrent luksOpen calls. A second device whose
@@ -610,15 +621,8 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 	default:
 	}
 
-	passphraseCache.Lock()
-	cached = make([][]byte, len(passphraseCache.passwords))
-	copy(cached, passphraseCache.passwords)
-	passphraseCache.Unlock()
-
-	for _, pw := range cached {
-		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
-			return
-		}
+	if tryCachedPassphrases(volumes, done, d, checkSlots) {
+		return
 	}
 
 	attempts := 0
