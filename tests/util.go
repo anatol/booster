@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -384,6 +385,78 @@ type Opts struct {
 	enableFido2          bool
 }
 
+var qemuDriveFileRe = regexp.MustCompile(`\bfile=([^,]+)`)
+
+func isOverlayCandidate(path string) bool {
+	clean := filepath.Clean(path)
+	if !strings.HasPrefix(clean, "assets/") {
+		return false
+	}
+	ext := filepath.Ext(clean)
+	return ext == ".img" || ext == ".raw"
+}
+
+func createQcow2Overlay(workDir string, idx int, backingPath, backingFormat string) (string, error) {
+	overlayPath := filepath.Join(workDir, fmt.Sprintf("overlay-%03d.qcow2", idx))
+	format := backingFormat
+	if format == "" {
+		format = "raw"
+	}
+	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", format, "-b", backingPath, overlayPath)
+	if testing.Verbose() {
+		log.Printf("Create qemu overlay: %s", cmd.String())
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to create overlay %s: %v", overlayPath, unwrapExitError(err))
+	}
+	return overlayPath, nil
+}
+
+func applyWritableOverlays(t *testing.T, workDir string, disks []vmtest.QemuDisk, params []string) ([]vmtest.QemuDisk, []string) {
+	t.Helper()
+
+	overlays := make(map[string]string)
+	nextOverlay := 0
+	getOverlay := func(path, format string) string {
+		if !isOverlayCandidate(path) {
+			return path
+		}
+		if overlay, ok := overlays[path]; ok {
+			return overlay
+		}
+		overlay, err := createQcow2Overlay(workDir, nextOverlay, path, format)
+		require.NoError(t, err)
+		nextOverlay++
+		overlays[path] = overlay
+		return overlay
+	}
+
+	overlaidDisks := make([]vmtest.QemuDisk, len(disks))
+	for i, d := range disks {
+		overlaidDisks[i] = d
+		overlaidDisks[i].Path = getOverlay(d.Path, d.Format)
+	}
+
+	overlaidParams := make([]string, len(params))
+	copy(overlaidParams, params)
+	for i, param := range overlaidParams {
+		m := qemuDriveFileRe.FindStringSubmatch(param)
+		if len(m) < 2 {
+			continue
+		}
+		path := m[1]
+		if !isOverlayCandidate(path) {
+			continue
+		}
+		overlay := getOverlay(path, "raw")
+		overlaidParams[i] = strings.Replace(param, "file="+path, "file="+overlay, 1)
+	}
+
+	return overlaidDisks, overlaidParams
+}
+
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
 	require.False(t, opts.asIso && opts.containsESP)
@@ -414,6 +487,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	}
 
 	workDir := t.TempDir()
+	disks, overlaidParams := applyWritableOverlays(t, workDir, disks, opts.params)
 	initRamfs, err := generateInitRamfs(workDir, opts)
 	require.NoError(t, err)
 
@@ -428,7 +502,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	// to enable network dump
 	// params = append(params, "-object", "filter-dump,id=f1,netdev=n1,file=network.dat")
 
-	params = append(params, opts.params...)
+	params = append(params, overlaidParams...)
 
 	// provide host's directory as a guest block device
 	// disks = append(disks, vmtest.QemuDisk{Path: fmt.Sprintf("fat:ro:%s,read-only=on", filepath.Join(kernelsDir, opts.kernelVersion)), Format: "raw"})
