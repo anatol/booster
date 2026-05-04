@@ -8,6 +8,7 @@ import (
 )
 
 func TestAlpineLinux(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, checkAsset("assets/alpinelinux.img")) // it will generate vmlinuz-version needed later
 
 	alpinelinuxKernelVersion, err := os.ReadFile("assets/alpinelinux/vmlinuz-version")

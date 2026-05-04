@@ -8,6 +8,7 @@ import (
 
 // Arch Linux zfs-dpkg package often lags behind 'linux'. Use older 'linux-lts' for ZFS tests.
 func TestZfs(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		enableZfs:     true,
 		zfsCachePath:  "assets/zfs/zpool.cache",
@@ -22,6 +23,7 @@ func TestZfs(t *testing.T) {
 }
 
 func TestUnlockEncryptedZfs(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		enableZfs:     true,
 		zfsCachePath:  "assets/zfs/zpool.cache",

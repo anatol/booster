@@ -8,6 +8,7 @@ import (
 )
 
 func TestVoidLinux(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, checkAsset("assets/voidlinux.img")) // it will generate vmlinuz-version needed later
 
 	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")

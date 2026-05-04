@@ -14,6 +14,7 @@ import (
 // TestCrypttabPassphrase verifies that a crypttab entry drives LUKS unlock
 // without any rd.luks.* kernel parameters.
 func TestCrypttabPassphrase(t *testing.T) {
+	t.Parallel()
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach\n",
@@ -35,6 +36,7 @@ func TestCrypttabPassphrase(t *testing.T) {
 // TestCrypttabNofail verifies that a nofail entry for an absent device does
 // not prevent the system from booting.
 func TestCrypttabNofail(t *testing.T) {
+	t.Parallel()
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptfake UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee none nofail,x-initrd.attach\n",
@@ -55,6 +57,7 @@ func TestCrypttabNofail(t *testing.T) {
 // correctly slice a keyfile embedded in the initramfs.
 // The luks2 password "1234" is stored at offset 8 of a padded keyfile.
 func TestCrypttabKeyfileOffsetSize(t *testing.T) {
+	t.Parallel()
 	keyfilePath := filepath.Join(t.TempDir(), "luks2.key")
 	require.NoError(t, os.WriteFile(keyfilePath, []byte("PADDINGx1234"), 0o600))
 
@@ -79,6 +82,7 @@ func TestCrypttabKeyfileOffsetSize(t *testing.T) {
 // Root is on the LUKS device so there is no concurrent root-mount race: the
 // first attempt is wrong, the second (within the tries=2 budget) is correct.
 func TestCrypttabTries(t *testing.T) {
+	t.Parallel()
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none tries=2,x-initrd.attach\n",
@@ -102,6 +106,7 @@ func TestCrypttabTries(t *testing.T) {
 // TestCrypttabKeySlot verifies that key-slot= restricts unlock to the specified
 // keyslot. Uses slot 0 which holds the "1234" password in luks2.img.
 func TestCrypttabKeySlot(t *testing.T) {
+	t.Parallel()
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none key-slot=0,x-initrd.attach\n",
@@ -125,6 +130,7 @@ func TestCrypttabKeySlot(t *testing.T) {
 // device "cryptroot" but the cmdline overrides it to "cmdroot"; the passphrase
 // prompt should name the device "cmdroot" confirming the crypttab entry was skipped.
 func TestCrypttabCmdlinePrecedence(t *testing.T) {
+	t.Parallel()
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach\n",
@@ -157,6 +163,7 @@ const (
 // keyfile field (/keyfile:UUID=<keydev>).  The key device is presented as a
 // second virtio disk; no passphrase prompt is expected.
 func TestCrypttabKeyfileDevice(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, checkAsset("assets/luks2.keyfile_device.img"))
 
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
@@ -180,6 +187,7 @@ func TestCrypttabKeyfileDevice(t *testing.T) {
 // detached header referenced via the crypttab header= option.  The generator
 // bundles the header file into the initramfs automatically.
 func TestCrypttabHeader(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 
 	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
@@ -211,6 +219,7 @@ func TestCrypttabHeader(t *testing.T) {
 // A fresh LUKS image is created for each run enrolling the connected device,
 // so the test works for any FIDO2 device without pre-built assets.
 func TestCrypttabFido2(t *testing.T) {
+	t.Parallel()
 	pin := os.Getenv("BOOSTER_TEST_FIDO2_PIN")
 	if pin == "" {
 		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
@@ -270,6 +279,7 @@ func TestCrypttabFido2(t *testing.T) {
 // random credential — it will never match any real device, so no hardware is
 // required.  The default token-timeout of 30s applies.
 func TestCrypttabFido2NoDevice(t *testing.T) {
+	t.Parallel()
 	if !fileExists(binariesDir + "/fido2plugin.so") {
 		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
 	}
@@ -298,6 +308,7 @@ func TestCrypttabFido2NoDevice(t *testing.T) {
 // TestCrypttabTPM2 verifies that a crypttab entry with tpm2-device=auto causes
 // the init to attempt TPM2 token unlock.  Uses the swtpm software emulator.
 func TestCrypttabTPM2(t *testing.T) {
+	t.Parallel()
 	swtpm, params, err := startSwtpm()
 	require.NoError(t, err)
 	defer swtpm.Kill()

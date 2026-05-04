@@ -34,6 +34,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestExt4UUID(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression: "zstd",
 		disk:        "assets/ext4.img",
@@ -46,6 +47,7 @@ func TestExt4UUID(t *testing.T) {
 }
 
 func TestExt4MountFlags(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
@@ -58,6 +60,7 @@ func TestExt4MountFlags(t *testing.T) {
 }
 
 func TestExt4Label(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
@@ -70,6 +73,7 @@ func TestExt4Label(t *testing.T) {
 }
 
 func TestExt4Wwid(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=WWID=scsi-QEMU_QEMU_HARDDISK_-0:0"},
@@ -81,6 +85,7 @@ func TestExt4Wwid(t *testing.T) {
 }
 
 func TestExt4Hwpath(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=HWPATH=pci-0000:00:04.0-scsi-2:0:0:0"},
@@ -92,6 +97,7 @@ func TestExt4Hwpath(t *testing.T) {
 }
 
 func TestInvalidInitBinary(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=/dev/sda", "init=/foo/bar", "rw"},
@@ -104,6 +110,7 @@ func TestInvalidInitBinary(t *testing.T) {
 
 // verifies module force loading + modprobe command-line parameters
 func TestVfio(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1",
@@ -133,6 +140,7 @@ func TestVfio(t *testing.T) {
 }
 
 func TestNonFormattedDrive(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disks: []vmtest.QemuDisk{
@@ -148,6 +156,7 @@ func TestNonFormattedDrive(t *testing.T) {
 }
 
 func TestMountTimeout(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		kernelArgs:   []string{"root=/dev/nonexistent"},
 		compression:  "xz",
@@ -160,6 +169,7 @@ func TestMountTimeout(t *testing.T) {
 }
 
 func TestMountTimeoutWithAllModaliases(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		kernelArgs:          []string{"root=/dev/sda"},
 		modules:             "-*",
@@ -174,6 +184,7 @@ func TestMountTimeoutWithAllModaliases(t *testing.T) {
 }
 
 func TestFsck(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression: "none",
 		disk:        "assets/ext4.img",
@@ -187,6 +198,7 @@ func TestFsck(t *testing.T) {
 }
 
 func TestVirtualConsole(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		compression:          "none",
 		disk:                 "assets/ext4.img",
@@ -200,6 +212,7 @@ func TestVirtualConsole(t *testing.T) {
 }
 
 func TestStripBinaries(t *testing.T) {
+	t.Parallel()
 	swtpm, params, err := startSwtpm()
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -217,6 +230,7 @@ func TestStripBinaries(t *testing.T) {
 }
 
 func TestNvme(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
 		kernelArgs: []string{"root=/dev/nvme0n1p3"},
@@ -228,6 +242,7 @@ func TestNvme(t *testing.T) {
 }
 
 func TestUsb(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disks:      []vmtest.QemuDisk{{Path: "assets/gpt.img", Format: "raw", Controller: "usb-storage,bus=ehci.0"}},
 		params:     []string{"-device", "usb-ehci,id=ehci"},
@@ -240,6 +255,7 @@ func TestUsb(t *testing.T) {
 }
 
 func TestLoadExtraModules(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/ext4.img",
 		kernelArgs: []string{"root=LABEL=atestlabel12", "rd.modules_force_load=foo,xfs"},
@@ -253,6 +269,7 @@ func TestLoadExtraModules(t *testing.T) {
 }
 
 func TestISO(t *testing.T) {
+	t.Parallel()
 	vm, err := buildVmInstance(t, Opts{
 		asIso:            true,
 		modules:          "iso9660",
