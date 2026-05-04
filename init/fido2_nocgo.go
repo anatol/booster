@@ -23,3 +23,7 @@ func isFido2PinBlockedError(err error) bool {
 func isFido2WrongDeviceError(err error) bool {
 	return false
 }
+
+func isFido2PinRequiredError(err error) bool {
+	return false
+}
