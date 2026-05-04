@@ -228,6 +228,9 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if err != nil && isFido2PinRequiredError(err) {
 		return nil, errFido2PinNeeded
 	}
+	if err != nil && isFido2TouchTimeoutError(err) {
+		return nil, errFido2TouchTimeout
+	}
 	if err == nil {
 		statusMessage("")
 	}
@@ -246,6 +249,7 @@ var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
 var errFido2WrongDevice = errors.New("FIDO2 device does not have our credential")
 var errFido2PinNeeded = errors.New("FIDO2 device requires PIN we did not supply")
+var errFido2TouchTimeout = errors.New("FIDO2 touch timed out")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
@@ -322,6 +326,14 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 				pinRequired = true
 				maxAttempts = 3
 				promptPrefix = "FIDO2 token requires PIN — "
+				continue
+			}
+			// Touch timeout on a PIN device: re-prompt without consuming an
+			// attempt. The user typed the PIN correctly but didn't touch in
+			// time; making them lose 1 of 3 attempts for a fumbled tap is
+			// hostile.
+			if errors.Is(err, errFido2TouchTimeout) && pinRequired {
+				promptPrefix = "FIDO2 touch timed out — "
 				continue
 			}
 			if !errors.Is(err, errFido2PinInvalid) {

@@ -12,4 +12,5 @@ type Fido2Plugin interface {
 	IsFido2PinBlocked(err error) bool
 	IsFido2WrongDevice(err error) bool
 	IsFido2PinRequired(err error) bool
+	IsFido2TouchTimeout(err error) bool
 }

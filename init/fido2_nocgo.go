@@ -27,3 +27,7 @@ func isFido2WrongDeviceError(err error) bool {
 func isFido2PinRequiredError(err error) bool {
 	return false
 }
+
+func isFido2TouchTimeoutError(err error) bool {
+	return false
+}
