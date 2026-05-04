@@ -115,3 +115,17 @@ func (f *fido2Impl) IsFido2PinBlocked(err error) bool {
 	// error string from errFromCode's default case.
 	return err != nil && strings.Contains(err.Error(), "libfido2 error 50")
 }
+
+// IsFido2WrongDevice reports whether the device rejected our credential —
+// either it was never enrolled here, or the credential ID we supplied is
+// invalid for it. Common when the user has multiple FIDO2 keys plugged in:
+// only one was enrolled with this volume; the others should be skipped
+// silently rather than logged at info level as opaque errors.
+//   - FIDO_ERR_NO_CREDENTIALS     (0x2e / 46) → ErrNoCredentials
+//   - FIDO_ERR_INVALID_CREDENTIAL (0x22 / 34) → ErrInvalidCredential
+func (f *fido2Impl) IsFido2WrongDevice(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, libfido2.ErrNoCredentials) || errors.Is(err, libfido2.ErrInvalidCredential)
+}
