@@ -3,6 +3,7 @@ package tests
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -122,6 +123,7 @@ func checkAsset(file string) error {
 		return fmt.Errorf("no generator for asset %s", file)
 	}
 	if exists := fileExists(file); exists {
+		enforceReadOnlyAssetOutputs(file, gen.env)
 		return nil
 	}
 
@@ -132,6 +134,44 @@ func checkAsset(file string) error {
 	err := shell("generators/"+gen.script, env...)
 	if err != nil {
 		_ = os.Remove(file)
+		return err
 	}
-	return err
+	enforceReadOnlyAssetOutputs(file, env)
+	return nil
+}
+
+func isReadOnlyAssetFile(path string) bool {
+	if !strings.HasPrefix(filepath.Clean(path), "assets/") {
+		return false
+	}
+	switch filepath.Ext(path) {
+	case ".img", ".raw", ".iso":
+		return true
+	default:
+		return false
+	}
+}
+
+func enforceReadOnlyAssetOutputs(output string, env []string) {
+	_ = setReadOnlyIfAssetImage(output)
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasSuffix(key, "_OUTPUT") {
+			_ = setReadOnlyIfAssetImage(value)
+		}
+	}
+}
+
+func setReadOnlyIfAssetImage(path string) error {
+	if !isReadOnlyAssetFile(path) {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(path, info.Mode()&^0o222)
 }
