@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -111,6 +112,24 @@ var assetGenerators = map[string]assetGenerator{
 	"tang/key.pub":                  {"tang.sh", nil},
 }
 
+var (
+	assetGenMu    sync.Mutex
+	assetGenLocks = make(map[string]*sync.Mutex)
+)
+
+func lockAssetGeneration(name string) func() {
+	assetGenMu.Lock()
+	mu := assetGenLocks[name]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		assetGenLocks[name] = mu
+	}
+	assetGenMu.Unlock()
+
+	mu.Lock()
+	return mu.Unlock
+}
+
 func checkAsset(file string) error {
 	if !strings.HasPrefix(file, "assets/") {
 		fmt.Println("asset path has to start with assets/ prefix")
@@ -122,6 +141,9 @@ func checkAsset(file string) error {
 	if !ok {
 		return fmt.Errorf("no generator for asset %s", file)
 	}
+	unlock := lockAssetGeneration(name)
+	defer unlock()
+
 	if exists := fileExists(file); exists {
 		enforceReadOnlyAssetOutputs(file, gen.env)
 		return nil
