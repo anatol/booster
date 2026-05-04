@@ -203,25 +203,11 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	var pin string
 	if pinRequired {
 		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
-		if plymouthEnabled {
-			pinBytes, err := plymouthAskPassword(prompt)
-			if err != nil {
-				warning("Plymouth password prompt failed: %v, falling back to console", err)
-				pinBytes, err2 := readPassword(prompt, "")
-				if err2 != nil {
-					return nil, err2
-				}
-				pin = string(pinBytes)
-			} else {
-				pin = string(pinBytes)
-			}
-		} else {
-			pinBytes, err := readPassword(prompt, "")
-			if err != nil {
-				return nil, err
-			}
-			pin = string(pinBytes)
+		pinBytes, err := askPasswordWithFallback(prompt, "")
+		if err != nil {
+			return nil, err
 		}
+		pin = string(pinBytes)
 	}
 
 	if pinRequired && pin == "" {
@@ -410,17 +396,7 @@ func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error
 		var authValue []byte
 		if node.Pin {
 			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
-			var pin []byte
-			var err error
-			if plymouthEnabled {
-				pin, err = plymouthAskPassword(prompt)
-				if err != nil {
-					warning("Plymouth password prompt failed: %v, falling back to console", err)
-					pin, err = readPassword(prompt, "")
-				}
-			} else {
-				pin, err = readPassword(prompt, "")
-			}
+			pin, err := askPasswordWithFallback(prompt, "")
 			if err != nil {
 				return nil, err
 			}
@@ -636,19 +612,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 
 		prompt := promptPrefix + fmt.Sprintf("Enter passphrase for %s:", mappingName)
 
-		var password []byte
-		var err error
-
-		if plymouthEnabled {
-			password, err = plymouthAskPassword(prompt)
-			if err != nil {
-				warning("plymouth password prompt failed: %v, falling back to console", err)
-				password, err = readPassword(prompt, "   Unlocking...")
-			}
-		} else {
-			password, err = readPassword(prompt, "   Unlocking...")
-		}
-
+		password, err := askPasswordWithFallback(prompt, "   Unlocking...")
 		if err != nil {
 			warning("reading password: %v", err)
 			return

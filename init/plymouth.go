@@ -142,6 +142,19 @@ func plymouthAskPassword(prompt string) ([]byte, error) {
 	return []byte(password), nil
 }
 
+// askPasswordWithFallback prompts via plymouth when enabled. Any plymouth
+// failure logs a warning and falls through to the console reader.
+func askPasswordWithFallback(prompt, postPrompt string) ([]byte, error) {
+	if plymouthEnabled {
+		password, err := plymouthAskPassword(prompt)
+		if err == nil {
+			return password, nil
+		}
+		warning("Plymouth password prompt failed: %v, falling back to console", err)
+	}
+	return readPassword(prompt, postPrompt)
+}
+
 // statusMessage shows msg on the Plymouth splash, or on the console if Plymouth
 // is disabled. Passing an empty string clears the Plymouth message (no-op on console).
 func statusMessage(msg string) {
