@@ -764,20 +764,6 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	var closeDone sync.Once
 	var senderWg sync.WaitGroup
 	var tokenWg sync.WaitGroup
-	var keyboardOnce sync.Once
-
-	// startKeyboard launches the keyboard (or keyfile) unlock goroutine at most once.
-	startKeyboard := func(checkSlots []int) {
-		keyboardOnce.Do(func() {
-			senderWg.Go(func() {
-				if mapping.keyfile != "" {
-					recoverKeyfilePassword(volumes, done, d, checkSlots, mapping)
-				} else {
-					requestKeyboardPassword(volumes, done, d, checkSlots, mapping.name, mapping.tries)
-				}
-			})
-		})
-	}
 
 	tokens, err := d.Tokens()
 	if err != nil {
@@ -836,7 +822,13 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		default:
 		}
 		if len(checkSlotsWithPassword) > 0 {
-			startKeyboard(checkSlotsWithPassword)
+			senderWg.Go(func() {
+				if mapping.keyfile != "" {
+					recoverKeyfilePassword(volumes, done, d, checkSlotsWithPassword, mapping)
+				} else {
+					requestKeyboardPassword(volumes, done, d, checkSlotsWithPassword, mapping.name, mapping.tries)
+				}
+			})
 		}
 	})
 
