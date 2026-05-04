@@ -4,7 +4,9 @@ import (
 	"flag"
 	"os"
 	"regexp"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
@@ -104,10 +106,13 @@ func TestInvalidInitBinary(t *testing.T) {
 
 // verifies module force loading + modprobe command-line parameters
 func TestVfio(t *testing.T) {
+	sshPort, err := getFreeTCPPort()
+	require.NoError(t, err)
+
 	vm, err := buildVmInstance(t, Opts{
 		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1",
-		params:           []string{"-net", "user,hostfwd=tcp:127.0.0.1:10022-:22", "-net", "nic"},
+		params:           []string{"-net", "user,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(sshPort) + "-:22", "-net", "nic"},
 		disk:             "assets/archlinux.ext4.raw",
 		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
 	})
@@ -119,7 +124,7 @@ func TestVfio(t *testing.T) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := ssh.Dial("tcp", ":10022", config)
+	conn, err := dialSSHWithRetry("127.0.0.1:"+strconv.Itoa(sshPort), config, 120*time.Second)
 	require.NoError(t, err)
 	defer conn.Close()
 

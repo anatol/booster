@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,6 +139,20 @@ func waitForFile(filename string, timeout time.Duration) error {
 
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func getFreeTCPPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected listener address type %T", l.Addr())
+	}
+	return addr.Port, nil
 }
 
 func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
