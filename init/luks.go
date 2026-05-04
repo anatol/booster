@@ -222,6 +222,9 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if err != nil && isFido2PinInvalidError(err) {
 		return nil, errFido2PinInvalid
 	}
+	if err != nil && isFido2WrongDeviceError(err) {
+		return nil, errFido2WrongDevice
+	}
 	if err == nil {
 		statusMessage("")
 	}
@@ -238,6 +241,7 @@ var fido2Mu sync.Mutex
 
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
+var errFido2WrongDevice = errors.New("FIDO2 device does not have our credential")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
@@ -326,6 +330,13 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 			if isFido2PinBlockedError(err) {
 				statusMessage("FIDO2 PIN is blocked (reset required), falling back to passphrase")
 				break
+			}
+			// Wrong device — credential not enrolled here. Skip silently;
+			// retrying this device would never succeed and the opaque
+			// "libfido2 error 46" message is noise when multiple keys are plugged in.
+			if errors.Is(err, errFido2WrongDevice) {
+				debug("FIDO2 device %s does not have our credential, skipping", devName)
+				continue
 			}
 			info("%v", err)
 			continue
