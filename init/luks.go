@@ -418,7 +418,46 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 	return result, err
 }
 
-var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
+// hidraw udev events are broadcast to every registered listener so multiple
+// FIDO2 tokens (e.g. one PIN-required, one touchless against the same physical
+// device) observe device-add events independently. A single shared channel
+// would let the first reader steal the event from siblings.
+var (
+	hidrawListenersMu sync.Mutex
+	hidrawListeners   []chan string
+)
+
+// Caller must invoke the returned drop function when done so the listener
+// doesn't accumulate in the registry.
+func registerHidrawListener() (chan string, func()) {
+	ch := make(chan string, 16)
+	hidrawListenersMu.Lock()
+	hidrawListeners = append(hidrawListeners, ch)
+	hidrawListenersMu.Unlock()
+	return ch, func() {
+		hidrawListenersMu.Lock()
+		defer hidrawListenersMu.Unlock()
+		for i, c := range hidrawListeners {
+			if c == ch {
+				hidrawListeners = append(hidrawListeners[:i], hidrawListeners[i+1:]...)
+				return
+			}
+		}
+	}
+}
+
+// Non-blocking per listener: a slow consumer with a full buffer drops the
+// event for itself only — siblings still receive it.
+func broadcastHidrawDevice(name string) {
+	hidrawListenersMu.Lock()
+	defer hidrawListenersMu.Unlock()
+	for _, ch := range hidrawListeners {
+		select {
+		case ch <- name:
+		default:
+		}
+	}
+}
 
 // fido2Sem serializes FIDO2 user interactions (PIN prompt + touch + assertion)
 // across all goroutines. The FIDO2 key can only service one assertion at a
@@ -453,6 +492,11 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	}
 
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
+
+	// Register BEFORE waiting on usbhidReady so any 'add' events arriving
+	// after the wait but before /sys/class/hidraw/ is read are buffered for us.
+	hidrawDevices, dropListener := registerHidrawListener()
+	defer dropListener()
 
 	if err := waitForUsbhid(ctx); err != nil {
 		info("FIDO2 unlock for %s cancelled before USB HID ready: %v", mappingName, err)
