@@ -4,9 +4,10 @@ package main
 //
 // The production loop is mirrored here as runPinTokens so it can be exercised
 // without setting up real LUKS devices, swtpm, or hardware tokens. Cancellation
-// uses a chan struct{} matching luksOpen's `done` channel.
+// uses context.Context matching luksOpen's `ctx`.
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"testing"
@@ -59,12 +60,12 @@ func TestTokenNeedsPin(t *testing.T) {
 
 // pinTokenSpec describes one token for runPinTokens. recoverFn is invoked when
 // the token's iteration starts (PIN) or its parallel goroutine starts (non-PIN).
-// It must observe done — production helpers (recoverSystemd*Password,
-// plymouthAskPassword, readPassword) check done to return early on cancellation.
+// It must observe ctx — production helpers (recoverSystemd*Password,
+// plymouthAskPassword, readPassword) check ctx to return early on cancellation.
 type pinTokenSpec struct {
 	id        int
 	pin       bool
-	recoverFn func(done <-chan struct{}) bool
+	recoverFn func(ctx context.Context) bool
 }
 
 // orchestrationEvent records what happened to a token during a runPinTokens
@@ -87,12 +88,11 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 		mu.Unlock()
 	}
 
-	done := make(chan struct{})
-	var closeDone sync.Once
-	closeFn := func() { closeDone.Do(func() { close(done) }) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	isDone := func() bool {
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return true
 		default:
 			return false
@@ -115,10 +115,10 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 				return
 			}
 			record(t.id, "started")
-			ok := t.recoverFn(done)
+			ok := t.recoverFn(ctx)
 			record(t.id, "completed")
 			if ok {
-				closeFn()
+				cancel()
 			}
 		}()
 	}
@@ -133,10 +133,10 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 					continue
 				}
 				record(t.id, "started")
-				ok := t.recoverFn(done)
+				ok := t.recoverFn(ctx)
 				record(t.id, "completed")
 				if ok {
-					closeFn()
+					cancel()
 					return
 				}
 			}
@@ -183,8 +183,8 @@ func lastEventOf(events []orchestrationEvent, id int) string {
 	return last
 }
 
-func returns(success bool) func(<-chan struct{}) bool {
-	return func(<-chan struct{}) bool { return success }
+func returns(success bool) func(context.Context) bool {
+	return func(context.Context) bool { return success }
 }
 
 // ── PIN-loop ordering & sequencing ───────────────────────────────────────────
@@ -206,7 +206,7 @@ func TestPinTokensAllFailRunInOrder(t *testing.T) {
 
 func TestPinTokensFirstSuccessShortCircuitsRest(t *testing.T) {
 	t.Parallel()
-	// Token 1 succeeds → done closes → loop returns. Tokens 2 and 3 never
+	// Token 1 succeeds → ctx cancelled → loop returns. Tokens 2 and 3 never
 	// have their recoverFn invoked.
 	events := runPinTokens([]pinTokenSpec{
 		{id: 1, pin: true, recoverFn: returns(true)},
@@ -240,11 +240,11 @@ func TestNonPinTokensRunInParallelWithPinLoop(t *testing.T) {
 	pinCanRelease := make(chan struct{})
 
 	specs := []pinTokenSpec{
-		{id: 1, pin: true, recoverFn: func(done <-chan struct{}) bool {
+		{id: 1, pin: true, recoverFn: func(ctx context.Context) bool {
 			<-pinCanRelease // block until test releases
 			return false
 		}},
-		{id: 2, pin: false, recoverFn: func(done <-chan struct{}) bool {
+		{id: 2, pin: false, recoverFn: func(ctx context.Context) bool {
 			close(nonPinDone)
 			return false
 		}},
@@ -266,26 +266,27 @@ func TestNonPinTokensRunInParallelWithPinLoop(t *testing.T) {
 func TestNonPinSuccessCancelsPinLoop(t *testing.T) {
 	t.Parallel()
 	// A non-PIN token (touchless FIDO2 / clevis / auto-TPM2) succeeding mid-
-	// boot must close done so the still-running PIN goroutine exits without
+	// boot must cancel ctx so the still-running PIN goroutine exits without
 	// dispatching the next prompt. The currently-running PIN token observes
-	// done and returns false; subsequent PIN tokens skip via the done check.
+	// ctx cancellation and returns false; subsequent PIN tokens skip via the
+	// ctx check.
 	pinStarted := make(chan struct{})
 	specs := []pinTokenSpec{
-		{id: 1, pin: true, recoverFn: func(done <-chan struct{}) bool {
+		{id: 1, pin: true, recoverFn: func(ctx context.Context) bool {
 			close(pinStarted)
-			<-done // production helpers observe done and return early
+			<-ctx.Done() // production helpers observe ctx and return early
 			return false
 		}},
 		{id: 2, pin: true, recoverFn: returns(false)},
-		{id: 3, pin: false, recoverFn: func(done <-chan struct{}) bool {
+		{id: 3, pin: false, recoverFn: func(ctx context.Context) bool {
 			<-pinStarted // ensure PIN loop is in token 1's recoverFn
 			return true  // non-PIN unlock wins
 		}},
 	}
 	events := runPinTokens(specs)
 	require.Equal(t, "completed", lastEventOf(events, 3), "non-PIN must complete with success")
-	require.Equal(t, "completed", lastEventOf(events, 1), "PIN token 1 must have observed done and returned")
-	require.Equal(t, "skipped-done", eventOf(events, 2), "PIN token 2 must skip after done")
+	require.Equal(t, "completed", lastEventOf(events, 1), "PIN token 1 must have observed ctx cancel and returned")
+	require.Equal(t, "skipped-done", eventOf(events, 2), "PIN token 2 must skip after ctx cancel")
 }
 
 // ── PIN-loop advance on skip / fallback errors ───────────────────────────────
