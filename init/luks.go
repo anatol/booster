@@ -442,6 +442,30 @@ func parseSystemdTPM2Blob(blob []byte) (private, public []byte, err error) {
 	return private, public, nil
 }
 
+// tokenNeedsPin reports whether the token requires a typed PIN at the keyboard.
+// PIN tokens are dispatched serially by a single goroutine in luksOpen so
+// prompts never interleave; non-PIN tokens (clevis, PCR-only TPM2, touchless
+// FIDO2) fan out in parallel and don't delay the keyboard passphrase fallback.
+func tokenNeedsPin(t luks.Token) bool {
+	switch t.Type {
+	case "systemd-tpm2":
+		var node struct {
+			Pin bool `json:"tpm2-pin"`
+		}
+		if json.Unmarshal(t.Payload, &node) == nil {
+			return node.Pin
+		}
+	case "systemd-fido2":
+		var node struct {
+			PinRequired bool `json:"fido2-clientPin-required"`
+		}
+		if json.Unmarshal(t.Payload, &node) == nil {
+			return node.PinRequired
+		}
+	}
+	return false
+}
+
 func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, t luks.Token, mappingName string) bool {
 	var password []byte
 	var err error
@@ -740,10 +764,21 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// which token (TPM2 vs FIDO2 vs clevis) tries to unlock first.
 	sort.Slice(tokens, func(i, j int) bool { return tokens[i].ID < tokens[j].ID })
 
+	// PIN-bearing tokens (TPM2 with PIN, FIDO2 with PIN) go into pinTokens for
+	// serial dispatch by a single goroutine so prompts never interleave when
+	// more than one is enrolled. Non-PIN tokens fan out as today.
+	var pinTokens []luks.Token
 	slotsWithTokens := make(map[int]bool)
 	for _, t := range tokens {
 		if t.Type == "systemd-recovery" {
 			continue // skipped: entered via keyboard later
+		}
+		for _, s := range t.Slots {
+			slotsWithTokens[s] = true
+		}
+		if tokenNeedsPin(t) {
+			pinTokens = append(pinTokens, t)
+			continue
 		}
 		t := t
 		senderWg.Add(1)
@@ -755,9 +790,31 @@ func luksOpen(dev string, mapping *luksMapping) error {
 				closeDone.Do(func() { close(done) })
 			}
 		}()
-		for _, s := range t.Slots {
-			slotsWithTokens[s] = true
-		}
+	}
+
+	// PIN tokens: one goroutine walks them in slice order (already sorted by
+	// ID above). A skipped/failed token advances to the next; a successful
+	// unlock closes done and stops iteration. The done check before each
+	// iteration lets a parallel non-PIN unlock cancel the loop without
+	// waiting for the next prompt to time out.
+	if len(pinTokens) > 0 {
+		senderWg.Add(1)
+		tokenWg.Add(1)
+		go func() {
+			defer senderWg.Done()
+			defer tokenWg.Done()
+			for _, t := range pinTokens {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if recoverTokenPassword(volumes, done, d, t, mapping.name) {
+					closeDone.Do(func() { close(done) })
+					return
+				}
+			}
+		}()
 	}
 
 	// Keyboard always skips slots claimed by any token: a typed passphrase will never
