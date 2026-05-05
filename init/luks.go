@@ -222,6 +222,15 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	if err != nil && isFido2PinInvalidError(err) {
 		return nil, errFido2PinInvalid
 	}
+	if err != nil && isFido2WrongDeviceError(err) {
+		return nil, errFido2WrongDevice
+	}
+	if err != nil && isFido2PinRequiredError(err) {
+		return nil, errFido2PinNeeded
+	}
+	if err != nil && isFido2TouchTimeoutError(err) {
+		return nil, errFido2TouchTimeout
+	}
 	if err == nil {
 		statusMessage("")
 	}
@@ -238,6 +247,9 @@ var fido2Mu sync.Mutex
 
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
+var errFido2WrongDevice = errors.New("FIDO2 device does not have our credential")
+var errFido2PinNeeded = errors.New("FIDO2 device requires PIN we did not supply")
+var errFido2TouchTimeout = errors.New("FIDO2 touch timed out")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
@@ -291,26 +303,47 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 		}
 		seenHidrawDevices[devName] = true
 
+		// pinRequired starts from credential metadata but may be flipped on if
+		// the device returns FIDO_ERR_PIN_REQUIRED — i.e. metadata said no PIN
+		// but the token has had one set since enrollment (firmware update,
+		// policy change). On the flip we re-prompt without consuming an attempt.
+		pinRequired := node.PinRequired
 		maxAttempts := 1
-		if node.PinRequired {
+		if pinRequired {
 			maxAttempts = 3
 		}
 		var password []byte
 		var err error
 		pinExhausted := false
 		promptPrefix := ""
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, node.PinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
+		attempt := 0
+		for attempt < maxAttempts {
+			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
 			if err == nil {
 				break
+			}
+			if errors.Is(err, errFido2PinNeeded) && !pinRequired {
+				pinRequired = true
+				maxAttempts = 3
+				promptPrefix = "FIDO2 token requires PIN — "
+				continue
+			}
+			// Touch timeout on a PIN device: re-prompt without consuming an
+			// attempt. The user typed the PIN correctly but didn't touch in
+			// time; making them lose 1 of 3 attempts for a fumbled tap is
+			// hostile.
+			if errors.Is(err, errFido2TouchTimeout) && pinRequired {
+				promptPrefix = "FIDO2 touch timed out — "
+				continue
 			}
 			if !errors.Is(err, errFido2PinInvalid) {
 				break
 			}
-			if attempt < maxAttempts-1 {
-				promptPrefix = "FIDO2 PIN incorrect — "
-			} else {
+			attempt++
+			if attempt >= maxAttempts {
 				pinExhausted = true
+			} else {
+				promptPrefix = "FIDO2 PIN incorrect — "
 			}
 		}
 
@@ -326,6 +359,13 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 			if isFido2PinBlockedError(err) {
 				statusMessage("FIDO2 PIN is blocked (reset required), falling back to passphrase")
 				break
+			}
+			// Wrong device — credential not enrolled here. Skip silently;
+			// retrying this device would never succeed and the opaque
+			// "libfido2 error 46" message is noise when multiple keys are plugged in.
+			if errors.Is(err, errFido2WrongDevice) {
+				debug("FIDO2 device %s does not have our credential, skipping", devName)
+				continue
 			}
 			info("%v", err)
 			continue

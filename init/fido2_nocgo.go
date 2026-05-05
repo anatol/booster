@@ -19,3 +19,15 @@ func isFido2PinAuthBlockedError(err error) bool {
 func isFido2PinBlockedError(err error) bool {
 	return false
 }
+
+func isFido2WrongDeviceError(err error) bool {
+	return false
+}
+
+func isFido2PinRequiredError(err error) bool {
+	return false
+}
+
+func isFido2TouchTimeoutError(err error) bool {
+	return false
+}
