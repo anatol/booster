@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -45,7 +46,7 @@ type luksMapping struct {
 
 // tryPassphraseAgainstSlots tries password against each slot, sending the opened
 // volume on volumes if successful.  Returns true on success.
-func tryPassphraseAgainstSlots(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, password []byte) bool {
+func tryPassphraseAgainstSlots(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, password []byte) bool {
 	for _, s := range checkSlots {
 		v, err := d.UnsealVolume(s, password)
 		if err == luks.ErrPassphraseDoesNotMatch {
@@ -56,7 +57,7 @@ func tryPassphraseAgainstSlots(volumes chan *luks.Volume, done <-chan struct{}, 
 		}
 		select {
 		case volumes <- v:
-		case <-done:
+		case <-ctx.Done():
 		}
 		return true
 	}
@@ -506,7 +507,7 @@ func tokenNeedsPin(t luks.Token) bool {
 	return false
 }
 
-func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, t luks.Token, mappingName string) bool {
+func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string) bool {
 	var password []byte
 	var err error
 
@@ -534,7 +535,7 @@ func recoverTokenPassword(volumes chan *luks.Volume, done <-chan struct{}, d luk
 	}
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
-	return tryPassphraseAgainstSlots(volumes, done, d, t.Slots, password)
+	return tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password)
 }
 
 // readKeyfile reads a keyfile at path, skipping offset bytes and reading at most
@@ -593,14 +594,14 @@ func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
 	return readKeyfile(path, mapping.keyfileOffset, mapping.keyfileSize)
 }
 
-func recoverKeyfilePassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mapping *luksMapping) {
+func recoverKeyfilePassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mapping *luksMapping) {
 	password, err := acquireKeyfilePassword(mapping)
 	if err != nil {
 		warning("reading keyfile %s: %v", mapping.keyfile, err)
 	}
 
 	if len(password) > 0 {
-		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, password) {
+		if tryPassphraseAgainstSlots(ctx, volumes, d, checkSlots, password) {
 			return
 		}
 	}
@@ -608,28 +609,28 @@ func recoverKeyfilePassword(volumes chan *luks.Volume, done <-chan struct{}, d l
 	warning("password in keyfile %s was unable to unseal %s", mapping.keyfile, mapping.name)
 
 	// fall back to keyboard
-	requestKeyboardPassword(volumes, done, d, checkSlots, mapping.name, mapping.tries)
+	requestKeyboardPassword(ctx, volumes, d, checkSlots, mapping.name, mapping.tries)
 }
 
 // tryCachedPassphrases snapshots passphraseCache and tries each entry against
 // checkSlots. Returns true if any unlocked the volume — caller should return
 // without prompting. The snapshot avoids holding passphraseCache.Lock across
 // the (potentially slow) UnsealVolume calls.
-func tryCachedPassphrases(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int) bool {
+func tryCachedPassphrases(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int) bool {
 	passphraseCache.Lock()
 	cached := make([][]byte, len(passphraseCache.passwords))
 	copy(cached, passphraseCache.passwords)
 	passphraseCache.Unlock()
 
 	for _, pw := range cached {
-		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, pw) {
+		if tryPassphraseAgainstSlots(ctx, volumes, d, checkSlots, pw) {
 			return true
 		}
 	}
 	return false
 }
 
-func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
+func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
@@ -637,14 +638,14 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 
 	// Bail early if the device was already unlocked by a token goroutine.
 	select {
-	case <-done:
+	case <-ctx.Done():
 		return
 	default:
 	}
 
 	// Fast path: try passwords that already unlocked another volume this boot
 	// (e.g. two LUKS members of a btrfs RAID1 with the same passphrase).
-	if tryCachedPassphrases(volumes, done, d, checkSlots) {
+	if tryCachedPassphrases(ctx, volumes, d, checkSlots) {
 		return
 	}
 
@@ -657,12 +658,12 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 
 	// Re-check after acquiring the lock: another device may have just unlocked.
 	select {
-	case <-done:
+	case <-ctx.Done():
 		return
 	default:
 	}
 
-	if tryCachedPassphrases(volumes, done, d, checkSlots) {
+	if tryCachedPassphrases(ctx, volumes, d, checkSlots) {
 		return
 	}
 
@@ -683,7 +684,7 @@ func requestKeyboardPassword(volumes chan *luks.Volume, done <-chan struct{}, d 
 		}
 		attempts++
 
-		if tryPassphraseAgainstSlots(volumes, done, d, checkSlots, password) {
+		if tryPassphraseAgainstSlots(ctx, volumes, d, checkSlots, password) {
 			passphraseCache.Lock()
 			passphraseCache.passwords = append(passphraseCache.passwords, password)
 			passphraseCache.Unlock()
@@ -789,8 +790,8 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 
 	volumes := make(chan *luks.Volume)
-	done := make(chan struct{})
-	var closeDone sync.Once
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var senderWg sync.WaitGroup
 	var tokenWg sync.WaitGroup
 
@@ -826,15 +827,15 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		go func() {
 			defer senderWg.Done()
 			defer tokenWg.Done()
-			if recoverTokenPassword(volumes, done, d, t, mapping.name) {
-				closeDone.Do(func() { close(done) })
+			if recoverTokenPassword(ctx, volumes, d, t, mapping.name) {
+				cancel()
 			}
 		}()
 	}
 
 	// PIN tokens: one goroutine walks them in slice order (already sorted by
 	// ID above). A skipped/failed token advances to the next; a successful
-	// unlock closes done and stops iteration. The done check before each
+	// unlock cancels ctx and stops iteration. The ctx check before each
 	// iteration lets a parallel non-PIN unlock cancel the loop without
 	// waiting for the next prompt to time out.
 	if len(pinTokens) > 0 {
@@ -845,12 +846,12 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			defer tokenWg.Done()
 			for _, t := range pinTokens {
 				select {
-				case <-done:
+				case <-ctx.Done():
 					return
 				default:
 				}
-				if recoverTokenPassword(volumes, done, d, t, mapping.name) {
-					closeDone.Do(func() { close(done) })
+				if recoverTokenPassword(ctx, volumes, d, t, mapping.name) {
+					cancel()
 					return
 				}
 			}
@@ -884,28 +885,28 @@ func luksOpen(dev string, mapping *luksMapping) error {
 			tokenWg.Wait()
 		}
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return // already unlocked by a token
 		default:
 		}
 		if len(checkSlotsWithPassword) > 0 {
 			senderWg.Go(func() {
 				if mapping.keyfile != "" {
-					recoverKeyfilePassword(volumes, done, d, checkSlotsWithPassword, mapping)
+					recoverKeyfilePassword(ctx, volumes, d, checkSlotsWithPassword, mapping)
 				} else {
-					requestKeyboardPassword(volumes, done, d, checkSlotsWithPassword, mapping.name, mapping.tries)
+					requestKeyboardPassword(ctx, volumes, d, checkSlotsWithPassword, mapping.name, mapping.tries)
 				}
 			})
 		}
 	})
 
 	// Watcher: when every unlock goroutine has given up, close volumes so luksOpen
-	// unblocks rather than hanging forever. Check done first to avoid closing volumes
+	// unblocks rather than hanging forever. Check ctx first to avoid closing volumes
 	// after a priority token already signalled success.
 	go func() {
 		senderWg.Wait()
 		select {
-		case <-done:
+		case <-ctx.Done():
 			// Already unlocked — volumes will drain naturally.
 		default:
 			close(volumes)
@@ -913,7 +914,6 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}()
 
 	v, ok := <-volumes
-	closeDone.Do(func() { close(done) })
 
 	if !ok {
 		return fmt.Errorf("failed to unlock %s: all unlock attempts exhausted", dev)
