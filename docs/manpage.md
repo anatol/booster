@@ -181,6 +181,16 @@ UUID parameter can optionally be enclosed with quote symbol `"` though it is not
 `root=UUID=ac8299a8-91ce-4bf6-a524-55a62844b787`, `root=UUID="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended),
 `rd.luks.uuid=ac8299a8-91ce-4bf6-a524-55a62844b787`, `rd.luks.uuid="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended).
 
+### Password entry
+Editing keys beyond the standard:
+ * **Ctrl+W** — erase the previous word.
+ * **Ctrl+U** — erase the entire entry.
+ * **Tab** — toggle visibility of the typed characters (asterisks ↔ literal).
+
+When any unlock method wins the race (a TPM2 PCR-only or FIDO2 touchless token completes, or a sibling volume's keyfile reads successfully), the keyboard prompt auto-dismisses and boot continues.
+
+PIN prompts (TPM2-PIN, FIDO2-PIN) accept up to 3 attempts; press Enter empty PIN to skip the token to the next unlock prompt.
+
 ### Modules selection
 It is a note to summarize the algorithm that computes what modules are going to end up in the generated booster image.
 Initial module list for booster is `defaultModulesList` - a set of predefined hard-coded modules defined at `generator.go`.
