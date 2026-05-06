@@ -160,12 +160,50 @@ func askPasswordWithFallback(ctx context.Context, prompt, postPrompt string) ([]
 
 // statusMessage shows msg on the Plymouth splash, or on the console if Plymouth
 // is disabled. Passing an empty string clears the Plymouth message (no-op on console).
+//
+// On the console, if a password prompt is active and its volume hasn't been
+// unlocked yet, the current line is erased and the prompt is reprinted beneath
+// the message so the cursor stays at the bottom. Once the prompt's done channel
+// closes (volume unlocked by another token), the redraw is skipped — otherwise
+// the unlock status message would reprint a stale prompt that ctx-cancel hasn't
+// torn down yet.
 func statusMessage(msg string) {
 	if plymouthEnabled {
 		plymouthMessage(msg)
 	} else if msg != "" {
-		console(msg + "\n")
+		consoleMu.Lock()
+		if consolePrompt.active && !promptVolumeUnlocked() {
+			consolePrint("\n\n" + msg + "\n\n" + consolePrompt.text + strings.Repeat("*", consolePrompt.asterisks))
+		} else {
+			consolePrint("\n\n" + msg + "\n\n")
+		}
+		consoleMu.Unlock()
 	}
+}
+
+// promptVolumeUnlocked reports whether the active prompt's volume has been
+// unlocked already (its done channel has closed). Caller must hold consoleMu.
+func promptVolumeUnlocked() bool {
+	if consolePrompt.done == nil {
+		return false
+	}
+	select {
+	case <-consolePrompt.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// statusMessageTimed shows msg and clears it after d. Use for transient status
+// updates that have no other natural dismissal point (skip confirmations,
+// success notifications).
+func statusMessageTimed(msg string, d time.Duration) {
+	statusMessage(msg)
+	go func() {
+		time.Sleep(d)
+		statusMessage("")
+	}()
 }
 
 // plymouthMessage displays a message on the plymouth splash screen.

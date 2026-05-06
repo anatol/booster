@@ -494,11 +494,10 @@ var consoleMu sync.Mutex
 //     it to skip a redraw once the volume is unlocked by another method
 //     (avoids redrawing a prompt that's about to be dismissed)
 var consolePrompt struct {
+	active    bool
+	text      string
 	asterisks int
-	// Foreshadowed for the upcoming Plymouth splash UX work — see comment above.
-	// active bool
-	// text   string
-	// done   <-chan struct{}
+	done      <-chan struct{}
 }
 
 // consolePrint writes msg without acquiring consoleMu. Callers must hold consoleMu.
@@ -591,17 +590,28 @@ func readPasswordOn(ctx context.Context, tty *os.File, prompt, postPrompt string
 
 	consoleMu.Lock()
 	consolePrint(prompt)
+	consolePrompt.active = true
+	consolePrompt.text = prompt
 	consolePrompt.asterisks = 0
+	consolePrompt.done = ctx.Done()
 	consoleMu.Unlock()
 
+	defer func() {
+		consoleMu.Lock()
+		consolePrompt.active = false
+		consolePrompt.done = nil
+		consoleMu.Unlock()
+	}()
+
 	// cancelRead is the cleanup hook for ctx-cancellation mid-prompt: flush
-	// type-ahead so partial bytes don't bleed into the next prompt, erase the
-	// prompt line so it doesn't linger on screen, and return ctx.Err() so the
-	// caller can distinguish cancel from "user pressed Enter". Termios
-	// restoration happens via defer above.
+	// type-ahead so partial bytes don't bleed into the next prompt, mark the
+	// prompt inactive, erase the prompt line so it doesn't linger on screen,
+	// and return ctx.Err() so the caller can distinguish cancel from "user
+	// pressed Enter". Termios restoration happens via defer above.
 	cancelRead := func() ([]byte, error) {
 		_ = unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIFLUSH)
 		consoleMu.Lock()
+		consolePrompt.active = false
 		consolePrint(eraseLineAndAdvance)
 		consoleMu.Unlock()
 		return nil, ctx.Err()
