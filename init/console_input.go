@@ -531,7 +531,7 @@ func readPasswordLocked(ctx context.Context, prompt, postPrompt string) ([]byte,
 // they can exercise termios setup, the Poll loop, and ctx cancellation
 // end-to-end. See TestReadPasswordOn* in console_input_pty_test.go.
 //
-// Read-loop design (the cancellable-read primitive K is built on):
+// Read-loop design (the cancellable-read primitive):
 //   - Termios is set to VMIN=1, VTIME=0: read(2) would block until 1 byte.
 //   - Instead of calling Read directly, we poll(2) with a 100ms timeout.
 //   - Between polls we check ctx.Err() — if cancelled, return ctx.Err()
