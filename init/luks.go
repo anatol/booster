@@ -172,7 +172,7 @@ func isHidRawFido2(devName string) (bool, error) {
 	return false, nil
 }
 
-func recoverFido2Password(devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
+func recoverFido2Password(ctx context.Context, devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
 	usbhidWg.Wait()
 
 	isFido2, err := isHidRawFido2(devName)
@@ -204,8 +204,7 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	var pin string
 	if pinRequired {
 		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
-		// FIDO2 PIN call site: pass Background until L2 threads ctx into recoverFido2Password.
-		pinBytes, err := askPasswordWithFallback(context.Background(), prompt, "")
+		pinBytes, err := askPasswordWithFallback(ctx, prompt, "")
 		if err != nil {
 			return nil, err
 		}
@@ -255,7 +254,7 @@ var errFido2TouchTimeout = errors.New("FIDO2 touch timed out")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
-func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, error) {
+func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
 		Salt                     string `json:"fido2-salt"`       // base64
@@ -320,7 +319,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 		promptPrefix := ""
 		attempt := 0
 		for attempt < maxAttempts {
-			password, err = recoverFido2Password(devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
+			password, err = recoverFido2Password(ctx, devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
 			if err == nil {
 				break
 			}
@@ -378,7 +377,7 @@ func recoverSystemdFido2Password(t luks.Token, mappingName string) ([]byte, erro
 	return nil, errFido2FallbackToKeyboard
 }
 
-func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error) {
+func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"` // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
@@ -438,8 +437,7 @@ func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error
 		var authValue []byte
 		if node.Pin {
 			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
-			// TPM2 PIN call site: pass Background until L2 threads ctx into recoverSystemdTPM2Password.
-			pin, err := askPasswordWithFallback(context.Background(), prompt, "")
+			pin, err := askPasswordWithFallback(ctx, prompt, "")
 			if err != nil {
 				return nil, err
 			}
@@ -517,9 +515,9 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	case "clevis":
 		password, err = recoverClevisPassword(t, d.Version())
 	case "systemd-fido2":
-		password, err = recoverSystemdFido2Password(t, mappingName)
+		password, err = recoverSystemdFido2Password(ctx, t, mappingName)
 	case "systemd-tpm2":
-		password, err = recoverSystemdTPM2Password(t, mappingName)
+		password, err = recoverSystemdTPM2Password(ctx, t, mappingName)
 	default:
 		info("token #%d has unknown type: %s", t.ID, t.Type)
 		return false

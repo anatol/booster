@@ -146,8 +146,7 @@ func plymouthAskPassword(prompt string) ([]byte, error) {
 // askPasswordWithFallback prompts via plymouth when enabled. Any plymouth
 // failure logs a warning and falls through to the console reader. ctx
 // cancellation is honored only by the console reader path; plymouth's IPC
-// is not yet ctx-aware. Pass context.Background() if cancellation is not
-// needed (e.g. FIDO2-PIN / TPM2-PIN call sites until L2 lands).
+// is not yet ctx-aware.
 func askPasswordWithFallback(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
 	if plymouthEnabled {
 		password, err := plymouthAskPassword(prompt)
