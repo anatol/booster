@@ -204,7 +204,8 @@ func recoverFido2Password(devName string, credential string, salt string, relyin
 	var pin string
 	if pinRequired {
 		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
-		pinBytes, err := askPasswordWithFallback(prompt, "")
+		// FIDO2 PIN call site: pass Background until L2 threads ctx into recoverFido2Password.
+		pinBytes, err := askPasswordWithFallback(context.Background(), prompt, "")
 		if err != nil {
 			return nil, err
 		}
@@ -437,7 +438,8 @@ func recoverSystemdTPM2Password(t luks.Token, mappingName string) ([]byte, error
 		var authValue []byte
 		if node.Pin {
 			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
-			pin, err := askPasswordWithFallback(prompt, "")
+			// TPM2 PIN call site: pass Background until L2 threads ctx into recoverSystemdTPM2Password.
+			pin, err := askPasswordWithFallback(context.Background(), prompt, "")
 			if err != nil {
 				return nil, err
 			}
@@ -677,7 +679,7 @@ func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d l
 
 		prompt := promptPrefix + fmt.Sprintf("Enter passphrase for %s:", mappingName)
 
-		password, err := askPasswordWithFallback(prompt, "   Unlocking...")
+		password, err := askPasswordWithFallback(ctx, prompt, "   Unlocking...")
 		if err != nil {
 			warning("reading password: %v", err)
 			return
