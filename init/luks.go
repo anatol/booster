@@ -535,7 +535,26 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	}
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
-	return tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password)
+	if !tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password) {
+		return false
+	}
+	statusMessageTimed(mappingName+" unlocked via "+tokenFriendlyName(t.Type), 3*time.Second)
+	return true
+}
+
+// tokenFriendlyName returns a short human-readable label for a token type, used
+// in the unlock-confirmation status message.
+func tokenFriendlyName(typ string) string {
+	switch typ {
+	case "systemd-fido2":
+		return "FIDO2"
+	case "systemd-tpm2":
+		return "TPM2"
+	case "clevis":
+		return "clevis"
+	default:
+		return typ
+	}
 }
 
 // readKeyfile reads a keyfile at path, skipping offset bytes and reading at most
