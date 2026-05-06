@@ -3,13 +3,10 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"sync"
 	"unsafe"
 
-	"github.com/anatol/booster/init/quirk"
 	"golang.org/x/sys/unix"
 )
 
@@ -145,76 +142,3 @@ func configureVirtualConsole() error {
 	return nil
 }
 
-// readPasswordLine reads from reader until it finds \n or io.EOF.
-// The slice returned does not include the \n.
-// readPasswordLine also ignores any \r it finds.
-// Windows uses \r as end of line. So, on Windows, readPasswordLine
-// reads until it finds \r and ignores any \n it finds during processing.
-func readPasswordLine(reader io.Reader) ([]byte, error) {
-	var buf [1]byte
-	var ret []byte
-
-	for {
-		n, err := reader.Read(buf[:])
-		if n > 0 {
-			switch buf[0] {
-			case '\b':
-				if len(ret) > 0 {
-					ret = ret[:len(ret)-1]
-				}
-			case '\n':
-				return ret, nil
-			default:
-				ret = append(ret, buf[0])
-			}
-			continue
-		}
-		if err != nil {
-			if err == io.EOF && len(ret) > 0 {
-				return ret, nil
-			}
-			return ret, err
-		}
-	}
-}
-
-var inputMutex sync.Mutex
-
-// readPasswordLocked reads a password from stdin. The caller must hold
-// inputMutex before calling this function.
-func readPasswordLocked(prompt, postPrompt string) ([]byte, error) {
-	console(prompt)
-
-	stdin := os.Stdin
-	fd := int(stdin.Fd())
-
-	termios, err := unix.IoctlGetTermios(fd, unix.TCGETS)
-	if err != nil {
-		return nil, err
-	}
-
-	newState := *termios
-	newState.Lflag &^= unix.ECHO
-	newState.Lflag |= unix.ICANON | unix.ISIG
-	newState.Iflag |= unix.ICRNL
-	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &newState); err != nil {
-		return nil, err
-	}
-
-	defer unix.IoctlSetTermios(fd, unix.TCSETS, termios)
-
-	password, err := readPasswordLine(stdin)
-	if postPrompt != "" {
-		console(postPrompt)
-	}
-	if !quirk.TestEnabled {
-		console("\n")
-	}
-	return password, err
-}
-
-func readPassword(prompt, postPrompt string) ([]byte, error) {
-	inputMutex.Lock()
-	defer inputMutex.Unlock()
-	return readPasswordLocked(prompt, postPrompt)
-}
