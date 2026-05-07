@@ -8,6 +8,65 @@ import (
 	"net"
 )
 
+// Direct IPC client for plymouthd's abstract Unix socket.
+//
+// Plymouth is the graphical boot splash daemon used to render password
+// prompts and progress messages during early boot:
+// https://gitlab.freedesktop.org/plymouth/plymouth
+//
+// The wire protocol verbs and reply byte constants are defined upstream in
+// src/libply-splash-core/ply-boot-protocol.h.
+//
+// Frame format for client → server commands:
+//
+//	[verb byte] [version = 2] [argLen byte] [argLen bytes, NUL-terminated]
+//
+// The server replies with a single byte for most verbs: 0x06 (ACK) on
+// success, 0x15 (NAK) on failure. The ask-password verb '*' is the
+// exception: the server replies with 0x02 (Answer) followed by
+// [uint32 length, little-endian][password bytes, not NUL-terminated].
+// plymouthAskPasswordSocket implements the answer-shaped exchange;
+// plymouthCmd handles the ACK/NAK shape used by ping, message, quit, etc.
+//
+// Verb reference (full set from ply-boot-protocol.h; only the first six are
+// exercised by booster — the rest are listed so future callers don't have
+// to cross-reference upstream):
+//
+//	IMPLEMENTED
+//	  P   PING                 plymouthPingOnce — readiness probe
+//	  $   SHOW_SPLASH          shown once plymouthd is up
+//	  *   PASSWORD             plymouthAskPasswordSocket (Answer reply)
+//	  M   SHOW_MESSAGE         plymouthMessage — status text under the prompt
+//	  Q   QUIT                 sent with retain-splash=1 at switchroot handoff
+//	  R   NEWROOT              advertises the new root path to plymouthd
+//
+//	UNUSED (defined upstream, no booster caller)
+//	  U   UPDATE               progress-bar percent
+//	  C   CHANGE_MODE          boot/shutdown/updates/firmware-upgrade/etc
+//	  u   SYSTEM_UPDATE        system-upgrade DM message
+//	  S   SYSTEM_INITIALIZED   "userspace is up" signal
+//	  D   DEACTIVATE           hand display ownership off (e.g. to systemd)
+//	  r   REACTIVATE           reclaim display ownership
+//	  l   RELOAD               re-read theme after handoff
+//	  c   CACHED_PASSWORD      replay a previously-collected password
+//	  W   QUESTION             free-form prompt (Answer-shaped reply)
+//	  m   HIDE_MESSAGE         clear a message previously shown via M
+//	  K   KEYSTROKE            subscribe to one keystroke
+//	  L   KEYSTROKE_REMOVE     unsubscribe
+//	  A   PROGRESS_PAUSE       freeze the throbber/progress-bar animation
+//	  a   PROGRESS_UNPAUSE     resume it
+//	  H   HIDE_SPLASH          (we use Q with retain=1 instead)
+//	  V   HAS_ACTIVE_VT        boolean reply about VT ownership
+//	  !   ERROR                push an error string into the splash
+//
+// Server response bytes:
+//
+//	0x06 ACK              success for command-shape verbs
+//	0x15 NAK              failure for command-shape verbs
+//	0x02 Answer           single answer (password/question reply)
+//	0x09 Multiple-Answers answer list (rare; multi-line questions)
+//	0x05 No-Answer        user dismissed the prompt without entering one
+
 const (
 	plymouthSocket = "\x00/org/freedesktop/plymouthd"
 	plymouthACK    = '\x06'
