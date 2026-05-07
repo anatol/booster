@@ -82,15 +82,14 @@ func initPlymouth() {
 	}
 	go cmd.Wait() // reap process in background
 
-	// Wait for plymouthd to be ready. Plymouth's --wait flag has its own
-	// internal retry loop but it only retries on connection failure. If
-	// plymouthd accepts the connection but isn't ready to process pings
-	// (still in device setup), --wait returns failure immediately. So we
-	// implement our own retry loop.
+	// Wait for plymouthd to be ready via direct socket ping. Plymouth's
+	// --wait flag has its own internal retry loop but only retries on
+	// connection failure; if plymouthd accepts the connection but isn't
+	// ready (still in device setup), --wait returns failure immediately.
 	pingDeadline := time.Now().Add(20 * time.Second)
 	pingOK := false
 	for time.Now().Before(pingDeadline) {
-		if exec.Command("plymouth", "--ping").Run() == nil {
+		if plymouthPingOnce() {
 			pingOK = true
 			break
 		}
@@ -103,7 +102,7 @@ func initPlymouth() {
 	}
 
 	// Show splash
-	if err := exec.Command("plymouth", "show-splash").Run(); err != nil {
+	if err := plymouthCmd('$', ""); err != nil {
 		warning("plymouth: failed to show splash: %v", err)
 		// plymouthd is running but splash failed; keep plymouth enabled
 		// for password prompts which may still work
@@ -208,18 +207,19 @@ func statusMessageTimed(msg string, d time.Duration) {
 
 // plymouthMessage displays a message on the plymouth splash screen.
 func plymouthMessage(msg string) {
-	if err := exec.Command("plymouth", "display-message", "--text="+msg).Run(); err != nil {
+	if err := plymouthCmd('M', msg); err != nil {
 		debug("plymouth: display-message failed: %v", err)
 	}
 }
 
-// plymouthQuit tells plymouth to quit with a timeout so it can't hang boot.
+// plymouthQuit tells plymouth to quit.
 func plymouthQuit() {
 	if !plymouthEnabled {
 		return
 	}
 	debug("plymouth: sending quit")
-	if err := exec.Command("plymouth", "quit").Run(); err != nil {
+	// Quit frame: Q + arg-marker + arg-len(1) + retain_splash(0).
+	if _, err := plymouthSendRecv([]byte{'Q', 2, 1, 0}); err != nil {
 		warning("plymouth: quit failed: %v", err)
 	}
 }
@@ -231,7 +231,7 @@ func plymouthNewroot(root string) {
 		return
 	}
 	debug("plymouth: setting newroot to %s", root)
-	if err := exec.Command("plymouth", "update-root-fs", "--new-root-dir="+root).Run(); err != nil {
+	if err := plymouthCmd('R', root); err != nil {
 		warning("plymouth: update-root-fs failed: %v", err)
 	}
 }
