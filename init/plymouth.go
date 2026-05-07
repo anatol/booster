@@ -1,17 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 var (
 	plymouthEnabled  bool
 	plymouthInitDone = make(chan struct{})
+	// plymouthPasswordMu serializes plymouthAskPassword calls so concurrent
+	// unlock goroutines don't stack two prompts on the splash at once.
+	plymouthPasswordMu sync.Mutex
 )
 
 // waitForPlymouthInit blocks until the plymouth initialization phase is
@@ -151,28 +156,47 @@ func getPlymouthdArgs() []string {
 	}
 }
 
-// plymouthAskPassword prompts the user for a password via plymouth.
-// Returns the password bytes or an error if plymouth fails.
-func plymouthAskPassword(prompt string) ([]byte, error) {
-	cmd := exec.Command("plymouth", "ask-for-password", "--prompt="+prompt)
-	out, err := cmd.Output()
+// plymouthAskPassword displays a password prompt on the splash and blocks
+// until the user submits a password — or ctx is cancelled, in which case
+// the underlying socket is closed. The goroutine returns cleanly either
+// way. plymouthd builds whose connection-hangup handler tears down pending
+// prompts also dismiss the on-screen UI on close; older builds leave the
+// prompt UI visible until the splash is otherwise cleared.
+//
+// Wire ctx to the LUKS unlock done channel so a sibling token unlocking the
+// volume cancels this prompt automatically.
+func plymouthAskPassword(ctx context.Context, prompt string) ([]byte, error) {
+	plymouthPasswordMu.Lock()
+	defer plymouthPasswordMu.Unlock()
+	// Re-check after acquiring: if another goroutine was showing a prompt
+	// and the volume got unlocked while we were waiting on the mutex, skip
+	// our prompt entirely so we don't flash a UI for an already-unlocking
+	// volume.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	out, err := plymouthAskPasswordSocket(ctx, prompt)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
-	// plymouth outputs the password followed by a newline
-	password := strings.TrimRight(string(out), "\n")
-	return []byte(password), nil
+	return bytes.TrimRight(out, "\n"), nil
 }
 
-// askPasswordWithFallback prompts via plymouth when enabled. Any plymouth
-// failure logs a warning and falls through to the console reader. ctx
-// cancellation is honored only by the console reader path; plymouth's IPC
-// is not yet ctx-aware.
+// askPasswordWithFallback prompts via plymouth when enabled, falling back
+// to the console reader on plymouth failure. Returns ctx.Err() without
+// falling back when ctx is cancelled — avoids flashing a console prompt
+// for a volume another unlock path has already won.
 func askPasswordWithFallback(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
 	if plymouthEnabled {
-		password, err := plymouthAskPassword(prompt)
+		password, err := plymouthAskPassword(ctx, prompt)
 		if err == nil {
 			return password, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		warning("Plymouth password prompt failed: %v, falling back to console", err)
 	}
