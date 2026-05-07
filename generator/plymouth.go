@@ -50,8 +50,9 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	}
 	debug("plymouth paths: plugins=%s themes=%s conf=%s policy=%s", pluginDir, themesDir, confDir, policyDir)
 
-	// Add plymouth binaries (appendExtraFiles auto-resolves ELF deps)
-	if err := img.appendExtraFiles("plymouth", "plymouthd"); err != nil {
+	// Add plymouthd — the init process speaks to it directly via socket.
+	// The plymouth CLI client is no longer bundled.
+	if err := img.appendExtraFiles("plymouthd"); err != nil {
 		return fmt.Errorf("plymouth binaries: %v", err)
 	}
 
