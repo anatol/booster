@@ -51,6 +51,32 @@ func TestAppendCrypttabAbsent(t *testing.T) {
 	img, _ := newTestImage(t)
 	_, err := img.appendCrypttab(filepath.Join(t.TempDir(), "no-such-file"))
 	require.Error(t, err)
+	require.True(t, os.IsNotExist(err), "expected IsNotExist, got %v", err)
+}
+
+// A crypttab that exists but is unreadable must surface as a permission
+// error from appendCrypttab so the caller (generateInitRamfs) can
+// distinguish absent-file (silent skip) from present-but-unreadable
+// (warn-and-continue when path is the default, fail when --crypttab is
+// explicit). Regression coverage for v0.13: a generator running
+// unprivileged on a system that DOES use /etc/crypttab must not silently
+// produce an image lacking LUKS unlock specs.
+func TestAppendCrypttabUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission bits ignored when running as root")
+	}
+	dir := t.TempDir()
+	crypttab := filepath.Join(dir, "crypttab")
+	require.NoError(t, os.WriteFile(crypttab, []byte(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none x-initrd.attach\n",
+	), 0o000))
+
+	img, _ := newTestImage(t)
+	_, err := img.appendCrypttab(crypttab)
+	require.Error(t, err)
+	require.True(t, os.IsPermission(err), "expected IsPermission, got %v", err)
+	require.False(t, os.IsNotExist(err), "must not look like an absent file")
+	require.False(t, img.contains["/etc/crypttab"])
 }
 
 func TestAppendCrypttabBundled(t *testing.T) {

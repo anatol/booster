@@ -123,9 +123,14 @@ func generateInitRamfs(conf *generatorConfig) error {
 		crypttabPath = "/etc/crypttab"
 	}
 	if hasFido2, err := img.appendCrypttab(crypttabPath); err != nil {
-		if !explicitCrypttab && (os.IsNotExist(err) || os.IsPermission(err)) {
-			// default path unavailable — crypttab is optional, skip silently
-		} else {
+		switch {
+		case explicitCrypttab:
+			return err
+		case os.IsNotExist(err):
+			// optional file
+		case os.IsPermission(err):
+			warning("crypttab: %s exists but is unreadable (%v) — image will lack /etc/crypttab-derived LUKS unlock specs; re-run with sufficient privileges to include them", crypttabPath, err)
+		default:
 			return err
 		}
 	} else if hasFido2 {
