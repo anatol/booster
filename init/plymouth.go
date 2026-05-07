@@ -71,14 +71,30 @@ func initPlymouth() {
 
 	cmd := exec.Command("plymouthd", args...)
 	cmd.Env = []string{"PATH=/usr/bin"}
+
+	// Write plymouthd stderr directly to /dev/kmsg rather than inheriting
+	// booster's stderr. Inherited fds are closed (FD_CLOEXEC) when booster
+	// exec's to systemd, causing plymouthd to receive EPIPE on its next
+	// stderr write and die — before systemd's plymouth-start.service can
+	// attach to the existing session.
+	kmsg, err := os.OpenFile("/dev/kmsg", os.O_WRONLY, 0)
+	if err != nil {
+		debug("plymouth: could not open /dev/kmsg for plymouthd stderr: %v", err)
+	} else {
+		cmd.Stderr = kmsg
+	}
+
 	// Use Start() instead of Run(). Plymouthd may not daemonize in debug
 	// mode (plymouth.debug on kernel cmdline), so Run() would block forever
 	// waiting for the foreground process to exit. Start() returns immediately
-	// and we use "plymouth --wait --ping" to detect when the daemon is ready.
+	// and we use a socket ping to detect when the daemon is ready.
 	if err := cmd.Start(); err != nil {
 		warning("plymouth: failed to start plymouthd: %v", err)
 		plymouthEnabled = false
 		return
+	}
+	if kmsg != nil {
+		kmsg.Close() // booster no longer needs this end; plymouthd inherited it
 	}
 	go cmd.Wait() // reap process in background
 
