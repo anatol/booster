@@ -132,7 +132,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
 
 Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see **crypttab(5)**).
-Only entries marked with the `x-initrd.attach` option are bundled into the initramfs at image build time. `rd.luks.*` kernel parameters take precedence — if a cmdline parameter already covers a device, its crypttab entry is skipped.
+Only entries marked with the `x-initrd.attach` option are bundled into the initramfs at image build time. When both a `rd.luks.*` cmdline parameter and a crypttab entry cover the same device, the cmdline takes precedence for the device reference and mapping name; the crypttab entry's security options (keyfile, header, tries, token-timeout, …) are merged in. Crypttab entries for devices not covered by `rd.luks.*` are appended as new mappings.
 
 Booster-specific behaviour for selected options:
  * **keyfile** `/path:UUID=xxx` (or `LABEL=`, `PARTUUID=`, `PARTLABEL=`) — keyfile on a separate device. Booster mounts the device read-only at boot, reads the key, then unmounts. The file is not bundled into the initramfs.
