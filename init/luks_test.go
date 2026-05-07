@@ -224,3 +224,60 @@ func TestMatchLuksMappingNoMatchReturnsNil(t *testing.T) {
 	require.Same(t, rootRef, cmdRoot)
 }
 
+// unreachableMapperName fires only when cmdRoot is /dev/mapper/<name> and no
+// luksMapping covers <name>. Any other shape is silent so we don't spam LVM
+// or RAID setups.
+func TestUnreachableMapperName(t *testing.T) {
+	cases := []struct {
+		desc     string
+		root     *deviceRef
+		mappings []*luksMapping
+		wantName string
+		wantOK   bool
+	}{
+		{
+			desc:     "root=/dev/mapper/cryptroot with empty luksMappings",
+			root:     &deviceRef{format: refPath, data: "/dev/mapper/cryptroot"},
+			wantName: "cryptroot",
+			wantOK:   true,
+		},
+		{
+			desc:   "no cmdRoot",
+			root:   nil,
+			wantOK: false,
+		},
+		{
+			desc:   "root=UUID=… is silent",
+			root:   &deviceRef{format: refFsUUID, data: UUID{}},
+			wantOK: false,
+		},
+		{
+			desc:   "root=/dev/sda1 (non-mapper path) is silent",
+			root:   &deviceRef{format: refPath, data: "/dev/sda1"},
+			wantOK: false,
+		},
+		{
+			desc:     "root=/dev/mapper/cryptroot WITHOUT covering mapping",
+			root:     &deviceRef{format: refPath, data: "/dev/mapper/cryptroot"},
+			mappings: []*luksMapping{{name: "swap"}},
+			wantName: "cryptroot",
+			wantOK:   true,
+		},
+		{
+			desc:     "root=/dev/mapper/cryptroot WITH covering mapping",
+			root:     &deviceRef{format: refPath, data: "/dev/mapper/cryptroot"},
+			mappings: []*luksMapping{{name: "cryptroot"}},
+			wantOK:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			withLuksGlobals(t)
+			cmdRoot = tc.root
+			luksMappings = tc.mappings
+			name, ok := unreachableMapperName()
+			require.Equal(t, tc.wantOK, ok)
+			require.Equal(t, tc.wantName, name)
+		})
+	}
+}

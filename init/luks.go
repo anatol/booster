@@ -971,6 +971,27 @@ func loadRequiredCryptoModules(encryption string) error {
 	return nil
 }
 
+// unreachableMapperName reports the basename of cmdRoot when it is a
+// /dev/mapper/<name> path-ref AND no luksMapping exists with that name. Used
+// to surface a diagnostic for the boot pattern that silently hangs when a
+// LUKS unlock spec is missing.
+func unreachableMapperName() (string, bool) {
+	if cmdRoot == nil || cmdRoot.format != refPath {
+		return "", false
+	}
+	p, ok := cmdRoot.data.(string)
+	if !ok || !strings.HasPrefix(p, "/dev/mapper/") {
+		return "", false
+	}
+	name := strings.TrimPrefix(p, "/dev/mapper/")
+	for _, m := range luksMappings {
+		if m.name == name {
+			return "", false
+		}
+	}
+	return name, true
+}
+
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
 		if blk.matchesRef(m.ref) {
