@@ -974,6 +974,12 @@ func loadRequiredCryptoModules(encryption string) error {
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	for _, m := range luksMappings {
 		if blk.matchesRef(m.ref) {
+			// Mirror the synthesis-fallback remap so root=UUID=<luks-uuid>
+			// keeps working after a crypttab/rd.luks.* entry adds the mapping.
+			if blk.matchesRef(cmdRoot) {
+				info("LUKS device %s matches root=, re-pointing root to /dev/mapper/%s", blk.path, m.name)
+				cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/" + m.name}
+			}
 			return m
 		}
 	}
