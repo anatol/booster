@@ -1081,6 +1081,14 @@ func boost() error {
 		}
 	}
 
+	// Diagnostic for the silent-hang case where root= names a /dev/mapper/<name>
+	// device but nothing in our config will create that mapper. Emitted as a
+	// warning rather than a fatal because LVM / RAID / dm-integrity can also
+	// produce mapper nodes via paths outside luksMappings.
+	if name, ok := unreachableMapperName(); ok {
+		warning("root=/dev/mapper/%s but no LUKS unlock spec was found for %q — if this is a LUKS root, image is missing rd.luks.name=, an /etc/crypttab entry with x-initrd.attach, or a DPS-tagged LUKS root partition; if this is LVM/RAID/dm-integrity this warning is benign", name, name)
+	}
+
 	// Check if plymouth should be enabled: needs both config and "splash" kernel param
 	if config.EnablePlymouth {
 		cmdlineBytes, err := os.ReadFile("/proc/cmdline")
