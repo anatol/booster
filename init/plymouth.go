@@ -222,10 +222,17 @@ func statusMessageTimed(msg string, d time.Duration) {
 }
 
 // plymouthMessage displays a message on the plymouth splash screen.
+//
+// Fire-and-forget: send in a goroutine so callers never block on plymouthd.
+// plymouthd is single-threaded and can stall during render setup or while a
+// password prompt is on screen; a synchronous in-process call would block
+// the calling goroutine on splash state, slowing concurrent unlock work.
 func plymouthMessage(msg string) {
-	if err := plymouthCmd('M', msg); err != nil {
-		debug("plymouth: display-message failed: %v", err)
-	}
+	go func() {
+		if err := plymouthCmd('M', msg); err != nil {
+			debug("plymouth: display-message failed: %v", err)
+		}
+	}()
 }
 
 // plymouthQuit tells plymouth to quit.
