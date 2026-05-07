@@ -653,13 +653,10 @@ func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d l
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
-	waitForPlymouthInit()
-
-	// Bail early if the device was already unlocked by a token goroutine.
-	select {
-	case <-ctx.Done():
+	// ctx cancellation lets a sibling token unlocking the device dismiss
+	// this wait without forcing it to the plymouth-init timeout.
+	if err := waitForPlymouthInit(ctx); err != nil {
 		return
-	default:
 	}
 
 	// Fast path: try passwords that already unlocked another volume this boot

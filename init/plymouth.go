@@ -15,10 +15,16 @@ var (
 )
 
 // waitForPlymouthInit blocks until the plymouth initialization phase is
-// complete (either plymouthd is running or plymouth was disabled).
+// complete (either plymouthd is running or plymouth was disabled), or until
+// ctx is cancelled. Returns ctx.Err() on cancellation, nil otherwise.
 // Safe to call multiple times; returns immediately after the first close.
-func waitForPlymouthInit() {
-	<-plymouthInitDone
+func waitForPlymouthInit(ctx context.Context) error {
+	select {
+	case <-plymouthInitDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // initPlymouth starts the plymouth daemon and shows the splash screen.
