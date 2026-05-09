@@ -509,7 +509,20 @@ func consolePrint(msg string) {
 	}
 }
 
-// Terminal byte sequences written via consolePrint.
+// consoleEcho writes terminal-only decoration (asterisks, backspace, line-erase
+// sequences) under consoleMu. In qemu integration builds (-tags test) it is a
+// no-op: per-character writes to /dev/kmsg flood the kernel log without
+// rendering anything useful (issue #360). readPasswordOn emits one summary
+// "password typed" line at end-of-input to keep a breadcrumb in test logs.
+// Callers must hold consoleMu.
+func consoleEcho(msg string) {
+	if quirk.TestEnabled {
+		return
+	}
+	fmt.Print(msg)
+}
+
+// Terminal byte sequences written via consoleEcho.
 const (
 	eraseChar           = "\b \b"      // erase the character at the cursor
 	eraseLineAndAdvance = "\r\x1b[K\n" // wipe current line and move to next
@@ -612,7 +625,7 @@ func readPasswordOn(ctx context.Context, tty *os.File, prompt, postPrompt string
 		_ = unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIFLUSH)
 		consoleMu.Lock()
 		consolePrompt.active = false
-		consolePrint(eraseLineAndAdvance)
+		consoleEcho(eraseLineAndAdvance)
 		consoleMu.Unlock()
 		return nil, ctx.Err()
 	}
@@ -662,7 +675,7 @@ loop:
 			if !masked {
 				consoleMu.Lock()
 				consolePrompt.asterisks++
-				consolePrint("*")
+				consoleEcho("*")
 				consoleMu.Unlock()
 			}
 		case keyBackspace:
@@ -672,7 +685,7 @@ loop:
 				if !masked {
 					consoleMu.Lock()
 					consolePrompt.asterisks--
-					consolePrint(eraseChar)
+					consoleEcho(eraseChar)
 					consoleMu.Unlock()
 				}
 			}
@@ -681,12 +694,12 @@ loop:
 			if masked {
 				cp := countCodepoints(password)
 				for range cp {
-					consolePrint("*")
+					consoleEcho("*")
 				}
 				consolePrompt.asterisks = cp
 			} else {
 				for range consolePrompt.asterisks {
-					consolePrint(eraseChar)
+					consoleEcho(eraseChar)
 				}
 				consolePrompt.asterisks = 0
 			}
@@ -697,7 +710,7 @@ loop:
 				consoleMu.Lock()
 				if !masked {
 					for range consolePrompt.asterisks {
-						consolePrint(eraseChar)
+						consoleEcho(eraseChar)
 					}
 				}
 				consolePrompt.asterisks = 0
@@ -711,7 +724,7 @@ loop:
 					consoleMu.Lock()
 					if !masked {
 						for range removed {
-							consolePrint(eraseChar)
+							consoleEcho(eraseChar)
 						}
 					}
 					consolePrompt.asterisks -= removed
@@ -728,6 +741,10 @@ loop:
 	}
 	if !quirk.TestEnabled {
 		console("\n")
+	} else if len(password) > 0 {
+		// Replace the per-keystroke asterisks consoleEcho suppressed in
+		// test builds with one breadcrumb line — issue #360.
+		info("password typed (%d chars)", countCodepoints(password))
 	}
 	return password, nil
 }
