@@ -3,6 +3,7 @@ package tests
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,11 +162,11 @@ func TestRemoteUnlock(t *testing.T) {
 
 	// unlock remotely
 	cmd := exec.Command("tangctl", "unlock", "localhost:34551", "assets/remote/key.priv")
+	out, err := cmd.CombinedOutput()
 	if testing.Verbose() {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		os.Stdout.Write(out)
 	}
-	require.NoError(t, cmd.Run())
+	require.NoErrorf(t, err, "remote unlock failed: cmd=%q output=%s", cmd.String(), strings.TrimSpace(string(out)))
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }

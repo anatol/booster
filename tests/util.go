@@ -166,7 +166,7 @@ func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	defer sessAnalyze.Close()
 
 	out, err := sessAnalyze.CombinedOutput(command)
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "ssh command failed: %q\noutput:\n%s", command, strings.TrimSpace(string(out)))
 
 	return string(out)
 }

@@ -132,8 +132,7 @@ func lockAssetGeneration(name string) func() {
 
 func checkAsset(file string) error {
 	if !strings.HasPrefix(file, "assets/") {
-		fmt.Println("asset path has to start with assets/ prefix")
-		return nil
+		return fmt.Errorf("asset path has to start with assets/ prefix: %s", file)
 	}
 
 	name := file[7:]
@@ -156,7 +155,7 @@ func checkAsset(file string) error {
 	err := shell("generators/"+gen.script, env...)
 	if err != nil {
 		_ = os.Remove(file)
-		return err
+		return fmt.Errorf("failed to generate asset %s using %s: %w", file, gen.script, err)
 	}
 	enforceReadOnlyAssetOutputs(file, env)
 	return nil
