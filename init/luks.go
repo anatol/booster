@@ -466,6 +466,32 @@ func broadcastHidrawDevice(name string) {
 // messages. Channel-as-semaphore so acquire is ctx-cancellable.
 var fido2Sem = make(chan struct{}, 1)
 
+// Push a touchless FIDO2 device back into the goroutine's own listener channel
+// so the loop retries — the user can then touch the token at any point during
+// boot, including while a passphrase prompt is showing, and the unlock succeeds.
+//
+// Gates (silently no-op if any fail):
+//   - pinRequired: PIN tokens have already engaged the user via prompt;
+//     re-seeding them silently would be confusing.
+//   - elapsed > 1s: bounds hot-loops on fast-fail errors (immediate libfido2
+//     rejections that return in microseconds would otherwise spin).
+//   - ctx not done: don't re-seed if a sibling token has already won.
+func reseedTouchlessFido2(ctx context.Context, listener chan string, devName string, seen set, pinRequired bool, elapsed time.Duration) error {
+	if pinRequired || elapsed <= time.Second {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	seen[devName] = false
+	select {
+	case listener <- devName:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
 var errFido2WrongDevice = errors.New("FIDO2 device does not have our credential")
@@ -554,6 +580,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 		pinExhausted := false
 		promptPrefix := ""
 		attempt := 0
+		assertStart := time.Now() // for reseedTouchlessFido2's elapsed gate
 		for attempt < maxAttempts {
 			password, err = recoverFido2Password(ctx, devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
 			if err == nil {
@@ -605,6 +632,12 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 				continue
 			}
 			info("%v", err)
+			// Private re-seed (not broadcast): sibling FIDO2 goroutines already
+			// tracked the device in their own seenHidrawDevices, so broadcasting
+			// would be a no-op for them.
+			if reseedErr := reseedTouchlessFido2(ctx, hidrawDevices, devName, seenHidrawDevices, pinRequired, time.Since(assertStart)); reseedErr != nil {
+				return nil, reseedErr
+			}
 			continue
 		}
 		return password, nil
