@@ -250,11 +250,22 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 	cmd := exec.Command(binariesDir+"/generator", generatorArgs...)
 	if testing.Verbose() {
 		log.Print("Create booster.img with " + cmd.String())
+	}
+	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
+		}
+	} else {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			details := strings.TrimSpace(string(out))
+			if details == "" {
+				return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
+			}
+			return "", fmt.Errorf("Cannot generate booster.img: %v\nCommand output:\n%s", unwrapExitError(err), details)
+		}
 	}
 
 	// check generated image integrity
