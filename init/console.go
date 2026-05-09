@@ -141,4 +141,3 @@ func configureVirtualConsole() error {
 	}
 	return nil
 }
-

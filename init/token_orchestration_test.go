@@ -107,9 +107,7 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 			continue
 		}
 		t := t
-		senderWg.Add(1)
-		go func() {
-			defer senderWg.Done()
+		senderWg.Go(func() {
 			if isDone() {
 				record(t.id, "skipped-done")
 				return
@@ -120,13 +118,11 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 			if ok {
 				cancel()
 			}
-		}()
+		})
 	}
 
 	if len(pinSpecs) > 0 {
-		senderWg.Add(1)
-		go func() {
-			defer senderWg.Done()
+		senderWg.Go(func() {
 			for _, t := range pinSpecs {
 				if isDone() {
 					record(t.id, "skipped-done")
@@ -140,7 +136,7 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	senderWg.Wait()

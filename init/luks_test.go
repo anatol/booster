@@ -85,6 +85,7 @@ func TestParseSystemdTPM2BlobRejectsTruncatedData(t *testing.T) {
 	_, _, err = parseSystemdTPM2Blob([]byte{0x00, 0x01, 0x01, 0x00, 0x02, 0x04})
 	require.Error(t, err)
 }
+
 // withLuksGlobals saves and restores the package-global cmdRoot and luksMappings
 // so each test can mutate them in isolation.
 func withLuksGlobals(t *testing.T) {

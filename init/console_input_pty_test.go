@@ -117,8 +117,7 @@ func TestReadPasswordOnCtxCancelReturnsPromptly(t *testing.T) {
 func TestReadPasswordOnReadsTypedBytes(t *testing.T) {
 	master, slave := openPTY(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	type result struct {
 		password []byte
@@ -154,8 +153,7 @@ func TestReadPasswordOnReadsTypedBytes(t *testing.T) {
 func TestReadPasswordOnBackspaceDeletesCodepoint(t *testing.T) {
 	master, slave := openPTY(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	type result struct {
 		password []byte
@@ -190,8 +188,7 @@ func TestReadPasswordOnBackspaceDeletesCodepoint(t *testing.T) {
 func TestReadPasswordOnEmptyPassword(t *testing.T) {
 	master, slave := openPTY(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	type result struct {
 		password []byte
@@ -224,8 +221,7 @@ func TestReadPasswordOnEmptyPassword(t *testing.T) {
 func TestReadPasswordOnEOFMidRead(t *testing.T) {
 	master, slave := openPTY(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	type result struct {
 		password []byte
