@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -251,21 +252,16 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 	if testing.Verbose() {
 		log.Print("Create booster.img with " + cmd.String())
 	}
+	var outputBuf bytes.Buffer
 	if testing.Verbose() {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
-		}
+		cmd.Stdout = io.MultiWriter(os.Stdout, &outputBuf)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &outputBuf)
 	} else {
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			details := strings.TrimSpace(string(out))
-			if details == "" {
-				return "", fmt.Errorf("Cannot generate booster.img: %v", unwrapExitError(err))
-			}
-			return "", fmt.Errorf("Cannot generate booster.img: %v\nCommand output:\n%s", unwrapExitError(err), details)
-		}
+		cmd.Stdout = &outputBuf
+		cmd.Stderr = &outputBuf
+	}
+	if err := cmd.Run(); err != nil {
+		return "", formatGeneratorBuildError(err, cmd, outputBuf.String(), opts.kernelVersion)
 	}
 
 	// check generated image integrity
@@ -293,6 +289,27 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 	}
 
 	return output, nil
+}
+
+func formatGeneratorBuildError(err error, cmd *exec.Cmd, output, kernelVersion string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Cannot generate booster.img: %s\nCommand: %s", formatCommandFailure(err), cmd.String())
+
+	details := strings.TrimSpace(output)
+	if details != "" {
+		fmt.Fprintf(&b, "\nCommand output:\n%s", details)
+	}
+	return errors.New(b.String())
+}
+
+func formatCommandFailure(err error) string {
+	if err == nil {
+		return ""
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Sprintf("generator build failed with exit code %d", exitErr.ExitCode())
+	}
+	return err.Error()
 }
 
 type NetworkConfig struct {
