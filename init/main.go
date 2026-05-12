@@ -859,6 +859,8 @@ func deleteRamfs() error {
 
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
+	clearSplashStatusSync()
+
 	// Tell plymouth about the new root before moving mounts
 	plymouthNewroot(newRoot)
 

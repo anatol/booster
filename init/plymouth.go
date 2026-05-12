@@ -240,15 +240,18 @@ func promptVolumeUnlocked() bool {
 	}
 }
 
-// statusMessageTimed shows msg and clears it after d. Use for transient status
-// updates that have no other natural dismissal point (skip confirmations,
-// success notifications).
-func statusMessageTimed(msg string, d time.Duration) {
-	statusMessage(msg)
-	go func() {
-		time.Sleep(d)
-		statusMessage("")
-	}()
+// clearSplashStatusSync synchronously clears the splash status line. Used at
+// boot handoff (switchRoot) so the last "unlocked via …" frame isn't left
+// behind on the splash after we exec to systemd. Synchronous because
+// goroutine-deferred work doesn't survive exec — a fire-and-forget clear
+// can be cancelled by the exec before plymouthd ever sees it.
+func clearSplashStatusSync() {
+	if !plymouthEnabled {
+		return
+	}
+	if err := plymouthCmd('M', ""); err != nil {
+		debug("plymouth: clear status failed: %v", err)
+	}
 }
 
 // plymouthMessage displays a message on the plymouth splash screen.
