@@ -538,7 +538,7 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	if !tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password) {
 		return false
 	}
-	statusMessageTimed(mappingName+" unlocked via "+tokenFriendlyName(t.Type), 3*time.Second)
+	statusMessage(mappingName + " unlocked via " + tokenFriendlyName(t.Type))
 	return true
 }
 
