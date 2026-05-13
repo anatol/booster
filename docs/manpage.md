@@ -259,9 +259,14 @@ Editing keys beyond the standard:
  * **Ctrl+U** — erase the entire entry.
  * **Tab** — toggle visibility of the typed characters (asterisks ↔ literal).
 
-When any unlock method wins the race (a TPM2 PCR-only or FIDO2 touchless token completes, or a sibling volume's keyfile reads successfully), the keyboard prompt auto-dismisses and boot continues.
+### LUKS unlock concurrency and prompt order
+Booster runs LUKS unlock paths concurrently per volume — multiple enrolled tokens dispatch in parallel where possible, and the keyboard passphrase prompt runs alongside them as a fallback. This subsection summarises the deterministic ordering and the cancel-on-win behaviour that ties them together.
 
-PIN prompts (TPM2-PIN, FIDO2-PIN) accept up to 3 attempts; press Enter empty PIN to skip the token to the next unlock prompt.
+**PIN-token serialization.** Tokens that need a PIN (TPM2-PIN, FIDO2-PIN) prompt serially, in ascending LUKS2 token-ID order — booster never races two PIN prompts for the same keyboard. Tokens that do not need a PIN (TPM2 PCR-only, FIDO2 touchless) dispatch in parallel and can win the race without user interaction. To preview the PIN prompt order for a volume, run `cryptsetup luksDump <device>` and read the token IDs.
+
+**Cancel-on-win.** Any prompt — keyboard passphrase, FIDO2-PIN, or TPM2-PIN — is dismissed automatically when a parallel unlock path wins (a touchless token completes, a sibling volume's keyfile reads successfully, etc.). This applies on both the kernel console and the Plymouth splash. On Plymouth the on-screen prompt clears immediately on the server side once Plymouth MR !393 is picked up; older Plymouth builds release the prompt server-side but leave its UI drawn until the splash is otherwise cleared.
+
+**PIN attempt caps.** Each PIN-bearing token accepts up to 3 attempts; submit an empty PIN (just press Enter) to skip the token and dispatch the next one.
 
 ### Modules selection
 It is a note to summarize the algorithm that computes what modules are going to end up in the generated booster image.
