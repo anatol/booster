@@ -8,8 +8,8 @@ Booster advantages:
 
  * Fast image build time and fast boot time.
  * Out-of-box support for LUKS-based full disk encryption setup.
- * Clevis style data binding. The encrypted filesystem can be bound to TPM2 chip or to a network service. This helps to unlock the drive automatically but only if the TPM2/network service presents.
- * Automatically detects and unlocks systemd-cryptenroll (fido2 and tpm2) type of partition encryption.
+ * Clevis style data binding. The encrypted filesystem can be bound to a TPM2 chip or to a network service. This helps to unlock the drive automatically but only if the TPM2/network service is present.
+ * Automatically detects and unlocks systemd-cryptenroll (fido2 and tpm2) types of partition encryption.
  * Easy to configure.
  * Automatic host configuration discovery. This helps to create minimalistic images specific for the current host.
 
@@ -54,17 +54,17 @@ Booster advantages:
 
  * `append_all_modaliases` is a boolean flag that instructs booster to add all hosts's module aliases to the booster image. This flag is useful for debugging boot timeout issues when some important modules are missed from the image. Setting the flag to `true` will help to print module names for aliases that were requested by kernel but missed in the image.
 
- * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option specified then "zstd" is used as a default compression.
+ * `compression` is a flag that specifies compression for the output initramfs file. Currently supported algorithms are "zstd", "gzip", "xz", "lz4", "none". If no option is specified, "zstd" is used as the default compression.
 
- * `mount_timeout` timeout for waiting for the root filesystem to appear. The field format is a decimal number and then unit number. Valid units are "s", "m", "h". If no value specified then default timeout (3 minutes) is used. To disable the timeout completely specify "0s".
+ * `mount_timeout` timeout for waiting for the root filesystem to appear. The field format is a decimal number and then unit number. Valid units are "s", "m", "h". If no value is specified, the default timeout (3 minutes) is used. To disable the timeout completely specify "0s".
 
- * `strip` is a boolean flag that enables ELF files stripping before adding it to the image. Binaries, shared libraries and kernel modules are examples of ELF files that get processed with strip UNIX tool.
+ * `strip` is a boolean flag that enables stripping of ELF files before adding them to the image. Binaries, shared libraries and kernel modules are examples of ELF files that get processed with the strip UNIX tool.
 
-   This options is not compatible with signed modules. If you see `booster: finit(crc32,generic): key was rejected by service` boot error please set the `strip` config option to `false`.
+   This option is not compatible with signed modules. If you see `booster: finit(crc32,generic): key was rejected by service` boot error please set the `strip` config option to `false`.
 
  * `extra_files` is a comma-separated list of extra files to add to the image. If an item starts with slash ("/") then it is considered an absolute path. Otherwise it is a path relative to /usr/bin. If the item is a directory then its content is added recursively. There are a few special cases:
     * adding `busybox` to the image enables an emergency shell in case of a panic during the boot process.
-    * adding `fsck` enables boot time filesystem check. It also requires filesystem specific binary called `fsck.$rootfstype` to be added to the image. Filesystems are corrected automatically and if it fails then boot stops and it is responsibility of the user to fix the root filesystem.
+    * adding `fsck` enables boot time filesystem check. It also requires filesystem specific binary called `fsck.$rootfstype` to be added to the image. Filesystems are corrected automatically and if it fails then boot stops and it is the responsibility of the user to fix the root filesystem.
 
  * `vconsole` is a flag that enables early-user console configuration. If it is set to `true` then booster reads configuration from `/etc/vconsole.conf` and `/etc/locale.conf` and adds required keymap and fonts to the generated image.
     The following config properties are taken into account: `KEYMAP`, `KEYMAP_TOGGLE`, `FONT`, `FONT_MAP`, `FONT_UNIMAP`. See also [man vconsole.conf](https://man.archlinux.org/man/vconsole.conf.5.en).
@@ -176,7 +176,7 @@ Device reference has one of the following values:
 
 ### UUID parameters
 Boot parameters such as `root=UUID=$UUID` and `rd.luks.uuid=$UUID` allow you to specify the block device by its UUID.
-The UUID format is `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` where `x` is a hexadecimal symbol either in lower of upper case.
+The UUID format is `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` where `x` is a hexadecimal symbol either in lower or upper case.
 UUID parameter can optionally be enclosed with quote symbol `"` though it is not recommended. Following examples show correct parameters format:
 `root=UUID=ac8299a8-91ce-4bf6-a524-55a62844b787`, `root=UUID="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended),
 `rd.luks.uuid=ac8299a8-91ce-4bf6-a524-55a62844b787`, `rd.luks.uuid="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended).
@@ -194,7 +194,7 @@ PIN prompts (TPM2-PIN, FIDO2-PIN) accept up to 3 attempts; press Enter empty PIN
 ### Modules selection
 It is a note to summarize the algorithm that computes what modules are going to end up in the generated booster image.
 Initial module list for booster is `defaultModulesList` - a set of predefined hard-coded modules defined at `generator.go`.
-These are selected modules  that most likely cover most system boot needs - disk, filesystem, keyboard, tpm, ethernet, usb drivers.
+These are selected modules that most likely cover most system boot needs - disk, filesystem, keyboard, tpm, ethernet, usb drivers.
 
 If the `universal` config option is set to false (default value) then so-called host mode is used.
 I.e. image is generated with the drivers needed for current host hardware only.
@@ -235,7 +235,7 @@ Please note that to boot the UKI by default, it may be necessary to configure yo
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
 information about what is going on. Just add `booster.log=debug,console` kernel parameter and booster
-provide additional logs.
+provides additional logs.
 
 ### Use TFTP to download logs for unbootable device
 In case of a boot failure, when the devices are missing, logs can still be retrieved from busybox using the network.
@@ -277,7 +277,7 @@ Users of the Btrfs filesystem with a system installed on a subvolume should add 
 
     UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470	/         	btrfs     	rw,relatime,autodefrag,compress=zstd:2,space_cache,subvol=root	0 0
 
-So /boot/loader/entries/booster.conf should looks like this:
+So /boot/loader/entries/booster.conf should look like this:
 
     title Linux with Booster
     linux /vmlinuz-linux
