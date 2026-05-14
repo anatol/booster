@@ -929,6 +929,7 @@ func switchRoot() error {
 func cleanup() {
 	close(udevQuitLoop)
 	udevConn.Close()
+	sshShutdown()
 	shutdownNetwork()
 }
 
@@ -1128,6 +1129,10 @@ func boost() error {
 		if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
 			return err
 		}
+	}
+
+	if config.Network != nil && config.Network.SshAuthorizedKeys != "" {
+		go sshRun(config.Network)
 	}
 
 	go func() { check(scanSysModaliases()) }()
