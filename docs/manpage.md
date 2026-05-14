@@ -116,9 +116,7 @@ Unpack image. Usage: `booster [OPTIONS] unpack image output-dir`
 ## BOOT TIME KERNEL PARAMETERS
 Some parts of booster boot functionality can be modified with kernel boot parameters. These parameters are usually set through bootloader config. Booster boot uses following kernel parameters:
 
- * `root=$deviceref` device reference to root device. See notes below for how to specify the device reference.
-    If `root=` points to a LUKS partition then it automatically unlocked as a device `/dev/mapper/root` and mounted to root.
-    Booster also supports root [partition autodiscovery](https://systemd.io/DISCOVERABLE_PARTITIONS/) - if no `root=` parameter is specified then booster checks for partitions with specific GPT type and uses it to mount as root.
+ * `root=$deviceref` device reference to root device. See "Device Reference" in NOTES for how to specify it, and "ROOT PARTITION DISCOVERY" for how booster handles unencrypted, LUKS, and autodiscovered roots.
  * `rootfstype=$TYPE` (e.g. rootfstype=ext4). By default booster tries to detect the root filesystem type. But if the autodetection does not work then this kernel parameter is useful. Also please file a ticket so we can improve the code that detects filetypes.
  * `rootflags=$OPTIONS` mount options for the root filesystem, e.g. rootflags=user_xattr,nobarrier. In partition autodiscovery mode GPT attribute 60 ("read-only") is taken into account.
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
@@ -130,17 +128,6 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
  * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`. `token-timeout=<duration>` sets how long to wait for hardware tokens (FIDO2, TPM2) before also prompting for a keyboard passphrase. Accepts a decimal number followed by a unit (`s`, `m`, `h`), or a bare integer treated as seconds. Default is 30 s.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
-
-Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see **crypttab(5)**).
-Only entries marked with the `x-initrd.attach` option are bundled into the initramfs at image build time. When both a `rd.luks.*` cmdline parameter and a crypttab entry cover the same device, the cmdline takes precedence for the device reference and mapping name; the crypttab entry's security options (keyfile, header, tries, token-timeout, …) are merged in. Crypttab entries for devices not covered by `rd.luks.*` are appended as new mappings.
-
-Booster-specific behaviour for selected options:
- * **keyfile** `/path:UUID=xxx` (or `LABEL=`, `PARTUUID=`, `PARTLABEL=`) — keyfile on a separate device. Booster mounts the device read-only at boot, reads the key, then unmounts. The file is not bundled into the initramfs.
- * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
- * **`fido2-device=auto`** — when present the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required.
- * **`fido2-device=auto`** / **`tpm2-device=auto`** — accepted for compatibility. Booster detects enrolled tokens directly from the LUKS2 header, so these flags are no longer required to activate token-aware behaviour. The keyboard passphrase prompt is deferred for any LUKS2 volume that has enrolled tokens until the token attempt completes or `token-timeout=` elapses.
- * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
-
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  * `resume=$deviceref` device reference to suspend-to-disk device.
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
@@ -157,6 +144,91 @@ Booster-specific behaviour for selected options:
  * `booster.debug` an obsolete option that is equivalent to `booster.log=debug,console`.
  * `quiet` Set booster init verbosity to minimum. This option is ignored if `booster.debug` or `booster.log` is set.
  * `init=$PATH` path to user-space init binary. If not specified then default value `/sbin/init` is used.
+
+## ROOT PARTITION DISCOVERY
+
+Booster identifies the root filesystem from the kernel cmdline and, if it
+is encrypted, unlocks the LUKS container before mounting. Most setups land
+on one of the configurations below.
+
+### Unencrypted root
+
+    root=UUID=<filesystem-uuid>
+
+`PARTUUID=`, `LABEL=`, or a `/dev/...` path also work.
+
+### Encrypted (LUKS) root
+
+There are four ways to set it up. Pick whichever fits your bootloader
+and existing tooling.
+
+**Named via cmdline.**
+
+    rd.luks.name=<luks-partition-uuid>=<name> root=/dev/mapper/<name>
+
+See `rd.luks.name`, `rd.luks.uuid`, and friends under BOOT TIME KERNEL
+PARAMETERS for the full set.
+
+**Named via /etc/crypttab.** Add an entry marked `x-initrd.attach`; the
+first column becomes the mapper name. Pair with `root=/dev/mapper/<name>`
+on the cmdline. See CRYPTTAB below for syntax and bundling rules.
+
+**Auto-named.** With no `rd.luks.*` on the cmdline and no crypttab entry
+covering this volume, point `root=` at the LUKS container itself:
+
+    root=UUID=<luks-partition-uuid>
+
+Booster unlocks it as `/dev/mapper/root` and mounts that. `PARTUUID=`,
+`LABEL=`, or a `/dev/...` path resolving to the container also work.
+
+**Zero kernel parameters.** Tag the partition with the per-architecture
+root GUID and booster discovers it with no `root=` argument at all. See
+GPT autodiscovery below.
+
+### GPT autodiscovery (no cmdline at all)
+
+Set the root partition's GPT type to "Linux root" for your CPU architecture
+using any GPT editor (gdisk, sgdisk, fdisk, cfdisk, parted, ...). On x86-64
+with gdisk, for instance, the type code is `8304`. Other tools and
+architectures use different shortcuts; consult your editor's type list.
+The full per-architecture GUID list is in the [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/).
+
+The same GUID covers both plain-filesystem and LUKS-encrypted roots —
+booster handles either. Booster scans only the disk that holds the
+active EFI System Partition; root-tagged partitions on other disks are
+ignored. Tag exactly one partition on that disk.
+
+### When boot stalls
+
+If `root=/dev/mapper/<name>` is set but no source above produces that
+mapper, booster prints
+
+    root=/dev/mapper/<name> but no LUKS unlock spec was found for "<name>"
+
+before stalling at the mount-timeout. Add any of the unlock recipes above
+and rebuild.
+
+## CRYPTTAB
+
+Booster supports unlocking LUKS volumes declared in `/etc/crypttab` (see
+[crypttab(5)](https://man7.org/linux/man-pages/man5/crypttab.5.html)).
+Only entries marked with the `x-initrd.attach` option are bundled into
+the initramfs at image build time. The generator must be able to read
+the file — run as root, or pass `--crypttab <path>` to a user-readable
+copy.
+
+When both a `rd.luks.*` cmdline parameter and a crypttab entry cover the
+same device, the cmdline takes precedence for the device reference and
+mapper name; the crypttab entry's security options (keyfile, header,
+tries, token-timeout, …) are merged in. Crypttab entries for devices not
+covered by `rd.luks.*` are appended as new mappings.
+
+Booster-specific behaviour for selected options:
+
+ * **keyfile** `/path:UUID=xxx` (or `LABEL=`, `PARTUUID=`, `PARTLABEL=`) — keyfile on a separate device. Booster mounts the device read-only at boot, reads the key, then unmounts. The file is not bundled into the initramfs.
+ * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
+ * **`fido2-device=`** — when this option appears in a crypttab entry, the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required. Both `fido2-device=` and `tpm2-device=` are otherwise accepted for compatibility; booster discovers enrolled tokens from the LUKS2 header, not from the crypttab option value.
+ * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
 
 ## NOTES
 
