@@ -46,6 +46,11 @@ type generatorConfig struct {
 
 	enablePlymouth bool
 
+	// SSH-based remote LUKS unlock. Empty sshHostKey means feature disabled.
+	sshHostKey        string
+	sshAuthorizedKeys string
+	sshListen         string
+
 	// virtual console configs
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
@@ -522,6 +527,11 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	}
 	if conf.networkActiveInterfaces != nil {
 		initConfig.Network.Interfaces = conf.networkActiveInterfaces
+	}
+	if conf.sshHostKey != "" && initConfig.Network != nil {
+		initConfig.Network.SshHostKey = conf.sshHostKey
+		initConfig.Network.SshAuthorizedKeys = conf.sshAuthorizedKeys
+		initConfig.Network.SshListen = conf.sshListen
 	}
 
 	content, err := yaml.Marshal(initConfig)

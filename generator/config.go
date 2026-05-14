@@ -9,9 +9,32 @@ import (
 	"strings"
 	"time"
 
+	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
+
+// validateAuthorizedKeys mirrors init/ssh.go:parseAuthorizedKeys so a missing
+// or garbage authorized_keys file fails the build loudly instead of silently
+// disabling the SSH server at boot — the same "fail at build, not as a
+// locked-out boot" posture as the crypttab unreadable-warning (commit
+// cebca35). Keep this in sync with the init-side parser.
+func validateAuthorizedKeys(data []byte) error {
+	rest := data
+	n := 0
+	for len(bytes.TrimSpace(rest)) > 0 {
+		_, _, _, next, err := gossh.ParseAuthorizedKey(rest)
+		if err != nil {
+			return fmt.Errorf("no parseable SSH public key found: %v", err)
+		}
+		n++
+		rest = next
+	}
+	if n == 0 {
+		return fmt.Errorf("contains no SSH public keys")
+	}
+	return nil
+}
 
 // UserConfig is a format for /etc/booster.yaml config that is interface between user and booster generator
 type UserConfig struct {
@@ -23,6 +46,14 @@ type UserConfig struct {
 		IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
+
+		// SSH-based remote LUKS unlock. Both SshHostKey and SshAuthorizedKeys
+		// must point to readable files at build time; their contents are
+		// embedded into the initramfs config. Setting SshAuthorizedKeys
+		// enables the SSH server during early boot.
+		SshHostKey        string `yaml:"ssh_host_key,omitempty"`        // path to OpenSSH- or PEM-encoded host private key
+		SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"` // path to authorized_keys file
+		SshListen         string `yaml:"ssh_listen,omitempty"`          // listen address, default :22
 	}
 	Universal            bool   `yaml:",omitempty"`
 	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
@@ -87,6 +118,14 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			if n.Dhcp && (n.IP != "" || n.Gateway != "") {
 				return nil, fmt.Errorf("config: option network.(ip|gateway) cannot be used together with network.dhcp")
 			}
+			if n.SshHostKey != "" || n.SshAuthorizedKeys != "" {
+				if n.SshHostKey == "" || n.SshAuthorizedKeys == "" {
+					return nil, fmt.Errorf("config: network.ssh_host_key and network.ssh_authorized_keys must both be set")
+				}
+				if !n.Dhcp && n.IP == "" {
+					return nil, fmt.Errorf("config: network.ssh_* requires network.dhcp or network.ip")
+				}
+			}
 		}
 	}
 
@@ -120,6 +159,31 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			// TODO: or maybe instead of resolving it to MAC address here we should compute predictable interface names
 			// in init? See the algorithm https://github.com/systemd/systemd/blob/main/src/udev/udev-builtin-net_id.c
 			conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
+		}
+
+		if n.SshAuthorizedKeys != "" {
+			// The host private key is embedded verbatim into the
+			// (unencrypted) initramfs by design — it must be available
+			// before any disk is unlocked. A group/other-accessible source
+			// key is almost always operator error; OpenSSH itself refuses
+			// loose private-key perms. Warn (don't fail) at build time.
+			if fi, err := os.Stat(n.SshHostKey); err == nil && fi.Mode().Perm()&0o077 != 0 {
+				warning("network.ssh_host_key: %s is accessible by group/other (mode %#o) — this SSH host private key gets embedded in the initramfs; tighten it to 0600", n.SshHostKey, fi.Mode().Perm())
+			}
+			hostKey, err := os.ReadFile(n.SshHostKey)
+			if err != nil {
+				return nil, fmt.Errorf("network.ssh_host_key: %v", err)
+			}
+			authKeys, err := os.ReadFile(n.SshAuthorizedKeys)
+			if err != nil {
+				return nil, fmt.Errorf("network.ssh_authorized_keys: %v", err)
+			}
+			if err := validateAuthorizedKeys(authKeys); err != nil {
+				return nil, fmt.Errorf("network.ssh_authorized_keys: %s %v", n.SshAuthorizedKeys, err)
+			}
+			conf.sshHostKey = string(hostKey)
+			conf.sshAuthorizedKeys = string(authKeys)
+			conf.sshListen = n.SshListen
 		}
 	}
 	conf.universal = u.Universal || opts.BuildCommand.Universal

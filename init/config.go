@@ -10,6 +10,14 @@ type InitNetworkConfig struct {
 	IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 	Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 	DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
+
+	// SshHostKey is the OpenSSH- or PEM-encoded SSH server private key
+	// (gossh.ParsePrivateKey accepts both). SshAuthorizedKeys is the
+	// contents of an authorized_keys file. SSH remote unlock is enabled
+	// when both are non-empty.
+	SshHostKey        string `yaml:"ssh_host_key,omitempty"`
+	SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"`
+	SshListen         string `yaml:"ssh_listen,omitempty"`
 }
 
 type VirtualConsole struct {
