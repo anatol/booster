@@ -361,6 +361,8 @@ So /boot/loader/entries/booster.conf should look like this:
     initrd /booster-linux.img
     options root=UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470 rw rootflags=relatime,autodefrag,compress=zstd:2,space_cache,subvol=root
 
+Booster has no built-in Btrfs subvolume default. If `subvol=` (or `subvolid=`) is omitted, the kernel mounts the filesystem's configured default subvolume — set with `btrfs subvolume set-default <id> <path>` — falling back to the top-level subvolume (ID 5) when no default has been configured. Distro conventions like `@` (Arch), `root` (some Debian-derived installers), or `@/.snapshots/N/snapshot` (openSUSE) must be set explicitly in your bootloader entry; both `subvol=NAME` and `subvolid=ID` are accepted.
+
 Create a Unified Kernel Image and write the result to /boot/EFI/Linux:
 
     $ /usr/lib/booster/regenerate_uki build /boot/EFI/Linux
