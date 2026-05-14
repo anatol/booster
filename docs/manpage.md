@@ -23,6 +23,9 @@ Booster advantages:
       ip: 10.0.2.15/24
       gateway: 10.0.2.255
       dns_servers: 192.168.1.1,8.8.8.8
+      ssh_host_key: /etc/booster/ssh_host_ed25519_key
+      ssh_authorized_keys: /etc/booster/authorized_keys
+      ssh_listen: :22
     universal: false
     modules: -*,hid_apple,kernel/sound/usb/,kernel/fs/btrfs/btrfs.ko,kernel/lib/crc4.ko.xz
     compression: zstd
@@ -44,6 +47,7 @@ Booster advantages:
     The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
     Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
     If `interfaces` node is not specified then all the interfaces are activated at boot.
+    The `network` node also accepts `ssh_host_key`, `ssh_authorized_keys`, and `ssh_listen` to enable remote LUKS unlock over SSH. `ssh_host_key` is a path to an OpenSSH- or PEM-encoded SSH host private key, `ssh_authorized_keys` is a path to an authorized_keys file, and `ssh_listen` is the listen address (default `:22`). Both `ssh_host_key` and `ssh_authorized_keys` must be set together, and SSH requires `dhcp: true` or a static `ip`. See REMOTE UNLOCK below.
 
  * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
@@ -251,6 +255,74 @@ Booster-specific behaviour for selected options:
  * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
  * **`fido2-device=`** — when this option appears in a crypttab entry, the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required. Both `fido2-device=` and `tpm2-device=` are otherwise accepted for compatibility; booster discovers enrolled tokens from the LUKS2 header, not from the crypttab option value.
  * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
+
+## REMOTE UNLOCK
+
+Booster can unlock LUKS volumes from a remote SSH client during early boot.
+The SSH server starts once networking is up (DHCP lease acquired or static
+`ip` configured) and prompts the connecting client for a LUKS passphrase.
+The submitted passphrase is broadcast to every LUKS device currently
+waiting at a keyboard prompt; a successful unlock seeds the in-boot
+passphrase cache so sibling volumes with the same key unlock without
+further prompts. Equivalent to Debian's `dropbear-initramfs` setup but
+native to booster — uses Go's `golang.org/x/crypto/ssh` rather than
+bundling dropbear.
+
+Generate a host key once (kept on the host, embedded into the image at
+build time):
+
+    $ ssh-keygen -t ed25519 -f /etc/booster/ssh_host_ed25519_key -N ''
+
+Build an `authorized_keys` file with one or more public keys, one per
+line:
+
+    ssh-ed25519 AAAAC3Nz...user1@laptop
+    ssh-ed25519 AAAAC3Nz...user2@phone
+
+Wire both files into `/etc/booster.yaml`:
+
+    network:
+      dhcp: on
+      ssh_host_key: /etc/booster/ssh_host_ed25519_key
+      ssh_authorized_keys: /etc/booster/authorized_keys
+      ssh_listen: :22
+
+Both `ssh_host_key` and `ssh_authorized_keys` are read at image build
+time and embedded into the initramfs; one without the other is a config
+error. SSH also requires `network.dhcp: true` or a static `network.ip`.
+
+From a client, connect as `root` and paste the passphrase at the prompt:
+
+    $ ssh -p 22 root@<host>
+
+Security notes:
+
+ * Pubkey-only authentication; password auth is not supported.
+   Per-session attempts are capped at 10 wrong submissions before
+   disconnect; the SSH handshake itself must complete within 15
+   seconds (slow-loris guard).
+ * The host private key and the enrolled `authorized_keys` are read
+   at image build time and embedded into the initramfs. Anyone with
+   read access to `/boot` (or the image file) can extract both. Treat
+   them as compromised whenever `/boot` is exposed; rebuild the image
+   to rotate the host key.
+ * The host key fingerprint is stable across reboots (no auto-regen),
+   so `known_hosts` does not churn.
+ * The SSH port plus a stolen copy of any private key listed in
+   `authorized_keys` is enough for an attacker to keep guessing LUKS
+   passphrases against the live server. We disconnect a session after
+   10 wrong submissions, but nothing stops the attacker from
+   reconnecting and trying 10 more. The cap slows brute force, it
+   does not stop it — anyone who can reach the SSH port is in a
+   position roughly equivalent to direct LUKS keyslot exposure.
+ * `ssh_listen: :22` listens on every network interface that comes
+   up at boot, on both IPv4 and IPv6 — including link-local IPv6
+   addresses (`fe80::...`) that auto-configure without DHCP. Pin
+   `ssh_listen` to an exact address (for example `10.0.0.5:22`) so
+   only the interface you actually intend to expose is reachable,
+   and firewall the port at the network boundary.
+ * The session is restricted to the passphrase prompt — no shell, no
+   command execution, no port forwarding, no PAM, no PTY allocation.
 
 ## NOTES
 
