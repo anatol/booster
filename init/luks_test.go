@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"sync"
 	"testing"
 	"time"
 
@@ -281,4 +282,85 @@ func TestUnreachableMapperName(t *testing.T) {
 			require.Equal(t, tc.wantName, name)
 		})
 	}
+}
+
+// withPendingPrompts isolates the pendingPrompts global across tests so a
+// failure in one case doesn't leave stale registrations visible to another.
+func withPendingPrompts(t *testing.T) {
+	t.Helper()
+	pendingPrompts.Lock()
+	orig := pendingPrompts.entries
+	pendingPrompts.entries = nil
+	pendingPrompts.Unlock()
+	t.Cleanup(func() {
+		pendingPrompts.Lock()
+		pendingPrompts.entries = orig
+		pendingPrompts.Unlock()
+	})
+}
+
+func TestPendingPromptsRegistry(t *testing.T) {
+	withPendingPrompts(t)
+
+	a := &promptRegistration{mappingName: "alpha"}
+	b := &promptRegistration{mappingName: "beta"}
+
+	registerPendingPrompt(a)
+	registerPendingPrompt(b)
+
+	pendingPrompts.Lock()
+	require.Equal(t, 2, len(pendingPrompts.entries))
+	pendingPrompts.Unlock()
+
+	unregisterPendingPrompt(a)
+	pendingPrompts.Lock()
+	_, hasA := pendingPrompts.entries[a]
+	_, hasB := pendingPrompts.entries[b]
+	pendingPrompts.Unlock()
+	require.False(t, hasA, "alpha should have been removed")
+	require.True(t, hasB, "beta should remain")
+
+	// unregistering an unknown entry must be a no-op
+	unregisterPendingPrompt(&promptRegistration{mappingName: "ghost"})
+	pendingPrompts.Lock()
+	require.Equal(t, 1, len(pendingPrompts.entries))
+	pendingPrompts.Unlock()
+}
+
+func TestPendingPromptsConcurrent(t *testing.T) {
+	// Hammer the registry from multiple goroutines so -race can flag any
+	// missing locking. The registry backs the SSH unlock path, where
+	// register/unregister races against trySubmitPassphraseToPending's
+	// snapshot are the primary concern.
+	withPendingPrompts(t)
+
+	const N = 200
+	regs := make([]*promptRegistration, N)
+	for i := range regs {
+		regs[i] = &promptRegistration{mappingName: "dev"}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for _, r := range regs {
+			registerPendingPrompt(r)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for _, r := range regs {
+			unregisterPendingPrompt(r)
+		}
+	}()
+	wg.Wait()
+
+	// Drain whatever's left so we don't leak into other tests; the exact
+	// residue is non-deterministic (races between register/unregister).
+	pendingPrompts.Lock()
+	for r := range pendingPrompts.entries {
+		delete(pendingPrompts.entries, r)
+	}
+	pendingPrompts.Unlock()
 }

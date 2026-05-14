@@ -86,6 +86,87 @@ var passphraseCache struct {
 // stored its passphrase.
 var keyboardMu sync.Mutex
 
+// pendingPrompts holds the set of keyboard prompts currently awaiting a
+// passphrase. Out-of-band password sources (SSH remote unlock) submit through
+// this registry so they share the unlock orchestration (ctx cancellation,
+// passphraseCache seeding) with the local keyboard path rather than walking
+// devices themselves.
+var pendingPrompts struct {
+	sync.Mutex
+	entries map[*promptRegistration]struct{}
+}
+
+type promptRegistration struct {
+	ctx         context.Context
+	volumes     chan *luks.Volume
+	d           luks.Device
+	checkSlots  []int
+	mappingName string
+}
+
+func registerPendingPrompt(p *promptRegistration) {
+	pendingPrompts.Lock()
+	defer pendingPrompts.Unlock()
+	if pendingPrompts.entries == nil {
+		pendingPrompts.entries = make(map[*promptRegistration]struct{})
+	}
+	pendingPrompts.entries[p] = struct{}{}
+}
+
+func unregisterPendingPrompt(p *promptRegistration) {
+	pendingPrompts.Lock()
+	defer pendingPrompts.Unlock()
+	delete(pendingPrompts.entries, p)
+}
+
+// trySubmitPassphraseToPending tries password against every currently-pending
+// keyboard prompt and returns the names of devices that unlocked. UnsealVolume
+// is dispatched in parallel — argon2 KDF runs concurrently across devices
+// rather than serially, so a single submission against N volumes finishes in
+// ~one KDF window instead of N. Without this, the keyboard prompt for a
+// not-yet-attempted device briefly displays while SSH works through the rest
+// of the queue.
+//
+// The passphrase is appended to passphraseCache when at least one device
+// matches, so subsequent volumes with the same key (e.g. btrfs RAID1 members)
+// unlock without further prompts.
+func trySubmitPassphraseToPending(password []byte) []string {
+	pendingPrompts.Lock()
+	snapshot := make([]*promptRegistration, 0, len(pendingPrompts.entries))
+	for p := range pendingPrompts.entries {
+		snapshot = append(snapshot, p)
+	}
+	pendingPrompts.Unlock()
+
+	var (
+		mu       sync.Mutex
+		unlocked []string
+		wg       sync.WaitGroup
+	)
+	for _, p := range snapshot {
+		if p.ctx.Err() != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(p *promptRegistration) {
+			defer wg.Done()
+			if tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password) {
+				mu.Lock()
+				unlocked = append(unlocked, p.mappingName)
+				mu.Unlock()
+			}
+		}(p)
+	}
+	wg.Wait()
+
+	if len(unlocked) > 0 {
+		passphraseCache.Lock()
+		passphraseCache.passwords = append(passphraseCache.passwords, password)
+		passphraseCache.Unlock()
+	}
+	return unlocked
+}
+
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
 var rdLuksOptions = map[string]string{
 	"discard":                luks.FlagAllowDiscards,
@@ -769,6 +850,19 @@ func tryCachedPassphrases(ctx context.Context, volumes chan *luks.Volume, d luks
 }
 
 func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
+	// Register this prompt so out-of-band sources (SSH remote unlock) can
+	// submit against the same device. Done before the plymouth-init wait
+	// so a remote unlock can race ahead of the splash coming up.
+	reg := &promptRegistration{
+		ctx:         ctx,
+		volumes:     volumes,
+		d:           d,
+		checkSlots:  checkSlots,
+		mappingName: mappingName,
+	}
+	registerPendingPrompt(reg)
+	defer unregisterPendingPrompt(reg)
+
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
