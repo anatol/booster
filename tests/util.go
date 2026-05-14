@@ -253,6 +253,12 @@ type NetworkConfig struct {
 	IP         string `yaml:",omitempty"` // e.g. 10.0.2.15/24
 	Gateway    string `yaml:",omitempty"` // e.g. 10.0.2.255
 	DNSServers string `yaml:"dns_servers,omitempty"`
+
+	// SSH remote-unlock fields. The generator reads these as paths to files
+	// on the host whose contents are embedded into the initramfs config.
+	SshHostKey        string `yaml:"ssh_host_key,omitempty"`
+	SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"`
+	SshListen         string `yaml:"ssh_listen,omitempty"`
 }
 
 type GeneratorConfig struct {
@@ -289,6 +295,13 @@ func generateBoosterConfig(output string, opts Opts) error {
 		}
 
 		net.Interfaces = opts.activeNetIfaces
+
+		// SSH remote-unlock wiring. Test code writes the keypair + authorized_keys
+		// to temp files and passes their paths through Opts; the generator
+		// embeds the file contents into the initramfs.
+		net.SshHostKey = opts.sshHostKeyPath
+		net.SshAuthorizedKeys = opts.sshAuthorizedKeysPath
+		net.SshListen = opts.sshListen
 	}
 	conf.Universal = true
 	conf.Compression = opts.compression
@@ -348,6 +361,12 @@ type Opts struct {
 	zfsCachePath         string // TODO: do we need any of these parameters?
 	crypttabFile         string // path to host crypttab to bundle; overrides /etc/crypttab
 	enableFido2          bool
+
+	// SSH remote-unlock options. Paths are passed through to the generator,
+	// which embeds the file contents into the initramfs config.
+	sshHostKeyPath        string
+	sshAuthorizedKeysPath string
+	sshListen             string
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
