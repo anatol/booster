@@ -365,6 +365,21 @@ The bootloader entry points `root=` at the future mapper node:
     initrd /booster-linux.img
     options root=/dev/mapper/cryptroot rw
 
+Boot with no `root=` on the kernel cmdline at all using GPT autodiscovery. Tag the root partition with the per-architecture GUID — on x86-64 that's `4f68bce3-e8cd-4db1-96e7-fbcaf984b709`:
+
+    $ sgdisk --typecode=2:4f68bce3-e8cd-4db1-96e7-fbcaf984b709 /dev/sda
+
+For a LUKS-encrypted root, add a `/etc/crypttab` entry naming the mapper (otherwise booster synthesises `/dev/mapper/root`):
+
+    cryptroot  UUID=e122d09e-87a9-4b35-83f7-2592ef40cefa  none  x-initrd.attach
+
+The bootloader entry then carries only the mount-style flags:
+
+    title Linux with Booster
+    linux /vmlinuz-linux
+    initrd /booster-linux.img
+    options rw
+
 Users of the Btrfs filesystem with a system installed on a subvolume should add rootflags corresponding to their entry in /etc/fstab. In this example 69bc4dd2-7f6c-4821-aa6b-d80d9c97d470 is a UUID for Btrfs partition, with the system installed on subvolume called root and /etc/fstab looks like this:
 
     UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470	/         	btrfs     	rw,relatime,autodefrag,compress=zstd:2,space_cache,subvol=root	0 0
