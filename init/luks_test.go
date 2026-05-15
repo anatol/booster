@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anatol/luks.go"
 	"github.com/google/go-tpm/tpmutil"
 	"github.com/stretchr/testify/require"
 )
@@ -363,4 +365,186 @@ func TestPendingPromptsConcurrent(t *testing.T) {
 		delete(pendingPrompts.entries, r)
 	}
 	pendingPrompts.Unlock()
+}
+
+// TestPendingPromptsInflightFence pins the race fence that prevents
+// luksOpen's watcher from closing the volumes channel while an SSH
+// submission is mid-UnsealVolume.
+//
+// Without this fence the bug is: senderWg.Wait() returns (all in-band
+// senders gave up), watcher calls close(volumes), an SSH goroutine that
+// snapshot-grabbed the entry under pendingPrompts.Lock a moment earlier
+// then completes its UnsealVolume and reaches tryPassphraseAgainstSlots's
+// `case volumes <- v:` — panic "send on closed channel" in pid 1.
+//
+// The fence is two coordinated mutations:
+//   - trySubmitPassphraseToPending Add()s to reg.inflight inside the same
+//     critical section that iterates pendingPrompts.entries.
+//   - The watcher first removes reg from pendingPrompts.entries (blocking
+//     new snapshots from picking us up), then waits on reg.inflight before
+//     closing volumes.
+//
+// This test mirrors both halves directly and asserts the watcher blocks
+// for as long as a snapshotted submitter has not yet completed.
+func TestPendingPromptsInflightFence(t *testing.T) {
+	withPendingPrompts(t)
+
+	reg := &promptRegistration{
+		ctx:         context.Background(),
+		mappingName: "fence-test",
+	}
+	registerPendingPrompt(reg)
+
+	// Submitter snapshot — same critical-section shape as
+	// trySubmitPassphraseToPending. Add to inflight under the lock so the
+	// watcher cannot remove-and-wait while a new submitter is still
+	// transitioning from "saw the entry" to "Add(1)".
+	pendingPrompts.Lock()
+	snapshot := make([]*promptRegistration, 0, len(pendingPrompts.entries))
+	for p := range pendingPrompts.entries {
+		require.NoError(t, p.ctx.Err())
+		p.inflight.Add(1)
+		snapshot = append(snapshot, p)
+	}
+	pendingPrompts.Unlock()
+	require.Len(t, snapshot, 1)
+
+	// Watcher role: delete the entry under the lock, then wait for any
+	// already-snapshotted submitter to drain. Must block — we haven't
+	// called Done yet.
+	watcherDone := make(chan struct{})
+	go func() {
+		pendingPrompts.Lock()
+		delete(pendingPrompts.entries, reg)
+		pendingPrompts.Unlock()
+		reg.inflight.Wait()
+		close(watcherDone)
+	}()
+
+	select {
+	case <-watcherDone:
+		t.Fatal("watcher unblocked before submitter's inflight reference released — fence missing")
+	case <-time.After(100 * time.Millisecond):
+		// expected: watcher must wait
+	}
+
+	// The watcher must have removed the entry before waiting so a later
+	// submitter cannot snapshot a now-doomed registration.
+	pendingPrompts.Lock()
+	_, present := pendingPrompts.entries[reg]
+	pendingPrompts.Unlock()
+	require.False(t, present, "watcher should have removed entry before waiting on inflight")
+
+	// Submitter completes its UnsealVolume + channel send. Watcher must
+	// unblock immediately after.
+	reg.inflight.Done()
+
+	select {
+	case <-watcherDone:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not unblock after inflight reached zero")
+	}
+}
+
+// fenceFakeLuksDevice satisfies luks.Device for the production-path fence
+// test. Only UnsealVolume is exercised; everything else is a no-op stub.
+type fenceFakeLuksDevice struct {
+	unseal func(keyslot int, passphrase []byte) (*luks.Volume, error)
+}
+
+func (f *fenceFakeLuksDevice) UnsealVolume(keyslot int, passphrase []byte) (*luks.Volume, error) {
+	return f.unseal(keyslot, passphrase)
+}
+func (f *fenceFakeLuksDevice) Close() error                                              { return nil }
+func (f *fenceFakeLuksDevice) Version() int                                              { return 2 }
+func (f *fenceFakeLuksDevice) Path() string                                              { return "/dev/fake" }
+func (f *fenceFakeLuksDevice) UUID() string                                              { return "" }
+func (f *fenceFakeLuksDevice) Slots() []int                                              { return []int{0} }
+func (f *fenceFakeLuksDevice) Tokens() ([]luks.Token, error)                             { return nil, nil }
+func (f *fenceFakeLuksDevice) FlagsGet() []string                                        { return nil }
+func (f *fenceFakeLuksDevice) FlagsAdd(flags ...string) error                            { return nil }
+func (f *fenceFakeLuksDevice) FlagsClear()                                               {}
+func (f *fenceFakeLuksDevice) Unlock(keyslot int, passphrase []byte, dmName string) error {
+	return nil
+}
+func (f *fenceFakeLuksDevice) UnlockAny(passphrase []byte, dmName string) error { return nil }
+
+// TestTrySubmitPassphraseToPendingHoldsInflight pins that the production
+// trySubmitPassphraseToPending bumps reg.inflight before UnsealVolume runs
+// and only releases it after the dispatched goroutine completes. This is
+// the producer half of the race fence (TestPendingPromptsInflightFence
+// covers the synchronization property; this test catches future regressions
+// that drop the Add(1) or move the Done() earlier).
+func TestTrySubmitPassphraseToPendingHoldsInflight(t *testing.T) {
+	withPendingPrompts(t)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	fake := &fenceFakeLuksDevice{
+		unseal: func(_ int, _ []byte) (*luks.Volume, error) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-release
+			return &luks.Volume{}, nil
+		},
+	}
+
+	// Buffered so tryPassphraseAgainstSlots's `case volumes <- v:` sends
+	// without needing a consumer goroutine; we're testing the inflight
+	// lifecycle, not the unlock-orchestration consumer side.
+	volumes := make(chan *luks.Volume, 1)
+	reg := &promptRegistration{
+		ctx:         context.Background(),
+		volumes:     volumes,
+		d:           fake,
+		checkSlots:  []int{0},
+		mappingName: "producer-test",
+	}
+	registerPendingPrompt(reg)
+
+	submitDone := make(chan struct{})
+	go func() {
+		defer close(submitDone)
+		trySubmitPassphraseToPending([]byte("any"))
+	}()
+
+	// Wait for UnsealVolume to enter — by which point trySubmitPassphraseToPending
+	// has already taken the pendingPrompts lock, called Add(1), released the
+	// lock, and dispatched the inner goroutine.
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("UnsealVolume never entered; trySubmitPassphraseToPending stalled")
+	}
+
+	// inflight must be >0 — verify by spawning a Wait()er and asserting it
+	// blocks while UnsealVolume is hung.
+	waitDone := make(chan struct{})
+	go func() {
+		reg.inflight.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+		t.Fatal("reg.inflight at zero while UnsealVolume hung — Add(1) missing or Done() premature")
+	case <-time.After(100 * time.Millisecond):
+		// expected
+	}
+
+	// Let UnsealVolume return. The dispatched goroutine's deferred Done()
+	// drops inflight to zero; our Wait()er unblocks.
+	close(release)
+
+	select {
+	case <-waitDone:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("inflight did not drop to zero after UnsealVolume returned")
+	}
+
+	<-submitDone
+	require.Len(t, volumes, 1, "volume should have been sent on the channel")
 }

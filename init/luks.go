@@ -102,6 +102,12 @@ type promptRegistration struct {
 	d           luks.Device
 	checkSlots  []int
 	mappingName string
+	// inflight counts goroutines that submitted via trySubmitPassphraseToPending
+	// (today: SSH remote unlock) and may still be mid-UnsealVolume after
+	// senderWg.Wait() returns. luksOpen's watcher waits on this before
+	// close(volumes) so the goroutine can't send on a closed channel and
+	// panic pid 1.
+	inflight sync.WaitGroup
 }
 
 func registerPendingPrompt(p *promptRegistration) {
@@ -134,6 +140,14 @@ func trySubmitPassphraseToPending(password []byte) []string {
 	pendingPrompts.Lock()
 	snapshot := make([]*promptRegistration, 0, len(pendingPrompts.entries))
 	for p := range pendingPrompts.entries {
+		if p.ctx.Err() != nil {
+			continue
+		}
+		// Bump inflight under the same lock that owns entries — luksOpen's
+		// watcher takes this lock to remove the entry before waiting on
+		// inflight, so a snapshot-then-spawn that races the close-volumes
+		// path can't sneak in unaccounted.
+		p.inflight.Add(1)
 		snapshot = append(snapshot, p)
 	}
 	pendingPrompts.Unlock()
@@ -144,11 +158,9 @@ func trySubmitPassphraseToPending(password []byte) []string {
 		wg       sync.WaitGroup
 	)
 	for _, p := range snapshot {
-		if p.ctx.Err() != nil {
-			continue
-		}
 		wg.Add(1)
 		go func(p *promptRegistration) {
+			defer p.inflight.Done()
 			defer wg.Done()
 			if tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password) {
 				mu.Lock()
@@ -850,19 +862,6 @@ func tryCachedPassphrases(ctx context.Context, volumes chan *luks.Volume, d luks
 }
 
 func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
-	// Register this prompt so out-of-band sources (SSH remote unlock) can
-	// submit against the same device. Done before the plymouth-init wait
-	// so a remote unlock can race ahead of the splash coming up.
-	reg := &promptRegistration{
-		ctx:         ctx,
-		volumes:     volumes,
-		d:           d,
-		checkSlots:  checkSlots,
-		mappingName: mappingName,
-	}
-	registerPendingPrompt(reg)
-	defer unregisterPendingPrompt(reg)
-
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
 	// plymouthd is still starting, causing the graphical prompt to fail.
@@ -1144,6 +1143,25 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}
 	}
 
+	// Register the passphrase target for the full lifetime of luksOpen so
+	// out-of-band sources (SSH remote unlock) can submit a passphrase against
+	// the passphrase slots concurrently with token attempts — not gated behind
+	// tokenWg.Wait() like the local keyboard prompt. A successful out-of-band
+	// unlock cancels ctx, which dismisses any in-flight token / keyboard
+	// prompt via the existing ctx-cancellation path.
+	var reg *promptRegistration
+	if len(checkSlotsWithPassword) > 0 {
+		reg = &promptRegistration{
+			ctx:         ctx,
+			volumes:     volumes,
+			d:           d,
+			checkSlots:  checkSlotsWithPassword,
+			mappingName: mapping.name,
+		}
+		registerPendingPrompt(reg)
+		defer unregisterPendingPrompt(reg)
+	}
+
 	// Start keyboard/keyfile unlock after all token goroutines finish (or tokenTimeout
 	// elapses). This gives hardware tokens priority over the keyboard prompt.
 	// senderWg ensures volumes is closed if this goroutine is the last sender.
@@ -1174,6 +1192,19 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// after a priority token already signalled success.
 	go func() {
 		senderWg.Wait()
+		// Race fence: remove the registration so no new submitter can grab
+		// this entry, then wait for already-snapshotted submitters to finish
+		// their UnsealVolume + channel send. Without this, an in-flight SSH
+		// submission whose UnsealVolume succeeds after close(volumes) would
+		// panic pid 1 with "send on closed channel" at tryPassphraseAgainstSlots.
+		// Skipped when reg is nil (no passphrase slots — no OOB submitter
+		// can target this device).
+		if reg != nil {
+			pendingPrompts.Lock()
+			delete(pendingPrompts.entries, reg)
+			pendingPrompts.Unlock()
+			reg.inflight.Wait()
+		}
 		select {
 		case <-ctx.Done():
 			// Already unlocked — volumes will drain naturally.
