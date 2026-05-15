@@ -399,7 +399,7 @@ func TestSSHRemoteUnlockRetryThenUnlock(t *testing.T) {
 	// pending devices matched" line plus another prompt.
 	_, err = io.WriteString(stdin, "wrongpass\n")
 	require.NoError(t, err)
-	require.NoError(t, readUntil(br, "No pending devices matched", 30*time.Second))
+	require.NoError(t, readUntil(br, "Passphrase did not unlock any device", 30*time.Second))
 	require.NoError(t, readUntil(br, "Enter passphrase:", 10*time.Second))
 
 	// Correct passphrase unlocks.

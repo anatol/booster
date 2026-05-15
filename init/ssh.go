@@ -236,7 +236,7 @@ func sshPromptLoop(ch gossh.Channel, remote net.Addr) {
 			return
 		}
 		statusMessage("")
-		_, _ = io.WriteString(ch, "No pending devices matched. Try again or disconnect.\r\n")
+		_, _ = io.WriteString(ch, "Passphrase did not unlock any device. Try again or disconnect.\r\n")
 	}
 }
 
