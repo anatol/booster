@@ -32,6 +32,10 @@ Booster advantages:
     vconsole: true
     enable_lvm: true
     enable_mdraid: true
+    token_timeout: 30s
+    serialize_tokens:
+      enabled: true
+      clevis_timeout: 45s
 
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
@@ -81,7 +85,12 @@ Booster advantages:
 
  * `enable_fido2` is a boolean flag that enables FIDO2 hardware token support.
 
- * `serialize_tokens` is a scoped block; set `serialize_tokens.enabled: true` (default off) to make booster try a device's LUKS tokens strictly one at a time, in ascending token-ID order, instead of racing them concurrently. Because each token is attempted to completion before the next begins, a non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled ahead of a PIN-bearing one unlocks the device before the PIN token is reached, so no PIN prompt is drawn — behaviour closer to `systemd-cryptsetup`. The trade-off is that a slow token, such as clevis waiting on the network, delays the next token instead of running alongside it. The keyboard passphrase fallback still runs last.
+ * `serialize_tokens` is a scoped block that makes booster try a device's LUKS tokens strictly one at a time, in ascending token-ID order, instead of racing them concurrently. Set `serialize_tokens.enabled: true` to turn it on (default off). Because each token is attempted to completion before the next begins, a non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled ahead of a PIN-bearing one unlocks the device before the PIN token is reached, so no PIN prompt is drawn — behaviour closer to `systemd-cryptsetup`. So that one stuck token cannot hang the boot or starve the tokens behind it, each non-interactive token is bounded by a per-type timeout (the keys below); when it expires booster abandons that token and moves to the next. PIN-bearing tokens are not auto-bounded — the user already has the empty-Enter skip. The keyboard passphrase fallback still runs last. The block accepts:
+
+    * `serialize_tokens.enabled` — boolean (default `false`); the opt-out switch itself.
+    * `serialize_tokens.clevis_timeout` / `serialize_tokens.tpm2_timeout` / `serialize_tokens.fido2_timeout` — per-token bounds for clevis, non-PIN `systemd-tpm2` (PCR-only), and non-PIN `systemd-fido2` (touchless) tokens. Each accepts a Go duration string (e.g. `45s`, `2m`). Defaults `45s`, `15s`, `30s` — clevis is generous because it may wait for network/DHCP, TPM2 PCR-only is fast, FIDO2 mostly caps the wait for an absent security key. No effect unless `serialize_tokens.enabled` is set.
+
+ * `token_timeout` is a top-level option (it applies in both concurrent and serialize modes) that sets the device-level timer for how long booster waits for tokens before *also* starting the keyboard passphrase prompt. It is the booster-config equivalent of the standard crypttab/`rd.luks.options` `token-timeout=` option and serves as a global default; an explicit per-device `token-timeout=` in crypttab or on the kernel command line overrides it. Accepts a Go duration string (e.g. `30s`). When unset everywhere: in serialize mode it defaults to the sum of the device's per-token timeouts (so the keyboard prompt never preempts a token that has not had its turn); otherwise it defaults to 30 s as before.
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.

@@ -359,6 +359,7 @@ func parseParams(params string) error {
 		}
 		if tokenTimeoutExplicit {
 			luksMappings[i].tokenTimeout = tokenTimeout
+			luksMappings[i].tokenTimeoutExplicit = true
 		}
 	}
 
