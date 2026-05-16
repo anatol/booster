@@ -821,10 +821,14 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// which token (TPM2 vs FIDO2 vs clevis) tries to unlock first.
 	sort.Slice(tokens, func(i, j int) bool { return tokens[i].ID < tokens[j].ID })
 
-	// PIN-bearing tokens (TPM2 with PIN, FIDO2 with PIN) go into pinTokens for
-	// serial dispatch by a single goroutine so prompts never interleave when
-	// more than one is enrolled. Non-PIN tokens fan out as today.
-	var pinTokens []luks.Token
+	// Tokens dispatched serially go into serialTokens; a single goroutine walks
+	// them in ID order so attempts never interleave. PIN-bearing tokens (TPM2
+	// with PIN, FIDO2 with PIN) always serialize so prompts never overlap when
+	// more than one is enrolled. When serialize_tokens is set every token
+	// serializes — the user opted out of booster's token concurrency entirely.
+	// Otherwise non-PIN tokens fan out in parallel.
+	serialize := config.SerializeTokens
+	var serialTokens []luks.Token
 	slotsWithTokens := make(map[int]bool)
 	for _, t := range tokens {
 		if t.Type == "systemd-recovery" {
@@ -833,8 +837,8 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
-		if tokenNeedsPin(t) {
-			pinTokens = append(pinTokens, t)
+		if serialize || tokenNeedsPin(t) {
+			serialTokens = append(serialTokens, t)
 			continue
 		}
 		t := t
@@ -849,18 +853,18 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}()
 	}
 
-	// PIN tokens: one goroutine walks them in slice order (already sorted by
+	// Serial tokens: one goroutine walks them in slice order (already sorted by
 	// ID above). A skipped/failed token advances to the next; a successful
 	// unlock cancels ctx and stops iteration. The ctx check before each
-	// iteration lets a parallel non-PIN unlock cancel the loop without
-	// waiting for the next prompt to time out.
-	if len(pinTokens) > 0 {
+	// iteration lets a parallel non-PIN unlock (when any exist) cancel the loop
+	// without waiting for the next prompt to time out.
+	if len(serialTokens) > 0 {
 		senderWg.Add(1)
 		tokenWg.Add(1)
 		go func() {
 			defer senderWg.Done()
 			defer tokenWg.Done()
-			for _, t := range pinTokens {
+			for _, t := range serialTokens {
 				select {
 				case <-ctx.Done():
 					return

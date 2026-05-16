@@ -42,6 +42,13 @@ type UserConfig struct {
 	EnablePlymouth       bool   `yaml:"enable_plymouth"`
 	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
 	EnableFido2          bool   `yaml:"enable_fido2"`
+
+	// SerializeTokens opts out of booster's token concurrency: tokens are
+	// tried one at a time in ID order. A scoped block (like network:) so the
+	// per-token timeouts can hang off it.
+	SerializeTokens *struct {
+		Enabled bool `yaml:",omitempty"` // process LUKS tokens one at a time instead of concurrently
+	} `yaml:"serialize_tokens,omitempty"`
 }
 
 func parseCommaList(raw string) []string {
@@ -170,6 +177,9 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.crypttabFile = u.CrypttabPath
 	}
 	conf.enableFido2 = u.EnableFido2
+	if st := u.SerializeTokens; st != nil {
+		conf.serializeTokens = st.Enabled
+	}
 
 	return &conf, nil
 }
