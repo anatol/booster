@@ -52,6 +52,8 @@ type generatorConfig struct {
 
 	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
 	enableFido2  bool
+
+	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
 }
 
 type networkStaticConfig struct {
@@ -497,6 +499,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.EnableZfs = conf.enableZfs
 	initConfig.ZfsImportParams = conf.zfsImportParams
 	initConfig.EnablePlymouth = conf.enablePlymouth
+	initConfig.SerializeTokens = conf.serializeTokens
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

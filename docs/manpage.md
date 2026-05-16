@@ -81,6 +81,8 @@ Booster advantages:
 
  * `enable_fido2` is a boolean flag that enables FIDO2 hardware token support.
 
+ * `serialize_tokens` is a scoped block; set `serialize_tokens.enabled: true` (default off) to make booster try a device's LUKS tokens strictly one at a time, in ascending token-ID order, instead of racing them concurrently. Because each token is attempted to completion before the next begins, a non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled ahead of a PIN-bearing one unlocks the device before the PIN token is reached, so no PIN prompt is drawn — behaviour closer to `systemd-cryptsetup`. The trade-off is that a slow token, such as clevis waiting on the network, delays the next token instead of running alongside it. The keyboard passphrase fallback still runs last.
+
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
 
