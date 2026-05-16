@@ -143,6 +143,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid token-timeout= value %q", name, opt[14:])
 					}
 					m.tokenTimeout = d
+					m.tokenTimeoutExplicit = true
 					tokenTimeoutExplicit = true
 				default:
 					debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
@@ -194,6 +195,7 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 	// default (30 s) and the crypttab entry carries an explicit value.
 	if src.tokenTimeout > 0 && src.tokenTimeout != dst.tokenTimeout {
 		dst.tokenTimeout = src.tokenTimeout
+		dst.tokenTimeoutExplicit = dst.tokenTimeoutExplicit || src.tokenTimeoutExplicit
 	}
 	if dst.keyfile == "" && src.keyfile != "" {
 		dst.keyfile = src.keyfile
