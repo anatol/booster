@@ -6,6 +6,7 @@ package main
 // a luksMapping, so they exercise the precedence rules without LUKS devices.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -97,10 +98,15 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		})
 	})
 
-	t.Run("serialize, only PIN tokens → 0 (wait on tokenWg)", func(t *testing.T) {
+	t.Run("serialize, only PIN tokens → mapping default (keyboard-fallback safety net)", func(t *testing.T) {
+		// Every serial token is PIN-bearing so the derived sum is 0. Returning
+		// 0 here means tokenWg.Wait() with no timer; a FIDO2-PIN goroutine
+		// parked on absent hardware would then never release the keyboard
+		// fallback and the boot would hang. Must fall through to the mapping's
+		// implicit default instead.
 		m := &luksMapping{tokenTimeout: 30 * time.Second}
 		withConfig(InitConfig{SerializeTokens: true}, func() {
-			require.Zero(t, effectiveTokenTimeout(m, []luks.Token{tpm2Pin}))
+			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, []luks.Token{tpm2Pin}))
 		})
 	})
 
@@ -108,6 +114,82 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		m := &luksMapping{tokenTimeout: 30 * time.Second}
 		withConfig(InitConfig{SerializeTokens: false}, func() {
 			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, nil))
+		})
+	})
+}
+
+// TestCtxSleep covers the wait primitive behind the pin_delay hold. The
+// safety property of pin_delay is that a cancel-on-win (or a serialize-mode
+// per-token timeout) during the hold aborts the sleep *immediately* so the
+// PIN prompt is never drawn — that is the cancel cases below, not the
+// timer-elapsed one.
+func TestCtxSleep(t *testing.T) {
+	t.Parallel()
+
+	t.Run("timer elapses → nil after the full duration", func(t *testing.T) {
+		t.Parallel()
+		start := time.Now()
+		require.NoError(t, ctxSleep(context.Background(), 30*time.Millisecond))
+		require.GreaterOrEqual(t, time.Since(start), 30*time.Millisecond)
+	})
+
+	t.Run("already-cancelled ctx → returns immediately, prompt never held", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		require.ErrorIs(t, ctxSleep(ctx, time.Hour), context.Canceled)
+		require.Less(t, time.Since(start), 50*time.Millisecond, "must not sleep out the hold")
+	})
+
+	t.Run("cancel-on-win during the hold → aborts well before the delay", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel() // a parallel non-interactive token won the race
+		}()
+		start := time.Now()
+		require.ErrorIs(t, ctxSleep(ctx, time.Hour), context.Canceled)
+		require.Less(t, time.Since(start), 200*time.Millisecond)
+	})
+
+	t.Run("deadline exceeded surfaces as the ctx error", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		require.ErrorIs(t, ctxSleep(ctx, time.Hour), context.DeadlineExceeded)
+	})
+}
+
+func TestPinDelay(t *testing.T) {
+	t.Run("unset → no delay", func(t *testing.T) {
+		withConfig(InitConfig{}, func() {
+			require.Zero(t, pinDelay(false, true))
+		})
+	})
+
+	t.Run("set, concurrent, parallel token racing → delay applies", func(t *testing.T) {
+		withConfig(InitConfig{PinDelay: 3}, func() {
+			require.Equal(t, 3*time.Second, pinDelay(false, true))
+		})
+	})
+
+	t.Run("set but serialize mode → no delay (strict ID order)", func(t *testing.T) {
+		withConfig(InitConfig{PinDelay: 3}, func() {
+			require.Zero(t, pinDelay(true, true))
+		})
+	})
+
+	t.Run("set but no parallel token → no delay (nothing to wait for)", func(t *testing.T) {
+		withConfig(InitConfig{PinDelay: 3}, func() {
+			require.Zero(t, pinDelay(false, false))
+		})
+	})
+
+	t.Run("negative config treated as off", func(t *testing.T) {
+		withConfig(InitConfig{PinDelay: -1}, func() {
+			require.Zero(t, pinDelay(false, true))
 		})
 	})
 }
