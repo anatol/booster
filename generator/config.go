@@ -43,6 +43,7 @@ type UserConfig struct {
 	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
 	EnableFido2          bool   `yaml:"enable_fido2"`
 	TokenTimeout         string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
+	PinDelay             string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
 
 	// SerializeTokens opts out of booster's token concurrency: tokens are
 	// tried one at a time in ID order. The per-type timeouts are scoped here
@@ -192,6 +193,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		dst  *int
 	}{
 		{"token_timeout", u.TokenTimeout, &conf.tokenTimeout},
+		{"pin_delay", u.PinDelay, &conf.pinDelay},
 		{"serialize_tokens.clevis_timeout", clevisT, &conf.clevisTimeout},
 		{"serialize_tokens.tpm2_timeout", tpm2T, &conf.tpm2Timeout},
 		{"serialize_tokens.fido2_timeout", fido2T, &conf.fido2Timeout},
@@ -205,6 +207,11 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		}
 		if d <= 0 {
 			return nil, fmt.Errorf("config: %s must be positive, got %q", f.name, f.val)
+		}
+		// Stored as whole seconds (0 means "unset" downstream), so a positive
+		// sub-second value would silently truncate to 0 and disable the option.
+		if d < time.Second {
+			return nil, fmt.Errorf("config: %s must be at least 1s, got %q", f.name, f.val)
 		}
 		*f.dst = int(d.Seconds())
 	}
