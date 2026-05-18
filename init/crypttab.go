@@ -191,11 +191,15 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 // into a cmdline-derived mapping (dst). dst's ref and name are preserved; crypttab
 // supplies keyfile, header, and other unlock options that rd.luks.* params cannot express.
 func mergeCrypttabOptions(dst, src *luksMapping) {
-	// Adopt crypttab's token timeout when the cmdline mapping still has the
-	// default (30 s) and the crypttab entry carries an explicit value.
-	if src.tokenTimeout > 0 && src.tokenTimeout != dst.tokenTimeout {
+	// Adopt crypttab's token-timeout only when the cmdline mapping did not
+	// carry an explicit token-timeout= of its own. Mirrors the keyfile/
+	// header/tries merges below: an explicit cmdline value always wins;
+	// crypttab fills in only what the cmdline left unset. (src.tokenTimeout
+	// is always >0 here — the crypttab parser fills a 30 s implicit default
+	// — so the gate must be the explicit flags, not the values.)
+	if !dst.tokenTimeoutExplicit && src.tokenTimeoutExplicit {
 		dst.tokenTimeout = src.tokenTimeout
-		dst.tokenTimeoutExplicit = dst.tokenTimeoutExplicit || src.tokenTimeoutExplicit
+		dst.tokenTimeoutExplicit = true
 	}
 	if dst.keyfile == "" && src.keyfile != "" {
 		dst.keyfile = src.keyfile
