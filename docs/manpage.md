@@ -32,6 +32,11 @@ Booster advantages:
     vconsole: true
     enable_lvm: true
     enable_mdraid: true
+    token_timeout: 30s
+    pin_delay: 5s
+    serialize_tokens:
+      enabled: true
+      clevis_timeout: 45s
 
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
@@ -80,6 +85,22 @@ Booster advantages:
  * `enable_plymouth` is a flag that enables Plymouth boot splash support. When enabled, booster bundles the Plymouth daemon, plugins, theme, and fonts into the initramfs. GPU driver must be included in `modules_force_load`. The `quiet splash` kernel parameters are also required. Note that `booster.log=console` conflicts with Plymouth's graphical display; when console logging is active, Plymouth reverts to the details plugin (text-based fallback).
 
  * `enable_fido2` is a boolean flag that enables FIDO2 hardware token support.
+
+ * `serialize_tokens` makes booster try a device's LUKS tokens one at a time in ascending token-ID order instead of racing them concurrently (default off). A non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled before a PIN token then unlocks the device before the PIN prompt is reached. Each non-interactive token is bounded by a per-type timeout so a stuck one cannot hang the boot; on expiry booster moves to the next. PIN tokens are not bounded (empty-Enter already skips them). Keys:
+
+    * `serialize_tokens.enabled` — boolean, default `false`.
+    * `serialize_tokens.clevis_timeout` / `serialize_tokens.tpm2_timeout` / `serialize_tokens.fido2_timeout` — per-token bounds for clevis, non-PIN `systemd-tpm2`, and non-PIN `systemd-fido2`. Go duration. Defaults `45s` / `15s` / `30s`. No effect unless `serialize_tokens.enabled` is set.
+
+ * `token_timeout` (top-level, applies in both modes) bounds how long booster waits for tokens before it *also* starts the keyboard passphrase prompt. The tokens keep racing after the prompt appears; whichever path wins first dismisses the other (see **LUKS unlock concurrency and prompt order** in NOTES). It is the booster-config equivalent of the crypttab/`rd.luks.options` `token-timeout=` (see `rd.luks.options` under **BOOT TIME KERNEL PARAMETERS**). Go duration. Precedence, highest first:
+
+    1. an explicit per-device `token-timeout=` — on the kernel cmdline (`rd.luks.options`) or in crypttab; the cmdline value wins when both set it for the same device.
+    2. this `token_timeout`.
+    3. in serialize mode, the sum of the device's per-token timeouts (so the keyboard prompt never preempts a token that has not had its turn).
+    4. the `30s` default.
+
+    In serialize mode prefer leaving `token_timeout` unset so tier 3 applies: a fixed value shorter than the token chain can start the keyboard prompt before a token has had its turn.
+
+ * `pin_delay` is the concurrent-mode counterpart to `serialize_tokens`: it holds the first interactive PIN prompt (TPM2-PIN, FIDO2-PIN) this long so a parallel non-interactive token can unlock first and the prompt is never drawn — cancelled before render if a token wins, shown as normal if the delay expires (no unlock path is lost; the delay only postpones the prompt). Go duration; unset (the default) means no delay. No effect in serialize mode, or when no parallel non-PIN token is enrolled (a PIN-only device prompts immediately). Set it longer than the racing token's real unlock time — TPM2/FIDO2 hardware bring-up, or for clevis the network/DHCP round-trip — but well below `token_timeout`; otherwise the prompt is still drawn. A few seconds suits a fast PCR-only TPM2 unseal; clevis-over-network or a universal image with slow module loading needs more.
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
@@ -219,8 +240,9 @@ copy.
 
 When both a `rd.luks.*` cmdline parameter and a crypttab entry cover the
 same device, the cmdline takes precedence for the device reference and
-mapper name; the crypttab entry's security options (keyfile, header,
-tries, token-timeout, …) are merged in. Crypttab entries for devices not
+mapper name, and for any security option (keyfile, header, tries,
+token-timeout, …) it sets explicitly; the crypttab entry supplies only
+the options the cmdline left unset. Crypttab entries for devices not
 covered by `rd.luks.*` are appended as new mappings.
 
 Booster-specific behaviour for selected options:

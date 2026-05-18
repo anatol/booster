@@ -76,10 +76,19 @@ type orchestrationEvent struct {
 	event string // "started", "completed", "skipped-done"
 }
 
-// runPinTokens mirrors the dispatch in luksOpen: non-PIN tokens fan out in
-// parallel, PIN tokens are walked sequentially in slice order by one goroutine.
-// Returns the recorded events.
+// runPinTokens mirrors the dispatch in luksOpen with serialize_tokens off:
+// non-PIN tokens fan out in parallel, PIN tokens are walked sequentially in
+// slice order by one goroutine.
 func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
+	return runTokens(specs, false)
+}
+
+// runTokens mirrors the token dispatch in luksOpen. When serialize is false,
+// non-PIN tokens fan out in parallel and only PIN tokens serialize. When
+// serialize is true, every token serializes (the serialize_tokens opt-out of
+// booster's token concurrency) — matching the `serialize || tokenNeedsPin(t)`
+// gate in luksOpen. Returns the recorded events.
+func runTokens(specs []pinTokenSpec, serialize bool) []orchestrationEvent {
 	var events []orchestrationEvent
 	var mu sync.Mutex
 	record := func(id int, ev string) {
@@ -102,7 +111,7 @@ func runPinTokens(specs []pinTokenSpec) []orchestrationEvent {
 
 	var pinSpecs []pinTokenSpec
 	for _, t := range specs {
-		if t.pin {
+		if serialize || t.pin {
 			pinSpecs = append(pinSpecs, t)
 			continue
 		}
@@ -340,4 +349,72 @@ func TestPinTokensPreserveInputSliceOrderWhenUnsorted(t *testing.T) {
 	events := runPinTokens(specs)
 	require.Equal(t, []int{3, 1, 0, 2, 4}, orderOf(events),
 		"without sort, loop must run tokens in input-slice order")
+}
+
+// ── serialize_tokens opt-out ─────────────────────────────────────────────────
+//
+// With serialize_tokens set, luksOpen routes every token (including non-PIN
+// clevis / touchless-FIDO2 / auto-TPM2) through the single serial loop. These
+// tests assert that opt-out: no parallel fan-out, strict slice-order, and the
+// short-circuit-on-success behaviour still holds.
+
+func TestSerializeTokensRunsNonPinTokensSerially(t *testing.T) {
+	t.Parallel()
+	// All three tokens are non-PIN. Without serialize they would fan out in
+	// parallel; with serialize each must fully complete before the next starts.
+	specs := []pinTokenSpec{
+		{id: 1, pin: false, recoverFn: returns(false)},
+		{id: 2, pin: false, recoverFn: returns(false)},
+		{id: 3, pin: false, recoverFn: returns(false)},
+	}
+	events := runTokens(specs, true)
+	require.Equal(t, []int{1, 2, 3}, orderOf(events), "serialize must run tokens in slice order")
+	require.Equal(t, []orchestrationEvent{
+		{1, "started"}, {1, "completed"},
+		{2, "started"}, {2, "completed"},
+		{3, "started"}, {3, "completed"},
+	}, events, "serialize must not interleave non-PIN tokens")
+}
+
+func TestSerializeTokensNonPinSuccessShortCircuits(t *testing.T) {
+	t.Parallel()
+	// A non-PIN token succeeding under serialize must cancel the loop so
+	// trailing tokens never run — same short-circuit as the PIN loop.
+	specs := []pinTokenSpec{
+		{id: 1, pin: false, recoverFn: returns(false)},
+		{id: 2, pin: false, recoverFn: returns(true)},
+		{id: 3, pin: false, recoverFn: returns(false)},
+	}
+	events := runTokens(specs, true)
+	require.Equal(t, []int{1, 2}, orderOf(events))
+	require.Equal(t, "", eventOf(events, 3), "token 3 must not run after a serial success")
+}
+
+func TestSerializeTokensBlockingTokenDelaysNext(t *testing.T) {
+	t.Parallel()
+	// Under serialize a blocking non-PIN token (e.g. clevis waiting on the
+	// network) must hold up the next token — proving there is no parallel
+	// goroutine. This is the deliberate trade-off of opting out of concurrency.
+	release := make(chan struct{})
+	secondStarted := make(chan struct{})
+	specs := []pinTokenSpec{
+		{id: 1, pin: false, recoverFn: func(ctx context.Context) bool {
+			<-release
+			return false
+		}},
+		{id: 2, pin: false, recoverFn: func(ctx context.Context) bool {
+			close(secondStarted)
+			return false
+		}},
+	}
+	resultCh := make(chan []orchestrationEvent, 1)
+	go func() { resultCh <- runTokens(specs, true) }()
+
+	select {
+	case <-secondStarted:
+		t.Fatal("token 2 started before token 1 finished — serialize is not serial")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	<-resultCh
 }

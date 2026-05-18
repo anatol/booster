@@ -42,6 +42,18 @@ type UserConfig struct {
 	EnablePlymouth       bool   `yaml:"enable_plymouth"`
 	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
 	EnableFido2          bool   `yaml:"enable_fido2"`
+	TokenTimeout         string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
+	PinDelay             string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
+
+	// SerializeTokens opts out of booster's token concurrency: tokens are
+	// tried one at a time in ID order. The per-type timeouts are scoped here
+	// because they only take effect in serialize mode.
+	SerializeTokens *struct {
+		Enabled       bool   `yaml:",omitempty"`               // process LUKS tokens one at a time instead of concurrently
+		ClevisTimeout string `yaml:"clevis_timeout,omitempty"` // per-token bound for clevis (e.g. 45s); default 45s
+		Tpm2Timeout   string `yaml:"tpm2_timeout,omitempty"`   // per-token bound for non-PIN systemd-tpm2 (e.g. 15s); default 15s
+		Fido2Timeout  string `yaml:"fido2_timeout,omitempty"`  // per-token bound for non-PIN systemd-fido2 (e.g. 30s); default 30s
+	} `yaml:"serialize_tokens,omitempty"`
 }
 
 func parseCommaList(raw string) []string {
@@ -170,6 +182,39 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.crypttabFile = u.CrypttabPath
 	}
 	conf.enableFido2 = u.EnableFido2
+	var clevisT, tpm2T, fido2T string
+	if st := u.SerializeTokens; st != nil {
+		conf.serializeTokens = st.Enabled
+		clevisT, tpm2T, fido2T = st.ClevisTimeout, st.Tpm2Timeout, st.Fido2Timeout
+	}
+	for _, f := range []struct {
+		name string
+		val  string
+		dst  *int
+	}{
+		{"token_timeout", u.TokenTimeout, &conf.tokenTimeout},
+		{"pin_delay", u.PinDelay, &conf.pinDelay},
+		{"serialize_tokens.clevis_timeout", clevisT, &conf.clevisTimeout},
+		{"serialize_tokens.tpm2_timeout", tpm2T, &conf.tpm2Timeout},
+		{"serialize_tokens.fido2_timeout", fido2T, &conf.fido2Timeout},
+	} {
+		if f.val == "" {
+			continue
+		}
+		d, err := time.ParseDuration(f.val)
+		if err != nil {
+			return nil, fmt.Errorf("config: unable to parse %s value %q: %v", f.name, f.val, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("config: %s must be positive, got %q", f.name, f.val)
+		}
+		// Stored as whole seconds (0 means "unset" downstream), so a positive
+		// sub-second value would silently truncate to 0 and disable the option.
+		if d < time.Second {
+			return nil, fmt.Errorf("config: %s must be at least 1s, got %q", f.name, f.val)
+		}
+		*f.dst = int(d.Seconds())
+	}
 
 	return &conf, nil
 }

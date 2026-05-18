@@ -34,6 +34,12 @@ type luksMapping struct {
 	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
+	// tokenTimeoutExplicit is set when tokenTimeout came from an explicit
+	// crypttab/cmdline token-timeout= (not the implicit 30s default). It lets
+	// luksOpen know whether a booster.yaml token_timeout or the serialize-mode
+	// derived sum may be substituted instead.
+	tokenTimeoutExplicit bool
+
 	keyfileDeviceRef *deviceRef    // non-nil when keyfile is on a separate device
 	keyfileTimeout   time.Duration // device wait timeout for keyfile device (0 = use MountTimeout)
 
@@ -89,7 +95,22 @@ var rdLuksOptions = map[string]string{
 	"no-write-workqueue":     luks.FlagNoWriteWorkqueue,
 }
 
-func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
+// ctxSleep blocks for d, or returns ctx.Err() as soon as ctx is done, whichever
+// comes first. Used to make fixed waits (clevis network-retry backoff, the
+// concurrent-mode PIN-prompt pre-delay) abort immediately on a cancel-on-win or
+// a serialize-mode per-token timeout instead of sleeping out the full duration.
+func ctxSleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) ([]byte, error) {
 	var payload []byte
 	// Note that token metadata stored differently in LUKS v1 and v2
 	if luksVersion == 1 {
@@ -107,6 +128,9 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
 	waitedForTpm := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		password, err := clevis.Decrypt(payload)
 		if err != nil {
 			var netError *net.OpError
@@ -126,7 +150,9 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 				if time.Now().After(deadline) {
 					return nil, fmt.Errorf("timeout waiting for USB device")
 				}
-				time.Sleep(500 * time.Millisecond)
+				if err := ctxSleep(ctx, 500*time.Millisecond); err != nil {
+					return nil, err
+				}
 				continue
 			} else if !errors.As(err, &netError) {
 				return nil, err
@@ -137,7 +163,9 @@ func recoverClevisPassword(t luks.Token, luksVersion int) ([]byte, error) {
 				return nil, fmt.Errorf("timeout waiting for network")
 			}
 			// else let's sleep and retry
-			time.Sleep(time.Second)
+			if err := ctxSleep(ctx, time.Second); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -298,7 +326,15 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 	seenHidrawDevices := make(set)
 
-	for devName := range hidrawDevices {
+	for {
+		var devName string
+		select {
+		case <-ctx.Done():
+			// serialize-mode per-token timeout (or cancel-on-win) fired
+			// while waiting for a FIDO2 device to appear — stop waiting.
+			return nil, ctx.Err()
+		case devName = <-hidrawDevices:
+		}
 		if seenHidrawDevices[devName] {
 			continue
 		}
@@ -507,13 +543,87 @@ func tokenNeedsPin(t luks.Token) bool {
 	return false
 }
 
+// secondsOr returns cfg seconds as a Duration, or def seconds when cfg is 0
+// (unset). Used to resolve the per-token-type serialize-mode bounds.
+func secondsOr(cfg, def int) time.Duration {
+	if cfg > 0 {
+		return time.Duration(cfg) * time.Second
+	}
+	return time.Duration(def) * time.Second
+}
+
+// perTokenTimeout returns the serialize-mode per-token bound for t, or 0 when t
+// must not be auto-cancelled. PIN-bearing tokens (interactive — the user has
+// the empty-Enter skip) and unknown token types are never bounded. Only used
+// when SerializeTokens is set; in concurrent mode tokens race so a blocker
+// can't starve siblings.
+func perTokenTimeout(t luks.Token) time.Duration {
+	if !config.SerializeTokens || tokenNeedsPin(t) {
+		return 0
+	}
+	switch t.Type {
+	case "clevis":
+		return secondsOr(config.ClevisTimeout, 45)
+	case "systemd-tpm2":
+		return secondsOr(config.Tpm2Timeout, 15)
+	case "systemd-fido2":
+		return secondsOr(config.Fido2Timeout, 30)
+	}
+	return 0
+}
+
+// effectiveTokenTimeout resolves how long luksOpen waits for tokens before the
+// keyboard/keyfile fallback also starts. Precedence, highest first:
+//
+//  1. explicit crypttab/cmdline token-timeout= (mapping.tokenTimeoutExplicit)
+//  2. booster.yaml token_timeout (config.TokenTimeout)
+//  3. serialize mode: sum of the enrolled tokens' per-token bounds, so the
+//     keyboard never preempts a serial token that hasn't had its turn (PIN
+//     tokens contribute 0 — they're interactive and covered by tokenWg). A
+//     zero sum (only PIN/unknown tokens) falls through to case 4 — otherwise
+//     a FIDO2-PIN goroutine parked on absent hardware would never release the
+//     keyboard fallback and the boot would hang.
+//  4. otherwise the mapping's implicit default (30 s; unchanged behaviour)
+//
+// A return of 0 means "wait for the token goroutines (tokenWg) with no timer".
+func effectiveTokenTimeout(mapping *luksMapping, serialTokens []luks.Token) time.Duration {
+	if mapping.tokenTimeoutExplicit {
+		return mapping.tokenTimeout
+	}
+	if config.TokenTimeout > 0 {
+		return time.Duration(config.TokenTimeout) * time.Second
+	}
+	if config.SerializeTokens {
+		var sum time.Duration
+		for _, t := range serialTokens {
+			sum += perTokenTimeout(t)
+		}
+		if sum > 0 {
+			return sum
+		}
+	}
+	return mapping.tokenTimeout
+}
+
+// pinDelay returns how long luksOpen holds the first interactive PIN prompt so
+// a parallel non-interactive token can win first and spare the user the PIN.
+// Returns 0 unless pin_delay is set, in serialize mode (strict ID order
+// already), or with no parallel non-PIN token (nothing could make the prompt
+// unnecessary).
+func pinDelay(serialize, hasParallelToken bool) time.Duration {
+	if config.PinDelay <= 0 || serialize || !hasParallelToken {
+		return 0
+	}
+	return time.Duration(config.PinDelay) * time.Second
+}
+
 func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string) bool {
 	var password []byte
 	var err error
 
 	switch t.Type {
 	case "clevis":
-		password, err = recoverClevisPassword(t, d.Version())
+		password, err = recoverClevisPassword(ctx, t, d.Version())
 	case "systemd-fido2":
 		password, err = recoverSystemdFido2Password(ctx, t, mappingName)
 	case "systemd-tpm2":
@@ -528,6 +638,15 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	}
 	if errors.Is(err, errTPM2Skipped) {
 		return false // intentional fallback; message already shown in recoverSystemdTPM2Password
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		// serialize-mode per-token timeout — not a failure, advance the
+		// serial loop to the next token (or the keyboard fallback).
+		info("%s token #%d timed out, moving on", t.Type, t.ID)
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false // another unlock path won (cancel-on-win); stay quiet
 	}
 	if err != nil {
 		warning("recovering %s token #%d failed: %v", t.Type, t.ID, err)
@@ -821,11 +940,19 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// which token (TPM2 vs FIDO2 vs clevis) tries to unlock first.
 	sort.Slice(tokens, func(i, j int) bool { return tokens[i].ID < tokens[j].ID })
 
-	// PIN-bearing tokens (TPM2 with PIN, FIDO2 with PIN) go into pinTokens for
-	// serial dispatch by a single goroutine so prompts never interleave when
-	// more than one is enrolled. Non-PIN tokens fan out as today.
-	var pinTokens []luks.Token
+	// Tokens dispatched serially go into serialTokens; a single goroutine walks
+	// them in ID order so attempts never interleave. PIN-bearing tokens (TPM2
+	// with PIN, FIDO2 with PIN) always serialize so prompts never overlap when
+	// more than one is enrolled. When serialize_tokens is set every token
+	// serializes — the user opted out of booster's token concurrency entirely.
+	// Otherwise non-PIN tokens fan out in parallel.
+	serialize := config.SerializeTokens
+	var serialTokens []luks.Token
 	slotsWithTokens := make(map[int]bool)
+	// hasParallelToken: a non-PIN token is racing in parallel. Gates the
+	// PIN-prompt pre-delay — holding the prompt only helps when a
+	// non-interactive token could still win and make it unnecessary.
+	hasParallelToken := false
 	for _, t := range tokens {
 		if t.Type == "systemd-recovery" {
 			continue // skipped: entered via keyboard later
@@ -833,11 +960,12 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		for _, s := range t.Slots {
 			slotsWithTokens[s] = true
 		}
-		if tokenNeedsPin(t) {
-			pinTokens = append(pinTokens, t)
+		if serialize || tokenNeedsPin(t) {
+			serialTokens = append(serialTokens, t)
 			continue
 		}
 		t := t
+		hasParallelToken = true
 		senderWg.Add(1)
 		tokenWg.Add(1)
 		go func() {
@@ -849,24 +977,55 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		}()
 	}
 
-	// PIN tokens: one goroutine walks them in slice order (already sorted by
+	delay := pinDelay(serialize, hasParallelToken)
+
+	// Serial tokens: one goroutine walks them in slice order (already sorted by
 	// ID above). A skipped/failed token advances to the next; a successful
 	// unlock cancels ctx and stops iteration. The ctx check before each
-	// iteration lets a parallel non-PIN unlock cancel the loop without
-	// waiting for the next prompt to time out.
-	if len(pinTokens) > 0 {
+	// iteration lets a parallel non-PIN unlock (when any exist) cancel the loop
+	// without waiting for the next prompt to time out.
+	if len(serialTokens) > 0 {
 		senderWg.Add(1)
 		tokenWg.Add(1)
 		go func() {
 			defer senderWg.Done()
 			defer tokenWg.Done()
-			for _, t := range pinTokens {
+			pinDelayed := false
+			for _, t := range serialTokens {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
-				if recoverTokenPassword(ctx, volumes, d, t, mapping.name) {
+				// Hold the first PIN prompt for pin_delay so the parallel
+				// non-interactive token race can win before any prompt is
+				// drawn; if it wins (here or later) ctx is cancelled and we
+				// return. Applied only once: the delay just buys the race a
+				// head start before the user is first interrupted. The race
+				// goroutines keep running regardless, and cancel-on-win still
+				// dismisses a later prompt — re-paying the delay per PIN token
+				// would only add boot latency with no extra benefit.
+				if delay > 0 && !pinDelayed && tokenNeedsPin(t) {
+					pinDelayed = true
+					if err := ctxSleep(ctx, delay); err != nil {
+						return // cancel-on-win during the delay
+					}
+				}
+				// Per-token timeout (serialize mode only): bound a
+				// non-interactive token so a dead clevis/absent-FIDO2
+				// can't stall the chain or starve later tokens. PIN
+				// tokens return 0 here (interactive, user has empty-Enter
+				// escape) and run under the parent ctx unbounded.
+				tctx := ctx
+				var tcancel context.CancelFunc
+				if pt := perTokenTimeout(t); pt > 0 {
+					tctx, tcancel = context.WithTimeout(ctx, pt)
+				}
+				ok := recoverTokenPassword(tctx, volumes, d, t, mapping.name)
+				if tcancel != nil {
+					tcancel()
+				}
+				if ok {
 					cancel()
 					return
 				}
@@ -895,8 +1054,8 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	// elapses). This gives hardware tokens priority over the keyboard prompt.
 	// senderWg ensures volumes is closed if this goroutine is the last sender.
 	senderWg.Go(func() {
-		if mapping.tokenTimeout > 0 {
-			waitTimeout(&tokenWg, mapping.tokenTimeout)
+		if tt := effectiveTokenTimeout(mapping, serialTokens); tt > 0 {
+			waitTimeout(&tokenWg, tt)
 		} else {
 			tokenWg.Wait()
 		}

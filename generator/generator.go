@@ -52,6 +52,13 @@ type generatorConfig struct {
 
 	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
 	enableFido2  bool
+
+	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
+	tokenTimeout    int  // device-level keyboard-fallback timer (seconds); 0 = unset
+	pinDelay        int  // concurrent-mode PIN-prompt pre-delay (seconds); 0 = off
+	clevisTimeout   int  // serialize-mode per-token bound for clevis (seconds); 0 = default
+	tpm2Timeout     int  // serialize-mode per-token bound for non-PIN systemd-tpm2 (seconds); 0 = default
+	fido2Timeout    int  // serialize-mode per-token bound for non-PIN systemd-fido2 (seconds); 0 = default
 }
 
 type networkStaticConfig struct {
@@ -497,6 +504,12 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.EnableZfs = conf.enableZfs
 	initConfig.ZfsImportParams = conf.zfsImportParams
 	initConfig.EnablePlymouth = conf.enablePlymouth
+	initConfig.SerializeTokens = conf.serializeTokens
+	initConfig.TokenTimeout = conf.tokenTimeout
+	initConfig.PinDelay = conf.pinDelay
+	initConfig.ClevisTimeout = conf.clevisTimeout
+	initConfig.Tpm2Timeout = conf.tpm2Timeout
+	initConfig.Fido2Timeout = conf.fido2Timeout
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

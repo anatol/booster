@@ -302,13 +302,14 @@ func TestFindLuksMapping(t *testing.T) {
 func TestMergeCrypttabOptions(t *testing.T) {
 	dst := &luksMapping{name: "cmdline-name", keySlot: -1, tokenTimeout: 30 * time.Second}
 	src := &luksMapping{
-		tries:        3,
-		tokenTimeout: 45 * time.Second,
+		tries:                3,
+		tokenTimeout:         45 * time.Second,
+		tokenTimeoutExplicit: true, // as parseCrypttabReader sets it for an explicit token-timeout=
 	}
 	mergeCrypttabOptions(dst, src)
 	require.Equal(t, 3, dst.tries)
-	require.Equal(t, 45*time.Second, dst.tokenTimeout)
-	require.Equal(t, "cmdline-name", dst.name) // name must not be overwritten
+	require.Equal(t, 45*time.Second, dst.tokenTimeout) // cmdline mapping was not explicit → crypttab's explicit value adopted
+	require.Equal(t, "cmdline-name", dst.name)         // name must not be overwritten
 }
 
 func TestMergeCrypttabOptionsDstWins(t *testing.T) {
@@ -319,6 +320,38 @@ func TestMergeCrypttabOptionsDstWins(t *testing.T) {
 	require.Equal(t, 2, dst.keySlot)              // cmdline key-slot wins
 	require.Equal(t, 5, dst.tries)                // cmdline tries wins
 	require.Equal(t, "/cmdline/hdr", dst.header)  // cmdline header wins
+}
+
+// An explicit token-timeout= on the kernel cmdline must outrank a crypttab
+// entry for the same device — both when crypttab omits token-timeout (its
+// parser still fills the 30s implicit default) and when crypttab sets a
+// different explicit value. This mirrors the keyfile/header/tries merges:
+// an explicit cmdline value always wins; crypttab fills only what the
+// cmdline left unset. Regression for the pre-existing `src != dst` merge
+// that let crypttab's implicit 30s clobber an explicit cmdline value.
+func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
+	t.Run("crypttab omits token-timeout (implicit 30s) → cmdline 10s survives", func(t *testing.T) {
+		dst := &luksMapping{tokenTimeout: 10 * time.Second, tokenTimeoutExplicit: true}
+		src := &luksMapping{tokenTimeout: 30 * time.Second} // crypttab parser's implicit default; not explicit
+		mergeCrypttabOptions(dst, src)
+		require.Equal(t, 10*time.Second, dst.tokenTimeout)
+		require.True(t, dst.tokenTimeoutExplicit)
+	})
+
+	t.Run("crypttab sets a different explicit value → cmdline still wins", func(t *testing.T) {
+		dst := &luksMapping{tokenTimeout: 10 * time.Second, tokenTimeoutExplicit: true}
+		src := &luksMapping{tokenTimeout: 60 * time.Second, tokenTimeoutExplicit: true}
+		mergeCrypttabOptions(dst, src)
+		require.Equal(t, 10*time.Second, dst.tokenTimeout, "explicit cmdline token-timeout outranks explicit crypttab")
+	})
+
+	t.Run("cmdline not explicit → explicit crypttab is adopted", func(t *testing.T) {
+		dst := &luksMapping{tokenTimeout: 30 * time.Second} // findOrCreateLuksMapping default, not explicit
+		src := &luksMapping{tokenTimeout: 60 * time.Second, tokenTimeoutExplicit: true}
+		mergeCrypttabOptions(dst, src)
+		require.Equal(t, 60*time.Second, dst.tokenTimeout)
+		require.True(t, dst.tokenTimeoutExplicit)
+	})
 }
 
 // rd.luks.name= on the kernel cmdline creates a mapping before crypttab is parsed.
