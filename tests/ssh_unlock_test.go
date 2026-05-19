@@ -81,7 +81,7 @@ func TestSSHRemoteUnlock(t *testing.T) {
 		enableNetwork: true,
 		useDhcp:       true,
 		params: []string{
-			"-nic", "user,id=n1,hostfwd=tcp::" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
 		},
 		sshHostKeyPath:        hostKeyPath,
 		sshAuthorizedKeysPath: authKeysPath,
@@ -178,7 +178,7 @@ func TestSSHRemoteUnlockMultiDeviceSharedPassphrase(t *testing.T) {
 		enableNetwork: true,
 		useDhcp:       true,
 		params: []string{
-			"-nic", "user,id=n1,hostfwd=tcp::" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
 		},
 		sshHostKeyPath:        hostKeyPath,
 		sshAuthorizedKeysPath: authKeysPath,
@@ -270,7 +270,7 @@ func TestSSHRemoteUnlockRejectsWrongClientKey(t *testing.T) {
 		enableNetwork: true,
 		useDhcp:       true,
 		params: []string{
-			"-nic", "user,id=n1,hostfwd=tcp::" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
 		},
 		sshHostKeyPath:        hostKeyPath,
 		sshAuthorizedKeysPath: authKeysPath,
@@ -338,7 +338,7 @@ func TestSSHRemoteUnlockRetryThenUnlock(t *testing.T) {
 		enableNetwork: true,
 		useDhcp:       true,
 		params: []string{
-			"-nic", "user,id=n1,hostfwd=tcp::" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
 		},
 		sshHostKeyPath:        hostKeyPath,
 		sshAuthorizedKeysPath: authKeysPath,
@@ -451,7 +451,7 @@ func TestSSHRemoteUnlockFido2Pending(t *testing.T) {
 		enableNetwork: true,
 		useDhcp:       true,
 		params: []string{
-			"-nic", "user,id=n1,hostfwd=tcp::" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
 		},
 		sshHostKeyPath:        hostKeyPath,
 		sshAuthorizedKeysPath: authKeysPath,
