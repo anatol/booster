@@ -158,16 +158,14 @@ func trySubmitPassphraseToPending(password []byte) []string {
 		wg       sync.WaitGroup
 	)
 	for _, p := range snapshot {
-		wg.Add(1)
-		go func(p *promptRegistration) {
+		wg.Go(func() {
 			defer p.inflight.Done()
-			defer wg.Done()
 			if tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password) {
 				mu.Lock()
 				unlocked = append(unlocked, p.mappingName)
 				mu.Unlock()
 			}
-		}(p)
+		})
 	}
 	wg.Wait()
 
