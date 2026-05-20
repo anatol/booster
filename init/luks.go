@@ -97,7 +97,14 @@ var pendingPrompts struct {
 }
 
 type promptRegistration struct {
-	ctx         context.Context
+	ctx context.Context
+	// cancel is luksOpen's own cancel — calling it ends this device's unlock
+	// orchestration (same effect as a token-success cancel). SSH submissions
+	// invoke it after a successful UnsealVolume so pendingDeviceNames stops
+	// listing the device on the very next prompt-loop iteration. Without it,
+	// the entry lingers until luksOpen returns past SetupMapper (~tens of ms),
+	// and the next prompt redundantly names the already-unlocked device.
+	cancel      context.CancelFunc
 	volumes     chan *luks.Volume
 	d           luks.Device
 	checkSlots  []int
@@ -161,6 +168,12 @@ func trySubmitPassphraseToPending(password []byte) []string {
 		wg.Go(func() {
 			defer p.inflight.Done()
 			if tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password) {
+				// Dismiss this device's unlock orchestration now that the
+				// volume is in hand — mirrors the token-success cancel.
+				// pendingDeviceNames filters by ctx.Err(), so the next
+				// sshPromptLoop iteration won't re-list this device while
+				// luksOpen is still finishing SetupMapper.
+				p.cancel()
 				mu.Lock()
 				unlocked = append(unlocked, p.mappingName)
 				mu.Unlock()
@@ -175,6 +188,24 @@ func trySubmitPassphraseToPending(password []byte) []string {
 		passphraseCache.Unlock()
 	}
 	return unlocked
+}
+
+// pendingDeviceNames returns a sorted snapshot of mapping names currently
+// registered for unlock whose ctx is still live. Used by the SSH prompt so
+// the operator can see which devices a submission will be broadcast against,
+// and so the loop can detect "everything unlocked" and disconnect cleanly.
+func pendingDeviceNames() []string {
+	pendingPrompts.Lock()
+	names := make([]string, 0, len(pendingPrompts.entries))
+	for p := range pendingPrompts.entries {
+		if p.ctx.Err() != nil {
+			continue
+		}
+		names = append(names, p.mappingName)
+	}
+	pendingPrompts.Unlock()
+	sort.Strings(names)
+	return names
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -1151,6 +1182,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	if len(checkSlotsWithPassword) > 0 {
 		reg = &promptRegistration{
 			ctx:         ctx,
+			cancel:      cancel,
 			volumes:     volumes,
 			d:           d,
 			checkSlots:  checkSlotsWithPassword,

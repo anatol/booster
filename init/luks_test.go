@@ -498,6 +498,7 @@ func TestTrySubmitPassphraseToPendingHoldsInflight(t *testing.T) {
 	volumes := make(chan *luks.Volume, 1)
 	reg := &promptRegistration{
 		ctx:         context.Background(),
+		cancel:      func() {},
 		volumes:     volumes,
 		d:           fake,
 		checkSlots:  []int{0},
@@ -547,4 +548,49 @@ func TestTrySubmitPassphraseToPendingHoldsInflight(t *testing.T) {
 
 	<-submitDone
 	require.Len(t, volumes, 1, "volume should have been sent on the channel")
+}
+
+// TestTrySubmitPassphraseCancelsRegistrationOnSuccess pins that a successful
+// SSH submission cancels the unlocked device's ctx synchronously — before
+// trySubmitPassphraseToPending returns. Without this, sshPromptLoop's next
+// pendingDeviceNames() snapshot still lists the just-unlocked device for the
+// window between volume-send and luksOpen's deferred unregister, and the
+// operator sees the already-unlocked mapping name on the reprompt.
+//
+// Property: after a successful submission, pendingDeviceNames() must not
+// include the unlocked entry, because ctx.Err() is non-nil. Removing
+// p.cancel() from trySubmitPassphraseToPending's success branch fails this.
+func TestTrySubmitPassphraseCancelsRegistrationOnSuccess(t *testing.T) {
+	withPendingPrompts(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	fake := &fenceFakeLuksDevice{
+		unseal: func(_ int, _ []byte) (*luks.Volume, error) {
+			return &luks.Volume{}, nil
+		},
+	}
+	// Buffered so the send in tryPassphraseAgainstSlots completes without a
+	// luksOpen-style consumer.
+	volumes := make(chan *luks.Volume, 1)
+	reg := &promptRegistration{
+		ctx:         ctx,
+		cancel:      cancel,
+		volumes:     volumes,
+		d:           fake,
+		checkSlots:  []int{0},
+		mappingName: "cancel-on-success",
+	}
+	registerPendingPrompt(reg)
+
+	unlocked := trySubmitPassphraseToPending([]byte("anything"))
+	require.Equal(t, []string{"cancel-on-success"}, unlocked)
+
+	require.Error(t, reg.ctx.Err(),
+		"ctx must be cancelled by trySubmitPassphraseToPending on success")
+
+	names := pendingDeviceNames()
+	require.NotContains(t, names, "cancel-on-success",
+		"pendingDeviceNames must drop entries whose ctx is cancelled")
 }

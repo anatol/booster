@@ -135,11 +135,11 @@ func TestSSHRemoteUnlock(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sess.Shell())
 
-	// The server writes "Enter passphrase: " then reads a CR/LF terminated
-	// line. Read until we see the prompt, send the passphrase, then look
-	// for "Unlocked: cryptroot" on the same channel.
+	// The server writes "Enter passphrase for <device>: " then reads a
+	// CR/LF-terminated line. Read until we see the prompt, send the
+	// passphrase, then look for "Unlocked: cryptroot" on the same channel.
 	br := bufio.NewReader(stdout)
-	require.NoError(t, readUntil(br, "Enter passphrase:", 15*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
 	_, err = io.WriteString(stdin, "1234\n")
 	require.NoError(t, err)
 	require.NoError(t, readUntil(br, "Unlocked: cryptroot", 15*time.Second))
@@ -231,7 +231,7 @@ func TestSSHRemoteUnlockMultiDeviceSharedPassphrase(t *testing.T) {
 	require.NoError(t, sess.Shell())
 
 	br := bufio.NewReader(stdout)
-	require.NoError(t, readUntil(br, "Enter passphrase:", 15*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
 	_, err = io.WriteString(stdin, "1234\n")
 	require.NoError(t, err)
 
@@ -239,6 +239,227 @@ func TestSSHRemoteUnlockMultiDeviceSharedPassphrase(t *testing.T) {
 	// registered device. Order is non-deterministic (map iteration).
 	require.NoError(t, readUntil(br, "Unlocked: ", 15*time.Second))
 	require.NoError(t, readUntil(br, "Unlocked: ", 15*time.Second))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSSHRemoteUnlockBtrfsRaid1SharedPassphrase boots a btrfs RAID1 root
+// whose two members are each wrapped in LUKS2 with the same passphrase.
+// A single SSH submission unlocks both members via the broadcast path; the
+// boot sequence must then poll BTRFS_IOC_DEVICES_READY (init/main.go's
+// waitForBtrfsDevicesReady) until both mapper devices are present and the
+// kernel reports the array assembled, before mountRootFs proceeds. The SSH
+// listener must stay alive across that wait; if cleanup()/sshShutdown()
+// fired early the second member's mapper-creation event would race against
+// process replacement.
+//
+// Verifies the btrfs-multi-device wait gate: switch_root does NOT fire
+// when *root* is unlocked, only when *root mount succeeds*, which for
+// multi-device btrfs requires every member assembled.
+func TestSSHRemoteUnlockBtrfsRaid1SharedPassphrase(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1.img"))
+
+	tmp := t.TempDir()
+
+	hostPriv, _, _ := generateSSHKeyPair(t)
+	_, clientAuthLine, clientSigner := generateSSHKeyPair(t)
+
+	hostKeyPath := filepath.Join(tmp, "host_ed25519")
+	require.NoError(t, os.WriteFile(hostKeyPath, hostPriv, 0o600))
+	authKeysPath := filepath.Join(tmp, "authorized_keys")
+	require.NoError(t, os.WriteFile(authKeysPath, clientAuthLine, 0o600))
+
+	// Mark both members x-initrd.attach so the generator includes them in
+	// the image's /etc/crypttab. The SSH unlock then targets both via the
+	// pendingPrompts broadcast.
+	crypttabPath := filepath.Join(tmp, "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"luks-btrfs1 UUID=d7fb15c9-4e6a-4901-cd3f-3a579bdf1357 none x-initrd.attach\n"+
+			"luks-btrfs2 UUID=e8ac26da-5f7b-4012-de40-4b68ace02468 none x-initrd.attach\n",
+	), 0o644))
+
+	hostPort := pickFreePort(t)
+	const guestPort = 2222
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:          "assets/luks2.btrfs_raid1.img",
+		modules:       "e1000",
+		enableNetwork: true,
+		useDhcp:       true,
+		crypttabFile:  crypttabPath,
+		params: []string{
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+		},
+		sshHostKeyPath:        hostKeyPath,
+		sshAuthorizedKeysPath: authKeysPath,
+		sshListen:             ":" + strconv.Itoa(guestPort),
+		kernelArgs:            []string{"root=UUID=f9bd37eb-607c-4123-ef51-5c79bdf13579"},
+		vmTimeout:             120 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
+
+	clientCfg := &gossh.ClientConfig{
+		User:            "root",
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(clientSigner)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := "127.0.0.1:" + strconv.Itoa(hostPort)
+	var conn *gossh.Client
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		conn, err = gossh.Dial("tcp", addr, clientCfg)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			require.NoError(t, err, "ssh.Dial never succeeded")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	defer conn.Close()
+
+	sess, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess.Close()
+
+	stdin, err := sess.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := sess.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, sess.Shell())
+
+	br := bufio.NewReader(stdout)
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
+	_, err = io.WriteString(stdin, "1234\n")
+	require.NoError(t, err)
+
+	// One submission unlocks both members via broadcast — two "Unlocked:"
+	// lines, order non-deterministic. After both unlock, the SSH server's
+	// next iteration finds pendingPrompts empty and emits the drain line.
+	// The boot then blocks in waitForBtrfsDevicesReady until btrfs sees
+	// both members; SSH stays alive throughout.
+	require.NoError(t, readUntil(br, "Unlocked: ", 15*time.Second))
+	require.NoError(t, readUntil(br, "Unlocked: ", 15*time.Second))
+	require.NoError(t, readUntil(br, "All devices unlocked.", 15*time.Second))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSSHRemoteUnlockBtrfsRaid1DistinctPassphrase boots a btrfs RAID1 root
+// whose two LUKS members carry DIFFERENT passphrases. Sequential SSH
+// unlocks must both complete before btrfs assembles: the broadcast path
+// only unlocks one member per submission (the passphrase cache cannot
+// help cross-member here — distinct keys), so the SSH session must stay
+// alive across two prompts. waitForBtrfsDevicesReady (init/main.go:606)
+// is what keeps the boot sequence parked between the first and second
+// unlock — without it, switch_root would fire as soon as the first LUKS
+// member's mapper appeared (it never would in practice with btrfs, but
+// the gate is what makes the multi-device case work cleanly).
+//
+// This is the legitimate-multi-device-in-initramfs case the boot
+// sequence handles correctly. Non-root LUKS volumes on a non-multi-
+// device root (e.g. ext4 root + extra ext4-shaped LUKS partition) are
+// abandoned at switch_root and should be configured via post-boot
+// userspace crypttab instead — outside the scope of this test.
+func TestSSHRemoteUnlockBtrfsRaid1DistinctPassphrase(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1_distinct.img"))
+
+	tmp := t.TempDir()
+
+	hostPriv, _, _ := generateSSHKeyPair(t)
+	_, clientAuthLine, clientSigner := generateSSHKeyPair(t)
+
+	hostKeyPath := filepath.Join(tmp, "host_ed25519")
+	require.NoError(t, os.WriteFile(hostKeyPath, hostPriv, 0o600))
+	authKeysPath := filepath.Join(tmp, "authorized_keys")
+	require.NoError(t, os.WriteFile(authKeysPath, clientAuthLine, 0o600))
+
+	crypttabPath := filepath.Join(tmp, "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"luks-btrfs1 UUID=9b5d8ac8-342b-423d-b253-3d3a5403fee8 none x-initrd.attach\n"+
+			"luks-btrfs2 UUID=461f9179-04f9-4def-9731-ac1598824026 none x-initrd.attach\n",
+	), 0o644))
+
+	hostPort := pickFreePort(t)
+	const guestPort = 2222
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:          "assets/luks2.btrfs_raid1_distinct.img",
+		modules:       "e1000",
+		enableNetwork: true,
+		useDhcp:       true,
+		crypttabFile:  crypttabPath,
+		params: []string{
+			"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(hostPort) + "-:" + strconv.Itoa(guestPort),
+		},
+		sshHostKeyPath:        hostKeyPath,
+		sshAuthorizedKeysPath: authKeysPath,
+		sshListen:             ":" + strconv.Itoa(guestPort),
+		kernelArgs:            []string{"root=UUID=aef9c3f8-2fbe-476f-b732-99f31226d601"},
+		vmTimeout:             180 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
+
+	clientCfg := &gossh.ClientConfig{
+		User:            "root",
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(clientSigner)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := "127.0.0.1:" + strconv.Itoa(hostPort)
+	var conn *gossh.Client
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		conn, err = gossh.Dial("tcp", addr, clientCfg)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			require.NoError(t, err, "ssh.Dial never succeeded")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	defer conn.Close()
+
+	sess, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess.Close()
+
+	stdin, err := sess.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := sess.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, sess.Shell())
+
+	br := bufio.NewReader(stdout)
+
+	// First prompt should name both members (order: alphabetical via
+	// pendingDeviceNames' sort). luks-btrfs1 < luks-btrfs2.
+	require.NoError(t, readUntil(br, "Enter passphrase for luks-btrfs1, luks-btrfs2:", 15*time.Second))
+
+	// Submit passphrase for member 1 ("1111"). Broadcast tries against
+	// both; only member 1's slot matches. SSH session continues
+	// (cb07ce3 + cancel-on-success), reprompts with just member 2.
+	_, err = io.WriteString(stdin, "1111\n")
+	require.NoError(t, err)
+	require.NoError(t, readUntil(br, "Unlocked: luks-btrfs1", 30*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for luks-btrfs2:", 15*time.Second))
+
+	// Submit member 2's passphrase ("2222"). Both members now unlocked;
+	// btrfs's BTRFS_IOC_DEVICES_READY ioctl transitions to ready; root
+	// mounts; switch_root fires.
+	_, err = io.WriteString(stdin, "2222\n")
+	require.NoError(t, err)
+	require.NoError(t, readUntil(br, "Unlocked: luks-btrfs2", 30*time.Second))
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
@@ -387,20 +608,20 @@ func TestSSHRemoteUnlockRetryThenUnlock(t *testing.T) {
 	require.NoError(t, sess.Shell())
 
 	br := bufio.NewReader(stdout)
-	require.NoError(t, readUntil(br, "Enter passphrase:", 15*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
 
 	// Empty submission — server's prompt-loop should treat zero-length input
 	// as a no-op and reprompt without trying to unlock anything.
 	_, err = io.WriteString(stdin, "\n")
 	require.NoError(t, err)
-	require.NoError(t, readUntil(br, "Enter passphrase:", 10*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 10*time.Second))
 
 	// Wrong passphrase — KDF runs but no slot matches; expect the "no
 	// pending devices matched" line plus another prompt.
 	_, err = io.WriteString(stdin, "wrongpass\n")
 	require.NoError(t, err)
 	require.NoError(t, readUntil(br, "Passphrase did not unlock any device", 30*time.Second))
-	require.NoError(t, readUntil(br, "Enter passphrase:", 10*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 10*time.Second))
 
 	// Correct passphrase unlocks.
 	_, err = io.WriteString(stdin, "1234\n")
@@ -506,7 +727,7 @@ func TestSSHRemoteUnlockFido2Pending(t *testing.T) {
 	require.NoError(t, sess.Shell())
 
 	br := bufio.NewReader(stdout)
-	require.NoError(t, readUntil(br, "Enter passphrase:", 15*time.Second))
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
 	// systemd-fido2-nodev.img's keyslot 0 was formatted with passphrase 567.
 	_, err = io.WriteString(stdin, "567\n")
 	require.NoError(t, err)

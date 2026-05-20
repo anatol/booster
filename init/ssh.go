@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -197,10 +198,11 @@ func sshHandleSession(ch gossh.Channel, reqs <-chan *gossh.Request, remote net.A
 }
 
 // sshPromptLoop reads passphrases from the client and submits them against
-// any LUKS device currently waiting for keyboard input. Successes are
-// reported back; empty submissions reprompt for free; non-matching
-// submissions consume one attempt up to sshMaxPromptAttempts, after which
-// the session is disconnected.
+// every LUKS device currently waiting for unlock. The loop keeps running
+// until pendingPrompts drains (every device unlocked), the client
+// disconnects, or sshMaxPromptAttempts non-empty wrong submissions have
+// been made — so a single SSH session can serve multiple devices with
+// distinct passphrases instead of forcing a reconnect after each unlock.
 func sshPromptLoop(ch gossh.Channel, remote net.Addr) {
 	attempts := 0
 	for {
@@ -208,7 +210,12 @@ func sshPromptLoop(ch gossh.Channel, remote net.Addr) {
 			_, _ = io.WriteString(ch, "Too many attempts, disconnecting.\r\n")
 			return
 		}
-		_, err := io.WriteString(ch, "Enter passphrase: ")
+		names := pendingDeviceNames()
+		if len(names) == 0 {
+			_, _ = io.WriteString(ch, "All devices unlocked.\r\n")
+			return
+		}
+		_, err := io.WriteString(ch, "Enter passphrase for "+strings.Join(names, ", ")+": ")
 		if err != nil {
 			return
 		}
@@ -233,7 +240,7 @@ func sshPromptLoop(ch gossh.Channel, remote net.Addr) {
 				fmt.Fprintf(ch, "Unlocked: %s\r\n", name)
 				statusMessage(name + " unlocked via SSH")
 			}
-			return
+			continue
 		}
 		statusMessage("")
 		_, _ = io.WriteString(ch, "Passphrase did not unlock any device. Try again or disconnect.\r\n")

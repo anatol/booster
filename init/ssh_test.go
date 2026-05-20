@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 
+	"github.com/anatol/luks.go"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
 )
@@ -127,25 +129,31 @@ func TestParseAuthorizedKeysSkipsGarbageBetweenValidKeys(t *testing.T) {
 // online oracle against LUKS keyslots whenever the operator's private
 // key has leaked.
 //
-// Setup: feed sshMaxPromptAttempts+5 non-empty wrong submissions and
-// assert exactly sshMaxPromptAttempts "Enter passphrase: " prompts are
-// emitted (one per attempt the loop processed) and the final output is
-// the "Too many attempts" disconnect line.
+// Setup: register one fake device whose UnsealVolume always reports
+// "passphrase does not match", feed sshMaxPromptAttempts+5 non-empty
+// wrong submissions, and assert exactly sshMaxPromptAttempts prompts
+// are emitted (one per attempt the loop processed) and the final output
+// is the "Too many attempts" disconnect line.
 func TestSshPromptLoopDisconnectsAfterMaxAttempts(t *testing.T) {
-	// Ensure pendingPrompts is empty so every submission returns
-	// no-unlock — otherwise we'd need a real LUKS device.
-	pendingPrompts.Lock()
-	saved := pendingPrompts.entries
-	pendingPrompts.entries = nil
-	pendingPrompts.Unlock()
-	t.Cleanup(func() {
-		pendingPrompts.Lock()
-		pendingPrompts.entries = saved
-		pendingPrompts.Unlock()
-	})
+	withPendingPrompts(t)
+
+	fake := &fenceFakeLuksDevice{
+		unseal: func(int, []byte) (*luks.Volume, error) {
+			return nil, luks.ErrPassphraseDoesNotMatch
+		},
+	}
+	reg := &promptRegistration{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		volumes:     make(chan *luks.Volume, 1), // never sent on for this test
+		d:           fake,
+		checkSlots:  []int{0},
+		mappingName: "cap-test",
+	}
+	registerPendingPrompt(reg)
 
 	var input bytes.Buffer
-	for i := 0; i < sshMaxPromptAttempts+5; i++ {
+	for range sshMaxPromptAttempts + 5 {
 		input.WriteString("wrong\r")
 	}
 	ch := &fakeChannel{in: &input}
@@ -154,7 +162,7 @@ func TestSshPromptLoopDisconnectsAfterMaxAttempts(t *testing.T) {
 	sshPromptLoop(ch, addr)
 
 	got := ch.out.String()
-	gotPrompts := bytes.Count([]byte(got), []byte("Enter passphrase: "))
+	gotPrompts := bytes.Count([]byte(got), []byte("Enter passphrase for cap-test: "))
 	require.Equal(t, sshMaxPromptAttempts, gotPrompts,
 		"expected exactly sshMaxPromptAttempts prompts, got %d", gotPrompts)
 	require.Contains(t, got, "Too many attempts, disconnecting.",
