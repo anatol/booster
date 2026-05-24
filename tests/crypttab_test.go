@@ -1,10 +1,14 @@
 package tests
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -332,6 +336,77 @@ func TestCtxAwareFido2CancelOnFallback(t *testing.T) {
 	// ctx.Err() and logs from its cancel branch. This is the leak-fix proof.
 	require.NoError(t, vm.ConsoleExpect("FIDO2 unlock for cryptroot cancelled before USB HID ready"))
 
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestCtxAwareFido2CancelMultiToken verifies that with multiple systemd-fido2
+// tokens enrolled, every FIDO2 unlock goroutine observes ctx cancellation when
+// keyboard fallback wins — not just one. Each token's recoverSystemdFido2Password
+// runs in its own goroutine (non-PIN systemd-fido2 fans out in parallel) and
+// blocks on waitForUsbhid; the cancel-path log must fire for each one.
+//
+// The 3-token image is built at test time by copying the 1-token
+// systemd-fido2-nodev.img fixture and adding two more fake systemd-fido2 tokens
+// via cryptsetup token import directly against the regular file (no sudo
+// required since cryptsetup doesn't need root for token JSON metadata mutation
+// on a user-owned LUKS file).
+func TestCtxAwareFido2CancelMultiToken(t *testing.T) {
+	if !fileExists(binariesDir + "/fido2plugin.so") {
+		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
+	}
+
+	// Copy the base 1-token fixture so we don't mutate it.
+	src := "assets/systemd-fido2-nodev.img"
+	dst := filepath.Join(t.TempDir(), "fido2-nodev-multi.img")
+	_, err := copyFile(src, dst)
+	require.NoError(t, err)
+
+	// Add 2 additional fake systemd-fido2 tokens with random credentials.
+	// fido2-clientPin-required:false so they fan out in parallel (PIN tokens
+	// would serialize, which we don't want — the point is to exercise
+	// concurrent waitForUsbhid cancellation).
+	for i := 0; i < 2; i++ {
+		var cred, salt [32]byte
+		_, err := rand.Read(cred[:])
+		require.NoError(t, err)
+		_, err = rand.Read(salt[:])
+		require.NoError(t, err)
+		tokenJSON := fmt.Sprintf(
+			`{"type":"systemd-fido2","keyslots":["0"],"fido2-credential":"%s","fido2-salt":"%s","fido2-rp":"io.systemd.cryptsetup","fido2-clientPin-required":false,"fido2-up-required":true,"fido2-uv-required":false}`,
+			base64.StdEncoding.EncodeToString(cred[:]),
+			base64.StdEncoding.EncodeToString(salt[:]),
+		)
+		cmd := exec.Command("cryptsetup", "token", "import", "--json-file=-", dst)
+		cmd.Stdin = strings.NewReader(tokenJSON)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "cryptsetup token import failed: %s", out)
+	}
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=a6cdb03e-ad77-440a-8a93-28ad97de3b00 none fido2-device=auto,token-timeout=5,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         dst,
+		kernelArgs:   []string{"root=UUID=0cb4665f-65a0-4acc-9710-05163af16f19"},
+		crypttabFile: crypttabPath,
+		vmTimeout:    45 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// Keyboard fallback opens after token-timeout=5s.
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("567\n"))
+
+	// All 3 FIDO2 goroutines (one per token) hit the cancel branch and log.
+	// Each ConsoleExpect blocks until the next occurrence of the substring,
+	// so 3 successive expects assert that the line appears at least 3 times
+	// in the transcript before "Hello, booster!".
+	for i := 0; i < 3; i++ {
+		require.NoError(t, vm.ConsoleExpect("FIDO2 unlock for cryptroot cancelled before USB HID ready"))
+	}
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
