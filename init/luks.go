@@ -356,10 +356,9 @@ func recoverFido2Password(ctx context.Context, devName string, credID []byte, sa
 		return nil, err
 	}
 
-	// Defence in depth: outer caller already filtered by isHidRawFido2 + pre-flight.
-	// Keep the check here so direct callers (if any future ones appear) aren't
-	// silently broken, but don't log a noisy "not FIDO2" at info level — that's
-	// expected when the outer caller hasn't pre-filtered.
+	// Defence in depth: recoverSystemdFido2Password pre-filters via
+	// isHidRawFido2 + pre-flight, so the !isFido2 branch is unreachable in
+	// normal flow. Kept to fail safely if a future caller skips the filter.
 	isFido2, err := isHidRawFido2(devName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to check whether %s is a FIDO2 device", devName)
@@ -562,18 +561,24 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	seenHidrawDevices := make(set)
 
 	var (
-		devicesProcessed int
-		devicesMatched   int // pre-flight returned true at least once
+		uniqueDevicesProcessed int // unique hidraws filtered through pre-flight; converges to len(dir) once seed drains
+		matchedAtLeastOne      bool
 	)
 	for {
-		// If the initial enumeration has been fully drained AND no device
-		// in it carried our credential, fall back so the serial token
-		// dispatcher can advance to the next token. Without this, the
-		// goroutine parks on the channel waiting for a hidraw event that
-		// may never arrive.
+		// Bail with errFido2FallbackToKeyboard once we've exhausted the
+		// initial enumeration with no credential match — lets the
+		// dispatcher advance to the next token (TPM2-PIN, passphrase,
+		// etc.) instead of parking on the channel waiting for a hidraw
+		// event that may never arrive. The keyboard prompt only fires
+		// after all tokens are exhausted (or tokenTimeout elapses).
+		// The len(dir) > 0 guard preserves the empty-hidraw case: with
+		// nothing enumerated, the user may still plug a key in — keep
+		// waiting for udev. Late hot-plugs arriving between the gate
+		// firing and dropListener running are dropped; the serial
+		// dispatcher's tokenTimeout bounds the wait either way.
 		select {
 		case <-seedDone:
-			if devicesProcessed >= len(dir) && devicesMatched == 0 {
+			if len(dir) > 0 && uniqueDevicesProcessed >= len(dir) && !matchedAtLeastOne {
 				return nil, errFido2FallbackToKeyboard
 			}
 		default:
@@ -591,7 +596,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 			continue
 		}
 		seenHidrawDevices[devName] = true
-		devicesProcessed++
+		uniqueDevicesProcessed++
 
 		isFido2, err := isHidRawFido2(devName)
 		if err != nil {
@@ -616,7 +621,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 			debug("FIDO2 device %s does not have our credential, skipping", devName)
 			continue
 		}
-		devicesMatched++
+		matchedAtLeastOne = true
 
 		info("HID %s supports FIDO and has our credential, attempting unlock", devName)
 
