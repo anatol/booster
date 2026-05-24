@@ -348,6 +348,7 @@ func isHidRawFido2(devName string) (bool, error) {
 
 func recoverFido2Password(ctx context.Context, devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
 	if err := waitForUsbhid(ctx); err != nil {
+		info("FIDO2 unlock for %s cancelled before USB HID ready: %v", mappingName, err)
 		return nil, err
 	}
 
@@ -362,6 +363,7 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 	info("HID %s supports FIDO, trying it to recover the password", devName)
 
 	if err := acquireFido2Lock(ctx); err != nil {
+		info("FIDO2 unlock for %s cancelled waiting for assertion lock: %v", mappingName, err)
 		return nil, err
 	}
 	defer releaseFido2Lock()
@@ -453,6 +455,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 
 	if err := waitForUsbhid(ctx); err != nil {
+		info("FIDO2 unlock for %s cancelled before USB HID ready: %v", mappingName, err)
 		return nil, err
 	}
 
