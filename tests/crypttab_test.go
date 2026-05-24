@@ -295,6 +295,46 @@ func TestCrypttabFido2NoDevice(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestCtxAwareFido2CancelOnFallback verifies that when a systemd-fido2 token
+// finds no matching device and keyboard fallback unlocks the volume, the FIDO2
+// goroutine observes ctx cancellation and exits via the ctx-aware waitForUsbhid
+// path — rather than pinning on a non-ctx-aware sync.WaitGroup.Wait() until
+// switch_root.
+//
+// Asserts the info log emitted from the cancel branch of waitForUsbhid in
+// recoverSystemdFido2Password. Without the ctx-aware primitives that log can
+// never fire and the goroutine leaks.
+func TestCtxAwareFido2CancelOnFallback(t *testing.T) {
+	if !fileExists(binariesDir + "/fido2plugin.so") {
+		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
+	}
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	// token-timeout=5 fires keyboard fallback fast, keeping test runtime short.
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=a6cdb03e-ad77-440a-8a93-28ad97de3b00 none fido2-device=auto,token-timeout=5,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/systemd-fido2-nodev.img",
+		kernelArgs:   []string{"root=UUID=0cb4665f-65a0-4acc-9710-05163af16f19"},
+		crypttabFile: crypttabPath,
+		vmTimeout:    30 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// Keyboard fallback opens after the token-timeout.
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("567\n"))
+
+	// Unlock cancels parent ctx; the FIDO2 goroutine's waitForUsbhid returns
+	// ctx.Err() and logs from its cancel branch. This is the leak-fix proof.
+	require.NoError(t, vm.ConsoleExpect("FIDO2 unlock for cryptroot cancelled before USB HID ready"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 // TestCrypttabTPM2 verifies that a crypttab entry with tpm2-device=auto causes
 // the init to attempt TPM2 token unlock.  Uses the swtpm software emulator.
 func TestCrypttabTPM2(t *testing.T) {
