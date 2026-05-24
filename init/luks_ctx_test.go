@@ -15,3 +15,19 @@ func TestWaitForUsbhidRespectsCtxCancel(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestAcquireFido2LockRespectsCtxCancel(t *testing.T) {
+	// Drain to a known-empty state, then pre-fill so the next acquire must wait.
+	select {
+	case <-fido2Sem:
+	default:
+	}
+	fido2Sem <- struct{}{}
+	t.Cleanup(func() { <-fido2Sem })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := acquireFido2Lock(ctx); err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
