@@ -350,12 +350,16 @@ func isHidRawFido2(devName string) (bool, error) {
 	return false, nil
 }
 
-func recoverFido2Password(ctx context.Context, devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
+func recoverFido2Password(ctx context.Context, devName string, credID []byte, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
 	if err := waitForUsbhid(ctx); err != nil {
 		info("FIDO2 unlock for %s cancelled before USB HID ready: %v", mappingName, err)
 		return nil, err
 	}
 
+	// Defence in depth: outer caller already filtered by isHidRawFido2 + pre-flight.
+	// Keep the check here so direct callers (if any future ones appear) aren't
+	// silently broken, but don't log a noisy "not FIDO2" at info level — that's
+	// expected when the outer caller hasn't pre-filtered.
 	isFido2, err := isHidRawFido2(devName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to check whether %s is a FIDO2 device", devName)
@@ -363,8 +367,6 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 	if !isFido2 {
 		return nil, fmt.Errorf("HID %s is not a FIDO2 device", devName)
 	}
-
-	info("HID %s supports FIDO, trying it to recover the password", devName)
 
 	if err := acquireFido2Lock(ctx); err != nil {
 		info("FIDO2 unlock for %s cancelled waiting for assertion lock: %v", mappingName, err)
@@ -376,10 +378,6 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 		plymouthMessage("") // clear "Waiting for FIDO2" now that device is detected and we have the lock
 	}
 
-	credID, err := base64.StdEncoding.DecodeString(credential)
-	if err != nil {
-		return nil, fmt.Errorf("invalid credential: %v", err)
-	}
 	saltBytes, err := base64.StdEncoding.DecodeString(salt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid salt: %v", err)
@@ -521,6 +519,11 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 		node.RelyingParty = "io.systemd.cryptsetup"
 	}
 
+	credID, err := base64.StdEncoding.DecodeString(node.Credential)
+	if err != nil {
+		return nil, fmt.Errorf("invalid credential: %v", err)
+	}
+
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 
 	// Register BEFORE waiting on usbhidReady so any 'add' events arriving
@@ -542,9 +545,11 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 		statusMessage("No FIDO2 device found for " + mappingName + ", insert security key or wait for passphrase prompt")
 	}
 
+	seedDone := make(chan struct{})
 	stopSeeding := make(chan struct{})
 	defer close(stopSeeding)
 	go func() {
+		defer close(seedDone)
 		for _, d := range dir {
 			select {
 			case hidrawDevices <- d.Name():
@@ -556,7 +561,24 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 	seenHidrawDevices := make(set)
 
+	var (
+		devicesProcessed int
+		devicesMatched   int // pre-flight returned true at least once
+	)
 	for {
+		// If the initial enumeration has been fully drained AND no device
+		// in it carried our credential, fall back so the serial token
+		// dispatcher can advance to the next token. Without this, the
+		// goroutine parks on the channel waiting for a hidraw event that
+		// may never arrive.
+		select {
+		case <-seedDone:
+			if devicesProcessed >= len(dir) && devicesMatched == 0 {
+				return nil, errFido2FallbackToKeyboard
+			}
+		default:
+		}
+
 		var devName string
 		select {
 		case <-ctx.Done():
@@ -569,6 +591,34 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 			continue
 		}
 		seenHidrawDevices[devName] = true
+		devicesProcessed++
+
+		isFido2, err := isHidRawFido2(devName)
+		if err != nil {
+			info("unable to check whether %s is a FIDO2 device: %v", devName, err)
+			continue
+		}
+		if !isFido2 {
+			info("HID %s is not a FIDO2 device", devName)
+			continue
+		}
+
+		// Silent-skip when pre-flight rejects: users with multiple FIDO2
+		// keys plugged in shouldn't see the wrong key's PIN prompt. See
+		// fido2iface.Fido2Preflight for the no-PIN-consumed semantics.
+		devPath := "/dev/" + devName
+		present, err := fido2Preflight(devPath, credID, node.RelyingParty, node.UserVerificationRequired)
+		if err != nil {
+			info("FIDO2 pre-flight on %s failed: %v", devName, err)
+			continue
+		}
+		if !present {
+			debug("FIDO2 device %s does not have our credential, skipping", devName)
+			continue
+		}
+		devicesMatched++
+
+		info("HID %s supports FIDO and has our credential, attempting unlock", devName)
 
 		// pinRequired starts from credential metadata but may be flipped on if
 		// the device returns FIDO_ERR_PIN_REQUIRED — i.e. metadata said no PIN
@@ -580,13 +630,12 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 			maxAttempts = 3
 		}
 		var password []byte
-		var err error
 		pinExhausted := false
 		promptPrefix := ""
 		attempt := 0
 		assertStart := time.Now() // for reseedTouchlessFido2's elapsed gate
 		for attempt < maxAttempts {
-			password, err = recoverFido2Password(ctx, devName, node.Credential, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
+			password, err = recoverFido2Password(ctx, devName, credID, node.Salt, node.RelyingParty, pinRequired, node.UserPresenceRequired, node.UserVerificationRequired, mappingName, promptPrefix)
 			if err == nil {
 				break
 			}
@@ -628,11 +677,11 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 				statusMessage("FIDO2 PIN is blocked (reset required), falling back to passphrase")
 				break
 			}
-			// Wrong device — credential not enrolled here. Skip silently;
-			// retrying this device would never succeed and the opaque
-			// "libfido2 error 46" message is noise when multiple keys are plugged in.
+			// Safety net only — pre-flight should have prevented us getting
+			// here. If we somehow attempted against a device that lacked the
+			// credential, keep moving and let other devices be tried.
 			if errors.Is(err, errFido2WrongDevice) {
-				debug("FIDO2 device %s does not have our credential, skipping", devName)
+				debug("FIDO2 device %s rejected credential at assertion time (pre-flight skew?), skipping", devName)
 				continue
 			}
 			info("%v", err)
