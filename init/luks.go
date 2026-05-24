@@ -110,6 +110,17 @@ func ctxSleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// waitForUsbhid is the ctx-aware counterpart of usbhidReady. Returns ctx.Err()
+// if ctx is cancelled before the first usbhid bind event closes the channel.
+func waitForUsbhid(ctx context.Context) error {
+	select {
+	case <-usbhidReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) ([]byte, error) {
 	var payload []byte
 	// Note that token metadata stored differently in LUKS v1 and v2
@@ -201,7 +212,9 @@ func isHidRawFido2(devName string) (bool, error) {
 }
 
 func recoverFido2Password(ctx context.Context, devName string, credential string, salt string, relyingParty string, pinRequired bool, userPresenceRequired bool, userVerificationRequired bool, mappingName string, promptPrefix string) ([]byte, error) {
-	usbhidWg.Wait()
+	if err := waitForUsbhid(ctx); err != nil {
+		return nil, err
+	}
 
 	isFido2, err := isHidRawFido2(devName)
 	if err != nil {
@@ -301,7 +314,9 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 
-	usbhidWg.Wait()
+	if err := waitForUsbhid(ctx); err != nil {
+		return nil, err
+	}
 
 	dir, err := os.ReadDir("/sys/class/hidraw/")
 	if err != nil {

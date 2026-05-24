@@ -67,16 +67,15 @@ var (
 	udevConn     *netlink.UEventConn
 	// Wait() will return after the TPM is ready.
 	// Only works after we start listening for udev events.
-	tpmReady   sync.Once
-	usbhid     sync.Once
-	tpmReadyWg sync.WaitGroup
-	usbhidWg   sync.WaitGroup
+	tpmReady    sync.Once
+	usbhid      sync.Once
+	tpmReadyWg  sync.WaitGroup
+	usbhidReady = make(chan struct{})
 )
 
 func udevListener() error {
 	// Initialize tpmReadyWg
 	tpmReadyWg.Add(1)
-	usbhidWg.Add(1)
 
 	udevConn = new(netlink.UEventConn)
 	if err := udevConn.Connect(netlink.KernelEvent); err != nil {
@@ -131,7 +130,7 @@ func handleUsbHidUevent(ev netlink.UEvent) {
 	// `PRODUCT` is associated with the usb device, and can be used to id the fido2 token
 	// it's the concat of `idVendor`, `idProduct`, and `bcdDevice` when a kernel usb event occurs
 	info(ev.Env["DRIVER"]+" uevent: product: %s", ev.Env["PRODUCT"])
-	usbhid.Do(usbhidWg.Done)
+	usbhid.Do(func() { close(usbhidReady) })
 }
 
 func handleTpmReadyUevent(ev netlink.UEvent) {
