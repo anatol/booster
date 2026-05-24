@@ -374,7 +374,7 @@ func recoverFido2Password(ctx context.Context, devName string, credID []byte, sa
 	defer releaseFido2Lock()
 
 	if plymouthEnabled {
-		plymouthMessage("") // clear "Waiting for FIDO2" now that device is detected and we have the lock
+		plymouthMessage("") // clear "No FIDO2 device found" now that we have one and the lock
 	}
 
 	saltBytes, err := base64.StdEncoding.DecodeString(salt)
@@ -542,8 +542,6 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	if node.PinRequired {
 		return recoverFido2WithEagerPrompt(ctx, mappingName, credID, node.Salt, node.RelyingParty, node.UserPresenceRequired, node.UserVerificationRequired)
 	}
-
-	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 
 	// Register BEFORE reading /sys/class/hidraw so any 'add' events arriving
 	// during/after the scan are buffered. We deliberately do NOT block on
