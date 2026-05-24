@@ -121,6 +121,19 @@ func waitForUsbhid(ctx context.Context) error {
 	}
 }
 
+// acquireFido2Lock takes the FIDO2 user-interaction lock. Returns ctx.Err()
+// if ctx is cancelled while waiting for the slot.
+func acquireFido2Lock(ctx context.Context) error {
+	select {
+	case fido2Sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseFido2Lock() { <-fido2Sem }
+
 func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) ([]byte, error) {
 	var payload []byte
 	// Note that token metadata stored differently in LUKS v1 and v2
@@ -226,8 +239,10 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 
 	info("HID %s supports FIDO, trying it to recover the password", devName)
 
-	fido2Mu.Lock()
-	defer fido2Mu.Unlock()
+	if err := acquireFido2Lock(ctx); err != nil {
+		return nil, err
+	}
+	defer releaseFido2Lock()
 
 	if plymouthEnabled {
 		plymouthMessage("") // clear "Waiting for FIDO2" now that device is detected and we have the lock
@@ -281,11 +296,12 @@ func recoverFido2Password(ctx context.Context, devName string, credential string
 
 var hidrawDevices = make(chan string, 10) // channel that receives 'add hidraw' events
 
-// fido2Mu serializes FIDO2 user interactions (PIN prompt + touch + assertion)
-// across all goroutines. The FIDO2 key can only service one assertion at a time,
-// and concurrent goroutines (e.g. multiple systemd-fido2 tokens or multiple LUKS
-// devices) would otherwise interleave PIN prompts and touch messages.
-var fido2Mu sync.Mutex
+// fido2Sem serializes FIDO2 user interactions (PIN prompt + touch + assertion)
+// across all goroutines. The FIDO2 key can only service one assertion at a
+// time, and concurrent goroutines (e.g. multiple systemd-fido2 tokens or
+// multiple LUKS devices) would otherwise interleave PIN prompts and touch
+// messages. Channel-as-semaphore so acquire is ctx-cancellable.
+var fido2Sem = make(chan struct{}, 1)
 
 var errFido2Skipped = errors.New("FIDO2 skipped by user")
 var errFido2PinInvalid = errors.New("FIDO2 PIN invalid")
