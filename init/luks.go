@@ -319,8 +319,12 @@ func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) (
 	}
 }
 
+// hidrawSysPath is the directory enumerated for FIDO2 HID devices. Overridden
+// by tests via withFakeHidrawDevices.
+var hidrawSysPath = "/sys/class/hidraw/"
+
 func isHidRawFido2(devName string) (bool, error) {
-	descriptor, err := os.ReadFile("/sys/class/hidraw/" + devName + "/device/report_descriptor")
+	descriptor, err := os.ReadFile(hidrawSysPath + devName + "/device/report_descriptor")
 	if err != nil {
 		return false, fmt.Errorf("unable to read HID descriptor for %s", devName)
 	}
@@ -529,7 +533,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 		return nil, err
 	}
 
-	dir, err := os.ReadDir("/sys/class/hidraw/")
+	dir, err := os.ReadDir(hidrawSysPath)
 	if err != nil {
 		return nil, err
 	}
