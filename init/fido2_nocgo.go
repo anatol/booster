@@ -8,6 +8,10 @@ func fido2Assertion(devPath string, credID, saltBytes []byte, relyingParty, pin 
 	return nil, fmt.Errorf("FIDO2 not supported in this build (requires CGO)")
 }
 
+func fido2Preflight(devPath string, credID []byte, relyingParty string, userVerificationRequired bool) (bool, error) {
+	return false, fmt.Errorf("FIDO2 not supported in this build (requires CGO)")
+}
+
 func isFido2PinInvalidError(err error) bool {
 	return false
 }

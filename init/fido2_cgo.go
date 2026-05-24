@@ -48,6 +48,16 @@ func fido2Assertion(devPath string, credID, saltBytes []byte, relyingParty, pin 
 	return fido2plugin.Fido2Assertion(devPath, credID, saltBytes, relyingParty, pin, pinRequired, userPresenceRequired, userVerificationRequired, notifyTouch)
 }
 
+// fido2Preflight reports whether devPath holds credID without consuming a
+// PIN attempt or asking for touch. See fido2iface.Fido2Preflight.
+func fido2Preflight(devPath string, credID []byte, relyingParty string, userVerificationRequired bool) (bool, error) {
+	loadFido2Plugin()
+	if fido2plugin == nil {
+		return false, fmt.Errorf("FIDO2 plugin unavailable (%s not found or invalid)", fido2PluginPath)
+	}
+	return fido2plugin.Fido2Preflight(devPath, credID, relyingParty, userVerificationRequired)
+}
+
 func isFido2PinInvalidError(err error) bool {
 	loadFido2Plugin()
 	if fido2plugin == nil {
