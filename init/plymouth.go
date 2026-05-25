@@ -226,6 +226,20 @@ func statusMessage(msg string) {
 	}
 }
 
+// Plymouth always shows; console shows only when a password prompt is visible.
+func statusMessageIfPrompt(msg string) {
+	if plymouthEnabled {
+		statusMessage(msg)
+		return
+	}
+	consoleMu.Lock()
+	visible := consolePrompt.active && !promptVolumeUnlocked()
+	consoleMu.Unlock()
+	if visible {
+		statusMessage(msg)
+	}
+}
+
 // promptVolumeUnlocked reports whether the active prompt's volume has been
 // unlocked already (its done channel has closed). Caller must hold consoleMu.
 func promptVolumeUnlocked() bool {

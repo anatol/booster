@@ -718,15 +718,14 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 		if err != nil {
 			if errors.Is(err, errFido2Skipped) || pinExhausted {
-				statusMessage("FIDO2 skipped, falling back to passphrase")
-				break
+				break // passphrase prompt is self-explanatory
 			}
 			if isFido2PinAuthBlockedError(err) {
-				statusMessage("FIDO2 PIN auth blocked (too many wrong attempts), falling back to passphrase")
+				statusMessageIfPrompt("FIDO2 PIN auth blocked (too many wrong attempts), falling back to passphrase")
 				break
 			}
 			if isFido2PinBlockedError(err) {
-				statusMessage("FIDO2 PIN is blocked (reset required), falling back to passphrase")
+				statusMessageIfPrompt("FIDO2 PIN is blocked (reset required), falling back to passphrase")
 				break
 			}
 			// Safety net only — pre-flight should have prevented us getting
@@ -944,8 +943,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 				return nil, err
 			}
 			if len(pin) == 0 {
-				statusMessage("TPM2 PIN skipped")
-				return nil, errTPM2Skipped
+				return nil, errTPM2Skipped // passphrase prompt is self-explanatory
 			}
 			authValue = tpm2PINAuthValue(pin, salt)
 		}
@@ -1123,7 +1121,8 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	if !tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password) {
 		return false
 	}
-	statusMessage(mappingName + " unlocked via " + tokenFriendlyName(t.Type))
+	// TODO: re-evaluate after plymouth!393 lands (auto-dismisses prompt on client disconnect)
+	statusMessageIfPrompt(mappingName + " unlocked via " + tokenFriendlyName(t.Type))
 	return true
 }
 
