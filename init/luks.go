@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -704,6 +705,51 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	return nil, errFido2FallbackToKeyboard
 }
 
+// flattenSystemdTPM2 copies all fields from raw and, if present, flattens the nested node
+// "systemd-tpm2" / "systemd_tpm2" to the same level (without overwriting existing keys).
+func flattenSystemdTPM2(raw map[string]any) map[string]any {
+	out := make(map[string]any, len(raw))
+	for k, v := range raw {
+		out[k] = v
+	}
+	// Possible container names used by systemd
+	for _, wrapper := range []string{"systemd-tpm2", "systemd_tpm2"} {
+		v, ok := raw[wrapper]
+		if !ok || v == nil {
+			continue
+		}
+		switch sub := v.(type) {
+		case map[string]any:
+			for k, vv := range sub {
+				if _, exists := out[k]; !exists {
+					out[k] = vv
+				}
+			}
+		case []any:
+			// sometimes it can be an array with a single object
+			if len(sub) > 0 {
+				if mm, ok := sub[0].(map[string]any); ok {
+					for k, vv := range mm {
+						if _, exists := out[k]; !exists {
+							out[k] = vv
+						}
+					}
+				}
+			}
+		case json.RawMessage:
+			var mm map[string]any
+			if err := json.Unmarshal(sub, &mm); err == nil {
+				for k, vv := range mm {
+					if _, exists := out[k]; !exists {
+						out[k] = vv
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"` // base64
@@ -945,11 +991,96 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	}
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
-	if !tryPassphraseAgainstSlots(ctx, volumes, d, t.Slots, password) {
-		return false
+
+	// Try different "compatible" variants of the secret
+	tryVariants := func(slot int, secret []byte) (*luks.Volume, error) {
+		// A) if the secret is exactly 32 bytes — FIRST try Base64-ENCODED (priority #1)
+		if len(secret) == 32 {
+			enc := []byte(base64.StdEncoding.EncodeToString(secret))
+			if v, err := d.UnsealVolume(slot, enc); err == nil {
+				info("slot %v: matched with Base64-ENCODED secret (priority #1)", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: Base64-encoded secret did not match", slot)
+			}
+		}
+		// B) RAW as is (priority #2)
+		if v, err := d.UnsealVolume(slot, secret); err == nil {
+			info("slot %v: matched with RAW secret", slot)
+			return v, nil
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			return nil, err
+		} else {
+			info("slot %v: passphrase does not match (raw)", slot)
+		}
+		// C) trim \n/\r
+		if len(secret) > 0 && (secret[len(secret)-1] == '\n' || secret[len(secret)-1] == '\r') {
+			trimmed := bytes.TrimRight(secret, "\r\n")
+			if v, err := d.UnsealVolume(slot, trimmed); err == nil {
+				info("slot %v: matched after trimming newline", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: still no match after trimming newline", slot)
+			}
+		}
+		// D) if the secret looks like Base64 text — try to decode
+		if b, err := base64.StdEncoding.DecodeString(string(secret)); err == nil {
+			if v, err2 := d.UnsealVolume(slot, b); err2 == nil {
+				info("slot %v: matched with Base64-decoded secret", slot)
+				return v, nil
+			} else if err2 != luks.ErrPassphraseDoesNotMatch {
+				return nil, err2
+			} else {
+				info("slot %v: Base64-decoded secret did not match", slot)
+			}
+		}
+		// E) if the secret is exactly 32 bytes — try its Base64-ENCODED form as text
+		if len(secret) == 32 {
+			enc := []byte(base64.StdEncoding.EncodeToString(secret))
+			if v, err := d.UnsealVolume(slot, enc); err == nil {
+				info("slot %v: matched with Base64-ENCODED secret", slot)
+				return v, nil
+			} else if err != luks.ErrPassphraseDoesNotMatch {
+				return nil, err
+			} else {
+				info("slot %v: Base64-encoded secret did not match", slot)
+			}
+		}
+		return nil, luks.ErrPassphraseDoesNotMatch
 	}
-	statusMessage(mappingName + " unlocked via " + tokenFriendlyName(t.Type))
-	return true
+
+	// 1) First — try the token's slots
+	tried := map[int]bool{}
+	for _, s := range t.Slots {
+		tried[s] = true
+		if v, err := tryVariants(s, password); err == nil {
+			info("password from %s token #%d matches", t.Type, t.ID)
+			volumes <- v
+			return true
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			warning("unlocking slot %v: %v", s, err)
+		}
+	}
+
+	// 2) Fallback — try the same secret across all other slots
+	for _, s := range d.Slots() {
+		if tried[s] {
+			continue
+		}
+		if v, err := tryVariants(s, password); err == nil {
+			info("password matched on non-advertised slot %v", s)
+			volumes <- v
+			return true
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			warning("unlocking slot %v: %v", s, err)
+		}
+	}
+	info("password from %s token #%d does not match any slot", t.Type, t.ID)
+	return false
 }
 
 // tokenFriendlyName returns a short human-readable label for a token type, used

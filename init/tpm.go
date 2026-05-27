@@ -41,6 +41,10 @@ func openTPM() (io.ReadWriteCloser, error) {
 		dev, err = net.Dial("tcp", ":2321") // swtpm emulator is listening at port 2321
 	} else {
 		dev, err = tpm2.OpenTPM("/dev/tpmrm0")
+		if err != nil {
+			// Fallback for systems without resource manager
+			dev, err = tpm2.OpenTPM("/dev/tpm0")
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -53,11 +57,11 @@ func openTPM() (io.ReadWriteCloser, error) {
 	return dev, nil
 }
 
-// Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
+// Waits until a tpm device is available for use. Times out and returns false after 5 seconds.
 func tpmAwaitReady() bool {
-	timedOut := waitTimeout(&tpmReadyWg, time.Second*3)
+	timedOut := waitTimeout(&tpmReadyWg, time.Second*5)
 	if timedOut {
-		info("no tpm devices found after 3 seconds.")
+		info("no tpm devices found after 5 seconds.")
 	}
 	return !timedOut
 }
