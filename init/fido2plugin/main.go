@@ -166,3 +166,31 @@ func (f *fido2Impl) IsFido2TouchTimeout(err error) bool {
 	}
 	return strings.Contains(err.Error(), "libfido2 error 47")
 }
+
+// Fido2Preflight is the libfido2 implementation of the interface contract
+// (see fido2iface.Fido2Preflight). Per CTAP 2.1 §6.2.4 the up=false
+// assertion neither prompts for touch nor decrements the PIN-retry
+// counter; the §7.4 UV-required case skips the probe entirely.
+func (f *fido2Impl) Fido2Preflight(devPath string, credID []byte, relyingParty string, userVerificationRequired bool) (bool, error) {
+	if userVerificationRequired {
+		// Mirrors systemd's libfido2-util.c — see interface docstring.
+		return true, nil
+	}
+
+	dev, err := libfido2.NewDevice(devPath)
+	if err != nil {
+		return false, err
+	}
+
+	opts := &libfido2.AssertionOpts{UP: libfido2.False}
+	var clientDataHash [32]byte
+
+	_, err = dev.Assertion(relyingParty, clientDataHash[:], [][]byte{credID}, "", opts)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, libfido2.ErrNoCredentials) || errors.Is(err, libfido2.ErrInvalidCredential) {
+		return false, nil
+	}
+	return false, err
+}
