@@ -501,6 +501,11 @@ var errFido2TouchTimeout = errors.New("FIDO2 touch timed out")
 var errFido2FallbackToKeyboard = errors.New("FIDO2 falling back to keyboard")
 var errTPM2Skipped = errors.New("TPM2 skipped by user")
 
+// askFido2Pin is the prompt entry point for FIDO2 PIN entry. Indirected
+// through a package var so tests can substitute a deterministic responder
+// without standing up plymouth or a console TTY.
+var askFido2Pin = askPasswordWithFallback
+
 func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Credential               string `json:"fido2-credential"` // base64
@@ -521,6 +526,15 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	credID, err := base64.StdEncoding.DecodeString(node.Credential)
 	if err != nil {
 		return nil, fmt.Errorf("invalid credential: %v", err)
+	}
+
+	// Eager PIN prompt for PIN-required tokens. Token metadata tells us a PIN
+	// is enrolled; ask now instead of waiting for device discovery. Lets the
+	// user empty-Enter to skip — breaks the serial-dispatcher deadlock where
+	// a missing FIDO2 device parks the loop and the next PIN-bearing token
+	// (e.g. TPM2-PIN) never gets prompted.
+	if node.PinRequired {
+		return recoverFido2WithEagerPrompt(ctx, mappingName, credID, node.Salt, node.RelyingParty, node.UserPresenceRequired, node.UserVerificationRequired)
 	}
 
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
@@ -702,6 +716,134 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	}
 
 	return nil, errFido2FallbackToKeyboard
+}
+
+// recoverFido2WithEagerPrompt drives a PIN-required FIDO2 token by asking
+// for the PIN from token metadata BEFORE scanning for a device. On each
+// submission we rescan /sys/class/hidraw and pre-flight every FIDO2-capable
+// entry for the token's credential; if none match we reprompt with a
+// "device not detected" prefix so the user can plug a key in and retype.
+// Empty Enter returns errFido2Skipped, which the serial dispatcher uses to
+// advance to the next PIN-bearing token (TPM2-PIN) without waiting on a
+// device that never arrives.
+//
+// PIN attempts are bounded at 3 — only assertion calls that consumed a PIN
+// attempt count toward the cap. "Device not detected" reprompts and touch
+// timeouts do not.
+func recoverFido2WithEagerPrompt(ctx context.Context, mappingName string, credID []byte, salt, relyingParty string, userPresenceRequired, userVerificationRequired bool) ([]byte, error) {
+	saltBytes, err := base64.StdEncoding.DecodeString(salt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid salt: %v", err)
+	}
+
+	// No waitForUsbhid: findMatchingFido2Device below rescans /sys/class/hidraw
+	// on every PIN submission, so a late-arriving key is picked up next round.
+
+	if err := acquireFido2Lock(ctx); err != nil {
+		info("FIDO2 unlock for %s cancelled waiting for assertion lock: %v", mappingName, err)
+		return nil, err
+	}
+	defer releaseFido2Lock()
+
+	const maxPinAttempts = 3
+	promptPrefix := ""
+	pinAttempts := 0
+
+	for {
+		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip):"
+		pinBytes, err := askFido2Pin(ctx, prompt, "")
+		if err != nil {
+			return nil, err
+		}
+		if len(pinBytes) == 0 {
+			return nil, errFido2Skipped
+		}
+		pin := string(pinBytes)
+
+		devName, err := findMatchingFido2Device(credID, relyingParty, userVerificationRequired)
+		if err != nil {
+			info("FIDO2 device discovery error: %v", err)
+			promptPrefix = "FIDO2 device discovery error — "
+			continue
+		}
+		if devName == "" {
+			promptPrefix = "FIDO2 device not detected — "
+			continue
+		}
+
+		notifyTouch := func() {
+			statusMessage("Please touch the FIDO2 key for " + mappingName)
+		}
+		result, err := fido2Assertion("/dev/"+devName, credID, saltBytes, relyingParty, pin, true, userPresenceRequired, userVerificationRequired, notifyTouch)
+		if err == nil {
+			statusMessage("")
+			return result, nil
+		}
+
+		if isFido2PinInvalidError(err) {
+			pinAttempts++
+			if pinAttempts >= maxPinAttempts {
+				statusMessage("FIDO2 PIN attempts exhausted, falling back to passphrase")
+				return nil, errFido2FallbackToKeyboard
+			}
+			promptPrefix = "FIDO2 PIN incorrect — "
+			continue
+		}
+		if isFido2TouchTimeoutError(err) {
+			// User typed PIN correctly but didn't touch in time — re-prompt
+			// without consuming a PIN attempt.
+			promptPrefix = "FIDO2 touch timed out — "
+			continue
+		}
+		if isFido2WrongDeviceError(err) {
+			// Pre-flight green-lit this device but assertion rejected the
+			// credential. Could be a hot-plug race; retry by reprompting.
+			debug("FIDO2 device %s rejected credential at assertion (pre-flight skew?)", devName)
+			promptPrefix = "FIDO2 device rejected credential — "
+			continue
+		}
+		if isFido2PinAuthBlockedError(err) {
+			statusMessage("FIDO2 PIN auth blocked (too many wrong attempts), falling back to passphrase")
+			return nil, errFido2FallbackToKeyboard
+		}
+		if isFido2PinBlockedError(err) {
+			statusMessage("FIDO2 PIN is blocked (reset required), falling back to passphrase")
+			return nil, errFido2FallbackToKeyboard
+		}
+		info("FIDO2 assertion failed: %v", err)
+		return nil, errFido2FallbackToKeyboard
+	}
+}
+
+// findMatchingFido2Device scans /sys/class/hidraw, filters by isHidRawFido2,
+// and pre-flights each candidate for credID. Returns the first matching
+// devName (e.g. "hidraw1"); returns "" with nil err when no device matches.
+// Used by the eager-prompt flow to rescan at each PIN submission.
+func findMatchingFido2Device(credID []byte, relyingParty string, userVerificationRequired bool) (string, error) {
+	dir, err := os.ReadDir(hidrawSysPath)
+	if err != nil {
+		return "", err
+	}
+	for _, d := range dir {
+		devName := d.Name()
+		isFido2, ferr := isHidRawFido2(devName)
+		if ferr != nil {
+			info("unable to check whether %s is a FIDO2 device: %v", devName, ferr)
+			continue
+		}
+		if !isFido2 {
+			continue
+		}
+		present, ferr := fido2Preflight("/dev/"+devName, credID, relyingParty, userVerificationRequired)
+		if ferr != nil {
+			info("FIDO2 pre-flight on %s failed: %v", devName, ferr)
+			continue
+		}
+		if present {
+			return devName, nil
+		}
+	}
+	return "", nil
 }
 
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
