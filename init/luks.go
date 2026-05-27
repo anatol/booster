@@ -467,6 +467,12 @@ func broadcastHidrawDevice(name string) {
 // messages. Channel-as-semaphore so acquire is ctx-cancellable.
 var fido2Sem = make(chan struct{}, 1)
 
+// fido2NoDeviceMsgOnce dedups the "No FIDO2 device found" status across
+// goroutines unlocking the same mapping. Multi-FIDO2-token pinless
+// enrollments invoke recoverSystemdFido2Password once per token; each
+// arms the no-device timer, but only the first to fire emits the hint.
+var fido2NoDeviceMsgOnce sync.Map // mappingName → *sync.Once
+
 // Push a touchless FIDO2 device back into the goroutine's own listener channel
 // so the loop retries — the user can then touch the token at any point during
 // boot, including while a passphrase prompt is showing, and the unlock succeeds.
@@ -554,10 +560,6 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 		return nil, err
 	}
 
-	if len(dir) == 0 {
-		statusMessage("No FIDO2 device found for " + mappingName + ", insert security key or wait for passphrase prompt")
-	}
-
 	seedDone := make(chan struct{})
 	stopSeeding := make(chan struct{})
 	defer close(stopSeeding)
@@ -573,6 +575,30 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 	}()
 
 	seenHidrawDevices := make(set)
+
+	// Defer the "No FIDO2 device found" hint so a parallel non-interactive
+	// token (TPM2, clevis) can win silently in the common case. Cap the wait
+	// at 10s so the message surfaces in time to inform the user before a
+	// long tokenTimeout completes. Suppressed on console-quiet (verbosity
+	// < info); Plymouth always shows because it's the only visibility
+	// layer under `quiet splash`.
+	//
+	// PIN-required tokens early-returned into recoverFido2WithEagerPrompt
+	// above and never reach this code — the eager PIN prompt is their
+	// affordance. The timer here serves only the pinless touch-anytime path.
+	var noDeviceC <-chan time.Time
+	if len(dir) == 0 && (plymouthEnabled || verbosityLevel >= levelInfo) {
+		delay := 30 * time.Second
+		if config.TokenTimeout > 0 {
+			delay = time.Duration(config.TokenTimeout) * time.Second
+		}
+		if delay /= 2; delay > 10*time.Second {
+			delay = 10 * time.Second
+		}
+		noDeviceTimer := time.NewTimer(delay)
+		defer noDeviceTimer.Stop()
+		noDeviceC = noDeviceTimer.C
+	}
 
 	var (
 		uniqueDevicesProcessed int // unique hidraws filtered through pre-flight; converges to len(dir) once seed drains
@@ -604,7 +630,23 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 			// serialize-mode per-token timeout (or cancel-on-win) fired
 			// while waiting for a FIDO2 device to appear — stop waiting.
 			return nil, ctx.Err()
+		case <-noDeviceC:
+			// Dedup across goroutines for the same mapping (multi-FIDO2-token
+			// pinless enrollment): each token's recoverSystemdFido2Password
+			// arms its own timer, but only the first to fire emits the hint.
+			v, _ := fido2NoDeviceMsgOnce.LoadOrStore(mappingName, &sync.Once{})
+			v.(*sync.Once).Do(func() {
+				statusMessage("No FIDO2 device found for " + mappingName + ", insert security key or wait for passphrase prompt")
+			})
+			noDeviceC = nil
+			continue
 		case devName = <-hidrawDevices:
+			// A device arrived: suppress the empty-state message. Without
+			// this nil-out, a timer expiry queued while we were processing
+			// an earlier device would fire on a subsequent loop iteration
+			// and tell the user "no FIDO2 device found" while a key is
+			// plugged in.
+			noDeviceC = nil
 		}
 		if seenHidrawDevices[devName] {
 			continue
