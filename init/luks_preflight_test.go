@@ -5,11 +5,18 @@ package main
 // Tests for the FIDO2 pre-flight gate in recoverSystemdFido2Password.
 // The gate keeps tokens whose credential isn't on any connected hidraw
 // from reaching the PIN prompt.
+//
+// Note for eager-prompt tests below: the PIN-required path in
+// recoverSystemdFido2Password routes through recoverFido2WithEagerPrompt,
+// which calls askFido2Pin (a package var) for PIN entry. Tests substitute
+// a scripted responder via withFakeFido2Pin so the flow runs
+// deterministically without a console TTY or plymouthd.
 
 import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +118,11 @@ type fakeFidoForPreflight struct {
 	assertionCalls    int
 	preflightCalls    int
 	assertionRequests []string // devPath of each full assertion
+	// assertionFn lets tests script success/failure per assertion call.
+	// nil → return ([]byte("ok"), nil) on every call.
+	assertionFn func(call int, devPath, pin string) ([]byte, error)
+	// pinInvalidFn classifies errors returned by assertionFn as PIN-invalid.
+	pinInvalidFn func(error) bool
 }
 
 func (f *fakeFidoForPreflight) Fido2Preflight(devPath string, credID []byte, rp string, uv bool) (bool, error) {
@@ -119,17 +131,62 @@ func (f *fakeFidoForPreflight) Fido2Preflight(devPath string, credID []byte, rp 
 }
 
 func (f *fakeFidoForPreflight) Fido2Assertion(devPath string, credID, salt []byte, rp, pin string, pinRequired, up, uv bool, notifyTouch func()) ([]byte, error) {
+	call := f.assertionCalls
 	f.assertionCalls++
 	f.assertionRequests = append(f.assertionRequests, devPath)
+	if f.assertionFn != nil {
+		return f.assertionFn(call, devPath, pin)
+	}
 	return []byte("ok"), nil
 }
 
-func (f *fakeFidoForPreflight) IsFido2PinInvalid(error) bool     { return false }
+// Per-error-class predicate hooks let tests script assertion outcomes.
+func (f *fakeFidoForPreflight) IsFido2PinInvalid(err error) bool {
+	if f.pinInvalidFn != nil {
+		return f.pinInvalidFn(err)
+	}
+	return false
+}
 func (f *fakeFidoForPreflight) IsFido2PinAuthBlocked(error) bool { return false }
 func (f *fakeFidoForPreflight) IsFido2PinBlocked(error) bool     { return false }
 func (f *fakeFidoForPreflight) IsFido2WrongDevice(error) bool    { return false }
 func (f *fakeFidoForPreflight) IsFido2PinRequired(error) bool    { return false }
 func (f *fakeFidoForPreflight) IsFido2TouchTimeout(error) bool   { return false }
+
+// withFakeFido2Pin substitutes askFido2Pin with a scripted responder that
+// returns the given replies in order. After the last reply, further calls
+// return ctx.Err() so a misbehaving test can't hang. Restores on cleanup.
+func withFakeFido2Pin(t *testing.T, replies []string) *fakePinResponder {
+	t.Helper()
+	r := &fakePinResponder{replies: replies}
+	prev := askFido2Pin
+	askFido2Pin = r.respond
+	t.Cleanup(func() { askFido2Pin = prev })
+	return r
+}
+
+type fakePinResponder struct {
+	replies []string
+	prompts []string
+	calls   int
+	// beforeReply, if set, fires after each call is recorded but before the
+	// reply is returned. The call argument is 1-indexed and identifies which
+	// reply is about to be issued — letting a test mutate side state (plug
+	// in a device, flip a fake-plugin map) between prompts.
+	beforeReply func(call int)
+}
+
+func (r *fakePinResponder) respond(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
+	r.prompts = append(r.prompts, prompt)
+	r.calls++
+	if r.beforeReply != nil {
+		r.beforeReply(r.calls)
+	}
+	if r.calls > len(r.replies) {
+		return nil, context.Canceled
+	}
+	return []byte(r.replies[r.calls-1]), nil
+}
 
 // makeFido2TokenPayload builds the systemd-fido2 LUKS token JSON payload
 // that recoverSystemdFido2Password unmarshals.
@@ -359,4 +416,167 @@ func TestEmptyHidrawAtEntryHotPlugNonMatchingKeepsWaiting(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		require.Fail(t, "recoverSystemdFido2Password did not return within deadline overrun budget")
 	}
+}
+
+// TestEagerPromptEmptyEnterReturnsFido2Skipped: when a PIN-required token's
+// PIN prompt is answered with empty Enter, the function returns
+// errFido2Skipped so the serial dispatcher can advance to the next
+// PIN-bearing token (TPM2-PIN, etc.) without waiting for a device. This is
+// the deadlock break: an empty hidraw at boot no longer parks the serial
+// loop for the full token-timeout.
+func TestEagerPromptEmptyEnterReturnsFido2Skipped(t *testing.T) {
+	credID := []byte("our-credential")
+	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	installFakeFido2Plugin(t, fake)
+	resp := withFakeFido2Pin(t, []string{""}) // empty Enter
+
+	withFakeHidrawDevices(t, []string{}, func() {
+		token := luks.Token{
+			Type:    "systemd-fido2",
+			ID:      0,
+			Slots:   []int{2},
+			Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
+		}
+		_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+		require.ErrorIs(t, err, errFido2Skipped, "expected errFido2Skipped on empty PIN")
+		require.Zero(t, fake.assertionCalls, "expected zero assertion calls when user skips")
+		require.Equal(t, 1, resp.calls, "expected exactly one PIN prompt")
+	})
+}
+
+// TestEagerPromptRepromptsWhenDeviceMissing: PIN prompt fires, user types PIN,
+// no FIDO2 device is plugged in → reprompt with "device not detected" prefix.
+// User plugs in the key (test injects it before second submission), types PIN
+// again → assertion fires against the now-present device.
+func TestEagerPromptRepromptsWhenDeviceMissing(t *testing.T) {
+	credID := []byte("our-credential")
+	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	installFakeFido2Plugin(t, fake)
+	resp := withFakeFido2Pin(t, []string{"1234", "1234"})
+
+	// Start with empty hidraw; the beforeReply hook plugs hidraw1 in and
+	// flips presentCreds between the first and second PIN prompts.
+	tmp := t.TempDir()
+	prev := hidrawSysPath
+	hidrawSysPath = tmp + "/"
+	t.Cleanup(func() { hidrawSysPath = prev })
+
+	resp.beforeReply = func(call int) {
+		if call != 2 {
+			return
+		}
+		devDir := filepath.Join(tmp, "hidraw1", "device")
+		require.NoError(t, os.MkdirAll(devDir, 0o755), "mkdir")
+		require.NoError(t, os.WriteFile(filepath.Join(devDir, "report_descriptor"), fidoHIDDescriptor, 0o644), "write desc")
+		fake.presentCreds["/dev/hidraw1:"+string(credID)] = true
+	}
+
+	token := luks.Token{
+		Type:    "systemd-fido2",
+		ID:      0,
+		Slots:   []int{2},
+		Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
+	}
+	_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+	require.NoError(t, err, "expected unlock to succeed after device arrived")
+	require.Equal(t, 1, fake.assertionCalls, "expected exactly one assertion call")
+	require.Equal(t, 2, resp.calls, "expected exactly 2 PIN prompts (initial + after device arrives)")
+	require.Contains(t, resp.prompts[1], "not detected", "expected second prompt to include 'not detected'")
+}
+
+// TestEagerPromptInvalidPinExhaustsAt3Attempts: assertion returns PIN-invalid
+// three times in a row. The function reprompts after attempts 1 and 2 with a
+// "PIN incorrect" prefix, and bails to keyboard fallback after the 3rd. Only
+// assertion calls that actually attempted with a PIN count toward the cap.
+func TestEagerPromptInvalidPinExhaustsAt3Attempts(t *testing.T) {
+	credID := []byte("our-credential")
+	pinErr := errors.New("pin invalid sentinel")
+	fake := &fakeFidoForPreflight{
+		presentCreds: map[string]bool{"/dev/hidraw0:" + string(credID): true},
+		assertionFn: func(call int, devPath, pin string) ([]byte, error) {
+			return nil, pinErr // always wrong
+		},
+		pinInvalidFn: func(err error) bool { return errors.Is(err, pinErr) },
+	}
+	installFakeFido2Plugin(t, fake)
+	resp := withFakeFido2Pin(t, []string{"1111", "2222", "3333"})
+
+	withFakeHidrawDevices(t, []string{"hidraw0"}, func() {
+		token := luks.Token{
+			Type:    "systemd-fido2",
+			ID:      0,
+			Slots:   []int{2},
+			Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
+		}
+		_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+		require.ErrorIs(t, err, errFido2FallbackToKeyboard, "expected errFido2FallbackToKeyboard after PIN attempts exhausted")
+		require.Equal(t, 3, fake.assertionCalls, "expected exactly 3 assertion calls (PIN cap)")
+		require.Equal(t, 3, resp.calls, "expected exactly 3 PIN prompts")
+		require.Contains(t, resp.prompts[1], "PIN incorrect", "expected second prompt to include 'PIN incorrect'")
+	})
+}
+
+// TestEagerPromptFiresPromptBeforeUsbhidReady: the whole point of the
+// eager-prompt path is to surface a PIN prompt BEFORE any hardware bind, so
+// the user can type while the kernel is still loading usbhid. Regression
+// guard: previous revisions called waitForUsbhid up-front, which in QEMU
+// (no USB HID device → no usbhid uevent → usbhidReady never closes) blocked
+// the goroutine until tokenTimeout, defeating the entire feature.
+func TestEagerPromptFiresPromptBeforeUsbhidReady(t *testing.T) {
+	// Force a fresh, never-closed usbhidReady for this test (other tests in
+	// the package close it as a side effect, so we cannot rely on initial
+	// state).
+	prevUsbhid := usbhidReady
+	usbhidReady = make(chan struct{})
+	t.Cleanup(func() { usbhidReady = prevUsbhid })
+
+	credID := []byte("our-credential")
+	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	installFakeFido2Plugin(t, fake)
+	resp := withFakeFido2Pin(t, []string{""}) // empty Enter → errFido2Skipped
+
+	withFakeHidrawDevices(t, []string{}, func() {
+		token := luks.Token{
+			Type:    "systemd-fido2",
+			ID:      0,
+			Slots:   []int{2},
+			Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, errFido2Skipped, "expected errFido2Skipped on empty PIN")
+		case <-time.After(time.Second):
+			require.Fail(t, "eager-prompt blocked waiting for usbhid — PIN prompt never fired")
+		}
+		require.Equal(t, 1, resp.calls, "expected exactly one PIN prompt")
+	})
+}
+
+// TestEagerPromptHappyPath: device present at function entry, PIN correct on
+// first try → single prompt, single assertion, success.
+func TestEagerPromptHappyPath(t *testing.T) {
+	credID := []byte("our-credential")
+	fake := &fakeFidoForPreflight{
+		presentCreds: map[string]bool{"/dev/hidraw0:" + string(credID): true},
+	}
+	installFakeFido2Plugin(t, fake)
+	resp := withFakeFido2Pin(t, []string{"1234"})
+
+	withFakeHidrawDevices(t, []string{"hidraw0"}, func() {
+		token := luks.Token{
+			Type:    "systemd-fido2",
+			ID:      0,
+			Slots:   []int{2},
+			Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
+		}
+		_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+		require.NoError(t, err, "expected unlock to succeed")
+		require.Equal(t, 1, resp.calls, "expected exactly 1 PIN prompt")
+		require.Equal(t, 1, fake.assertionCalls, "expected exactly 1 assertion call")
+	})
 }
