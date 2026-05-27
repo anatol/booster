@@ -246,55 +246,6 @@ func UnsealWithSessionEx(dev io.ReadWriteCloser, objectHandle tpmutil.Handle, se
 
 // --- END: helpers for UnsealWithSessionEx ---
 
-// ---- raw TPM commands (legacy) ----
-func policyORLegacy(rw io.ReadWriter, session tpmutil.Handle, digests [][]byte, hashAlg tpm2.Algorithm) error {
-	const (
-		tagNoSessions = tpmutil.Tag(0x8001)    // TPM_ST_NO_SESSIONS
-		ccPolicyOR    = tpmutil.Command(0x171) // TPM_CC_PolicyOR
-	)
-	if len(digests) < 2 {
-		// By the spec there must be at least 2 branches; if 0/1 — OR is not needed.
-		return nil
-	}
-	want := digestSizeOfAlg(hashAlg)
-	var params bytes.Buffer
-	// TPML_DIGEST: count (u32) + array of TPM2B_DIGEST (size(u16)+bytes)
-	if err := binary.Write(&params, binary.BigEndian, uint32(len(digests))); err != nil {
-		return err
-	}
-	for i, d := range digests {
-		if len(d) != want {
-			return fmt.Errorf("PolicyOR: digest[%d] len=%d, want=%d (hashAlg=%v)", i, len(d), want, hashAlg)
-		}
-		if err := binary.Write(&params, binary.BigEndian, uint16(len(d))); err != nil {
-			return err
-		}
-		if _, err := params.Write(d); err != nil {
-			return err
-		}
-	}
-	// header: tag(2)|size(4)|code(4) + handle(4) + params
-	size := uint32(10 + 4 + params.Len())
-	var pkt bytes.Buffer
-	_ = binary.Write(&pkt, binary.BigEndian, tagNoSessions)
-	_ = binary.Write(&pkt, binary.BigEndian, size)
-	_ = binary.Write(&pkt, binary.BigEndian, ccPolicyOR)
-	_ = binary.Write(&pkt, binary.BigEndian, session.HandleValue())
-	_, _ = pkt.Write(params.Bytes())
-	resp, err := tpmutil.RunCommandRaw(rw, pkt.Bytes())
-	if err != nil {
-		return err
-	}
-	if len(resp) < 10 {
-		return fmt.Errorf("PolicyOR: short TPM response")
-	}
-	rc := binary.BigEndian.Uint32(resp[6:10])
-	if rc != 0 {
-		return fmt.Errorf("PolicyOR: TPM RC=0x%X", rc)
-	}
-	return nil
-}
-
 func policyTrace(dev io.ReadWriter, sess tpmutil.Handle, tag string) {
 	d, err := tpm2.PolicyGetDigest(dev, sess)
 	if err != nil {
@@ -360,39 +311,12 @@ func deriveAuthFromPIN(pin []byte, alg tpm2.Algorithm) []byte {
 	return sum
 }
 
-// pbkdf2HMACSHA256: standard PBKDF2-HMAC-SHA256 (dkLen=32) with iterations.
-// Compatible with systemd: iterations = 10000, block #1 (salt || 0x00000001).
-
-func pbkdf2HMACSHA256(pass, salt []byte, iters int) []byte {
-	// U1 = HMAC(pass, salt||1)
-	blk := make([]byte, len(salt)+4)
-	copy(blk, salt)
-	blk[len(salt)+0] = 0
-	blk[len(salt)+1] = 0
-	blk[len(salt)+2] = 0
-	blk[len(salt)+3] = 1
-	mac := hmac.New(sha256.New, pass)
-	mac.Write(blk)
-	u := mac.Sum(nil) // 32 bytes
-	dk := make([]byte, 32)
-	copy(dk, u)
-	for i := 1; i < iters; i++ { // another 9999 iterations
-		mac = hmac.New(sha256.New, pass)
-		mac.Write(u)
-		u = mac.Sum(nil)
-		for j := 0; j < 32; j++ {
-			dk[j] ^= u[j]
-		}
-	}
-	return dk
-}
-
 // if the token requires a PIN and there is salt — RETURNS Base64(PBKDF2-HMAC-SHA256(pin, salt, pbkdf2Iters, 32)).
 // (this is exactly what systemd does and what is stored in the tpm2-pin field / is the object's authValue).
 // otherwise — returns HASH_alg(PIN) (compatibility for cases without salt).
 func derivePINForTPM(pin []byte, salt []byte, usePIN bool, alg tpm2.Algorithm) (auth []byte, usedPBKDF2 bool) {
 	if usePIN && len(pin) > 0 && len(salt) > 0 {
-		dk := pbkdf2HMACSHA256(pin, salt, pbkdf2Iters) // 32 bytes
+		dk := pbkdf2.Key(pin, salt, pbkdf2Iters, 32, sha256.New) // 32 bytes
 		return dk, true
 	}
 	if usePIN && len(pin) > 0 {
@@ -404,36 +328,10 @@ func derivePINForTPM(pin []byte, salt []byte, usePIN bool, alg tpm2.Algorithm) (
 
 // TPM constants we need.
 const (
-	tagNoSessions     = tpmutil.Tag(0x8001)    // TPM_ST_NO_SESSIONS
-	ccPolicyAuthValue = tpmutil.Command(0x16B) // TPM_CC_PolicyAuthValue
-	tpmHeaderSize     = 10                     // tag(2)+size(4)+code(4)
-	handleSize        = 4
+	tagNoSessions = tpmutil.Tag(0x8001) // TPM_ST_NO_SESSIONS
+	tpmHeaderSize = 10                  // tag(2)+size(4)+code(4)
+	handleSize    = 4
 )
-
-// PolicyAuthValueLegacy sends TPM2_PolicyAuthValue for a policy session.
-func PolicyAuthValueLegacy(rw io.ReadWriter, session tpmutil.Handle) error {
-	// Build raw command: [tag | size | ordinal | handle]
-	var pkt bytes.Buffer
-	cmdSize := uint32(tpmHeaderSize + handleSize)
-	_ = binary.Write(&pkt, binary.BigEndian, tagNoSessions)
-	_ = binary.Write(&pkt, binary.BigEndian, cmdSize)
-	_ = binary.Write(&pkt, binary.BigEndian, ccPolicyAuthValue)
-	_ = binary.Write(&pkt, binary.BigEndian, session.HandleValue())
-
-	// Send it as-is; check RC in the response header.
-	resp, err := tpmutil.RunCommandRaw(rw, pkt.Bytes())
-	if err != nil {
-		return err
-	}
-	if len(resp) < tpmHeaderSize {
-		return fmt.Errorf("short TPM response")
-	}
-	rc := binary.BigEndian.Uint32(resp[6:10]) // tag(2)+size(4)=6
-	if rc != 0 {
-		return fmt.Errorf("TPM returned RC=0x%X", rc)
-	}
-	return nil
-}
 
 // ----- Low-level PolicyAuthorizeNV (raw) ----
 // TPM2_CC for PolicyAuthorizeNV
@@ -509,7 +407,7 @@ func trialDigestForNV(rw io.ReadWriter, policyAlg tpm2.Algorithm, usePIN bool, n
 		return nil, err
 	}
 	if usePIN {
-		if err := PolicyAuthValueLegacy(rw, sess); err != nil {
+		if err := tpm2.PolicyPassword(rw, sess); err != nil {
 			return nil, err
 		}
 	}
@@ -1014,7 +912,11 @@ func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, policyAlg tpm2.Algorit
 			_ = tpm2.FlushContext(dev, th)
 			branch = append(branch, dg)
 		}
-		if err := policyORLegacy(dev, sessHandle, branch, policyAlg); err != nil {
+		digests := make([]tpmutil.U16Bytes, len(branch))
+		for i, d := range branch {
+			digests[i] = d
+		}
+		if err := tpm2.PolicyOr(dev, sessHandle, tpm2.TPMLDigest{Digests: digests}); err != nil {
 			return tpm2.HandleNull, nil, nil, nil, fmt.Errorf("PolicyOR failed: %v", err)
 		}
 	}
@@ -1029,7 +931,7 @@ func policyPCRSession(dev io.ReadWriteCloser, pcrs []int, policyAlg tpm2.Algorit
 
 AUTH_AND_CC:
 	if usePassword {
-		if err := PolicyAuthValueLegacy(dev, sessHandle); err != nil {
+		if err := tpm2.PolicyPassword(dev, sessHandle); err != nil {
 			return tpm2.HandleNull, nil, nil, nil, err
 		}
 		policyTrace(dev, sessHandle, "after PolicyAuthValue")

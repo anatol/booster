@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +45,17 @@ func TestExtractSRKHandle(t *testing.T) {
 
 	// Handle field is zero → falls back to 0x81000001.
 	require.Equal(t, tpmutil.Handle(0x81000001), extractSRKHandle(iesysBytes(0)))
+
+	// Raw 4-byte big-endian handle format (no IESYS magic) → falls back to 0x81000001
+	rawHandle := make([]byte, 4)
+	binary.BigEndian.PutUint32(rawHandle, 0x81000003)
+	require.Equal(t, tpmutil.Handle(0x81000001), extractSRKHandle(rawHandle))
+
+	// Invalid/malformed input → falls back to 0x81000001
+	require.Equal(t, tpmutil.Handle(0x81000001), extractSRKHandle([]byte("not a valid handle")))
+
+	// Partial handle bytes (less than 10) → falls back to 0x81000001
+	require.Equal(t, tpmutil.Handle(0x81000001), extractSRKHandle([]byte{0x81, 0x00}))
 }
 
 func TestTPM2PINAuthValue(t *testing.T) {
@@ -223,6 +238,158 @@ func TestMatchLuksMappingNoMatchReturnsNil(t *testing.T) {
 	blk := &blkInfo{path: "/dev/sdb1", format: "luks", uuid: blkUUID}
 	require.Nil(t, matchLuksMapping(blk))
 	require.Same(t, rootRef, cmdRoot)
+}
+
+func TestFlattenSystemdTPM2(t *testing.T) {
+	t.Parallel()
+
+	// Flat token (already flat): unchanged
+	flat := map[string]any{
+		"tpm2-blob":      "abc",
+		"tpm2-hash-pcrs": "10+13",
+	}
+	require.Equal(t, flat, flattenSystemdTPM2(flat))
+
+	// One level nesting with systemd-tpm2 wrapper
+	systemdNested := map[string]any{
+		"systemd-tpm2": map[string]any{
+			"tpm2-blob": "xyz",
+		},
+	}
+	result := flattenSystemdTPM2(systemdNested)
+	require.Equal(t, "xyz", result["tpm2-blob"])
+	require.Equal(t, map[string]any{"tpm2-blob": "xyz"}, result["systemd-tpm2"])
+
+	// systemd_tpm2 wrapper (underscore variant)
+	systemdUnderscore := map[string]any{
+		"systemd_tpm2": map[string]any{
+			"tpm2-pin": false,
+		},
+	}
+	result = flattenSystemdTPM2(systemdUnderscore)
+	require.Equal(t, false, result["tpm2-pin"])
+
+	// Mixed nesting: top-level keys take precedence over flattened wrapper keys
+	mixed := map[string]any{
+		"systemd-tpm2": map[string]any{
+			"tpm2-blob": "from-wrapper",
+		},
+		"tpm2-blob": "direct-value",
+	}
+	result = flattenSystemdTPM2(mixed)
+	require.Equal(t, "direct-value", result["tpm2-blob"]) // direct value not overwritten
+
+	// json.RawMessage handling (string containing JSON)
+	jsonInString := map[string]any{
+		"systemd-tpm2": json.RawMessage(`{"tpm2-blob": "nested-json"}`),
+	}
+	result = flattenSystemdTPM2(jsonInString)
+	require.Equal(t, "nested-json", result["tpm2-blob"])
+
+	// Array with single object (systemd sometimes wraps in array)
+	arrayWrapped := map[string]any{
+		"systemd-tpm2": []any{
+			map[string]any{
+				"tpm2-blob": "from-array",
+			},
+		},
+	}
+	result = flattenSystemdTPM2(arrayWrapped)
+	require.Equal(t, "from-array", result["tpm2-blob"])
+
+	// Two wrappers: first matching one wins (systemd-tpm2 before systemd_tpm2)
+	bothWrappers := map[string]any{
+		"systemd-tpm2": map[string]any{
+			"tpm2-blob": "first",
+		},
+		"systemd_tpm2": map[string]any{
+			"tpm2-blob": "second",
+		},
+	}
+	result = flattenSystemdTPM2(bothWrappers)
+	require.Equal(t, "first", result["tpm2-blob"])
+}
+
+func TestTPM2PINAuthValueEmptyCases(t *testing.T) {
+	t.Parallel()
+
+	// Empty PIN with no salt: SHA256("") path
+	emptyPIN := tpm2PINAuthValue([]byte(""), nil)
+	emptyPINExpected, _ := hex.DecodeString("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	require.Equal(t, emptyPINExpected, emptyPIN)
+
+	// Empty PIN with non-empty salt: PBKDF2 → base64 → SHA256 path
+	emptyPINWithSalt := tpm2PINAuthValue([]byte(""), []byte("salt123"))
+	// PBKDF2("", "salt123", 10000, 32) → base64 → SHA256
+	require.NotEmpty(t, emptyPINWithSalt)
+
+	// Non-empty PIN with empty salt: SHA256(pin) path
+	pin := []byte("test")
+	noSaltAuth := tpm2PINAuthValue(pin, nil)
+	noSaltExpected := sha256.Sum256(pin)
+	require.Equal(t, noSaltExpected[:], noSaltAuth)
+
+	// PIN with empty salt (salt len 0) should use non-salted path (same as nil salt)
+	emptySalt := []byte{}
+	pinWithEmptySalt := tpm2PINAuthValue(pin, emptySalt)
+	require.Equal(t, noSaltAuth, pinWithEmptySalt)
+}
+
+func TestPolicyHashParsing(t *testing.T) {
+	t.Parallel()
+
+	// Hex string parsing
+	hexStr := "abc123"
+	policyHash, err := hex.DecodeString(hexStr)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xab, 0xc1, 0x23}, policyHash)
+
+	// Mixed case hex handling (hex.DecodeString handles both upper and lower)
+	hexMixed := "AbC123"
+	policyHash2, err := hex.DecodeString(hexMixed)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xab, 0xc1, 0x23}, policyHash2)
+
+	// Base64 fallback parsing
+	b64Str := "YWJjMTIz" // base64 of "abc123"
+	b64Decoded, err := base64.StdEncoding.DecodeString(b64Str)
+	require.NoError(t, err)
+	require.Equal(t, []byte("abc123"), b64Decoded)
+}
+
+func TestPCRStringParsing(t *testing.T) {
+	t.Parallel()
+
+	// Helper to simulate PCR string parsing like in recoverSystemdTPM2Password
+	parseHashPCRs := func(hashPCRs string) []int {
+		var pcrs []int
+		for _, s := range strings.Split(hashPCRs, "+") {
+			if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && v >= 0 {
+				pcrs = append(pcrs, v)
+			}
+		}
+		return pcrs
+	}
+
+	// "10+13" → []int{10, 13}
+	pcrs := parseHashPCRs("10+13")
+	require.Equal(t, []int{10, 13}, pcrs)
+
+	// "0+7" → []int{0, 7}
+	pcrs = parseHashPCRs("0+7")
+	require.Equal(t, []int{0, 7}, pcrs)
+
+	// Empty string → empty slice
+	pcrs = parseHashPCRs("")
+	require.Empty(t, pcrs)
+
+	// Whitespace handling
+	pcrs = parseHashPCRs(" 10 + 13 ")
+	require.Equal(t, []int{10, 13}, pcrs)
+
+	// Single PCR
+	pcrs = parseHashPCRs("7")
+	require.Equal(t, []int{7}, pcrs)
 }
 
 // unreachableMapperName fires only when cmdRoot is /dev/mapper/<name> and no
