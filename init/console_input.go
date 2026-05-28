@@ -89,6 +89,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -506,6 +507,20 @@ func consolePrint(msg string) {
 		_, _ = fmt.Fprint(devKmsg, "<", 2, ">booster: ", msg, "\n")
 	} else {
 		fmt.Print(msg)
+	}
+}
+
+// consolePrintWithPromptRedraw writes msg to the console under consoleMu,
+// re-painting any active password prompt below so the user's cursor stays
+// at the bottom. Used by log levels (info, warning, severe) which would
+// otherwise overwrite the prompt line mid-input.
+func consolePrintWithPromptRedraw(msg string) {
+	consoleMu.Lock()
+	defer consoleMu.Unlock()
+	if consolePrompt.active && !promptVolumeUnlocked() {
+		consolePrint(msg + "\n" + consolePrompt.text + strings.Repeat("*", consolePrompt.asterisks))
+	} else {
+		consolePrint(msg + "\n")
 	}
 }
 
