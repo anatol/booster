@@ -3,13 +3,13 @@ module github.com/anatol/booster
 go 1.26
 
 require (
-	github.com/anatol/clevis.go v0.0.0-20260314011406-8606b0091ceb
+	github.com/anatol/clevis.go v0.0.0-20260526031059-8cd07c1db068
 	github.com/anatol/devmapper.go v0.0.0-20260315162726-c47dfb6cf674
 	github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f
 	github.com/anatol/luks.go v0.0.0-20260315175739-98c0a50095cb
 	github.com/anatol/smart.go v0.0.0-20260427185427-04c4679efd4e
 	github.com/anatol/tang.go v0.0.0-20260314012254-926d9c91008f
-	github.com/anatol/vmtest v0.0.0-20260313235012-c2b0479898b4
+	github.com/anatol/vmtest v0.0.0-20260509163454-0d3e5bd9399c
 	github.com/cavaliergopher/cpio v1.0.1
 	github.com/google/go-tpm v0.9.8
 	github.com/google/renameio/v2 v2.0.2
@@ -22,8 +22,8 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.51.0
-	golang.org/x/sys v0.44.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/sys v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -47,5 +47,5 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
-	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 )
