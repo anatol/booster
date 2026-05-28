@@ -545,15 +545,15 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 	statusMessage("Waiting for FIDO2 security key for " + mappingName + "...")
 
-	// Register BEFORE waiting on usbhidReady so any 'add' events arriving
-	// after the wait but before /sys/class/hidraw/ is read are buffered for us.
+	// Register BEFORE reading /sys/class/hidraw so any 'add' events arriving
+	// during/after the scan are buffered. We deliberately do NOT block on
+	// waitForUsbhid here: on usbhid-less configs (QEMU without USB,
+	// embedded systems, laptops with only PS2/i2c HID) usbhidReady never
+	// closes, and blocking would prevent the deferred "No FIDO2 device
+	// found" timer below from ever arming. A late-arriving usbhid bind
+	// surfaces its hidraw through the listener channel.
 	hidrawDevices, dropListener := registerHidrawListener()
 	defer dropListener()
-
-	if err := waitForUsbhid(ctx); err != nil {
-		info("FIDO2 unlock for %s cancelled before USB HID ready: %v", mappingName, err)
-		return nil, err
-	}
 
 	dir, err := os.ReadDir(hidrawSysPath)
 	if err != nil {
