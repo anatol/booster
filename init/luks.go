@@ -384,7 +384,7 @@ func recoverFido2Password(ctx context.Context, devName string, credID []byte, sa
 
 	var pin string
 	if pinRequired {
-		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip to passphrase):"
+		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip):"
 		pinBytes, err := askPasswordWithFallback(ctx, prompt, "")
 		if err != nil {
 			return nil, err
