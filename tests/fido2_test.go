@@ -173,7 +173,7 @@ func TestCtxAwareFido2CancelMultiToken(t *testing.T) {
 	// fido2-clientPin-required:false so they fan out in parallel (PIN tokens
 	// would serialize, which we don't want — the point is to exercise
 	// concurrent waitForUsbhid cancellation).
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		var cred, salt [32]byte
 		_, err := rand.Read(cred[:])
 		require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestCtxAwareFido2CancelMultiToken(t *testing.T) {
 	// Each ConsoleExpect blocks until the next occurrence of the substring,
 	// so 3 successive expects assert that the line appears at least 3 times
 	// in the transcript before "Hello, booster!".
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		require.NoError(t, vm.ConsoleExpect("FIDO2 unlock for cryptroot cancelled before USB HID ready"))
 	}
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
