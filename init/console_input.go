@@ -752,7 +752,9 @@ loop:
 	}
 
 	if postPrompt != "" {
-		console(postPrompt)
+		// Newline before the postPrompt so it renders on its own line below
+		// the typed asterisks, not glued to the right of them.
+		console("\n" + postPrompt)
 	}
 	if !quirk.TestEnabled {
 		console("\n")
