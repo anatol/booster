@@ -43,7 +43,7 @@ func printMessage(format string, requestedLevel, kernelLevel int, v ...any) {
 		}
 	}
 	if printToConsole {
-		fmt.Println(msg)
+		consolePrintWithPromptRedraw(msg)
 	}
 }
 
