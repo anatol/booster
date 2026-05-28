@@ -954,6 +954,49 @@ func pinDelay(serialize, hasParallelToken bool) time.Duration {
 	return time.Duration(config.PinDelay) * time.Second
 }
 
+// secretVariants returns all "compatible" transformations of secret to try against LUKS slots.
+// Order matters: more likely matches first.
+func secretVariants(secret []byte) [][]byte {
+	var variants [][]byte
+	// A) 32 bytes → try Base64-encoded first (most likely match for TPM output)
+	if len(secret) == 32 {
+		variants = append(variants, []byte(base64.StdEncoding.EncodeToString(secret)))
+	}
+	// B) RAW as-is
+	variants = append(variants, secret)
+	// C) trim newline
+	if len(secret) > 0 && (secret[len(secret)-1] == '\n' || secret[len(secret)-1] == '\r') {
+		variants = append(variants, bytes.TrimRight(secret, "\r\n"))
+	}
+	// D) if looks like Base64 → decode and try
+	if b, err := base64.StdEncoding.DecodeString(string(secret)); err == nil {
+		variants = append(variants, b)
+	}
+	// E) 32 bytes → Base64-encoded again
+	if len(secret) == 32 {
+		variants = append(variants, []byte(base64.StdEncoding.EncodeToString(secret)))
+	}
+	return variants
+}
+
+// trySlotWithVariants tries all secret variants against a single slot.
+func trySlotWithVariants(d luks.Device, slot int, secret []byte) (*luks.Volume, error) {
+	for i, variant := range secretVariants(secret) {
+		if i > 0 {
+			info("slot %v: variant #%d did not match", slot, i+1)
+		}
+		if v, err := d.UnsealVolume(slot, variant); err == nil {
+			info("slot %v: matched variant #%d", slot, i+1)
+			return v, nil
+		} else if err != luks.ErrPassphraseDoesNotMatch {
+			// continue to next variant
+		} else {
+			return nil, err // actual error, stop
+		}
+	}
+	return nil, luks.ErrPassphraseDoesNotMatch
+}
+
 func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string) bool {
 	var password []byte
 	var err error
@@ -992,72 +1035,11 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 
 	info("recovered password from %s token #%d", t.Type, t.ID)
 
-	// Try different "compatible" variants of the secret
-	tryVariants := func(slot int, secret []byte) (*luks.Volume, error) {
-		// A) if the secret is exactly 32 bytes — FIRST try Base64-ENCODED (priority #1)
-		if len(secret) == 32 {
-			enc := []byte(base64.StdEncoding.EncodeToString(secret))
-			if v, err := d.UnsealVolume(slot, enc); err == nil {
-				info("slot %v: matched with Base64-ENCODED secret (priority #1)", slot)
-				return v, nil
-			} else if err != luks.ErrPassphraseDoesNotMatch {
-				return nil, err
-			} else {
-				info("slot %v: Base64-encoded secret did not match", slot)
-			}
-		}
-		// B) RAW as is (priority #2)
-		if v, err := d.UnsealVolume(slot, secret); err == nil {
-			info("slot %v: matched with RAW secret", slot)
-			return v, nil
-		} else if err != luks.ErrPassphraseDoesNotMatch {
-			return nil, err
-		} else {
-			info("slot %v: passphrase does not match (raw)", slot)
-		}
-		// C) trim \n/\r
-		if len(secret) > 0 && (secret[len(secret)-1] == '\n' || secret[len(secret)-1] == '\r') {
-			trimmed := bytes.TrimRight(secret, "\r\n")
-			if v, err := d.UnsealVolume(slot, trimmed); err == nil {
-				info("slot %v: matched after trimming newline", slot)
-				return v, nil
-			} else if err != luks.ErrPassphraseDoesNotMatch {
-				return nil, err
-			} else {
-				info("slot %v: still no match after trimming newline", slot)
-			}
-		}
-		// D) if the secret looks like Base64 text — try to decode
-		if b, err := base64.StdEncoding.DecodeString(string(secret)); err == nil {
-			if v, err2 := d.UnsealVolume(slot, b); err2 == nil {
-				info("slot %v: matched with Base64-decoded secret", slot)
-				return v, nil
-			} else if err2 != luks.ErrPassphraseDoesNotMatch {
-				return nil, err2
-			} else {
-				info("slot %v: Base64-decoded secret did not match", slot)
-			}
-		}
-		// E) if the secret is exactly 32 bytes — try its Base64-ENCODED form as text
-		if len(secret) == 32 {
-			enc := []byte(base64.StdEncoding.EncodeToString(secret))
-			if v, err := d.UnsealVolume(slot, enc); err == nil {
-				info("slot %v: matched with Base64-ENCODED secret", slot)
-				return v, nil
-			} else if err != luks.ErrPassphraseDoesNotMatch {
-				return nil, err
-			} else {
-				info("slot %v: Base64-encoded secret did not match", slot)
-			}
-		}
-		return nil, luks.ErrPassphraseDoesNotMatch
-	}
-
 	// 1) First — try the token's slots
 	tried := map[int]bool{}
 	for _, s := range t.Slots {
 		tried[s] = true
-		if v, err := tryVariants(s, password); err == nil {
+		if v, err := trySlotWithVariants(d, s, password); err == nil {
 			info("password from %s token #%d matches", t.Type, t.ID)
 			volumes <- v
 			return true
@@ -1071,7 +1053,7 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 		if tried[s] {
 			continue
 		}
-		if v, err := tryVariants(s, password); err == nil {
+		if v, err := trySlotWithVariants(d, s, password); err == nil {
 			info("password matched on non-advertised slot %v", s)
 			volumes <- v
 			return true

@@ -1,11 +1,13 @@
 # IDE config files
 .idea
+.codegraph
 
 # Build artifacts
 init/init
 generator/generator
 
 # Local test files
+*.pid
 *.img
 booster-plymouth.yaml
 booster-journal.log
