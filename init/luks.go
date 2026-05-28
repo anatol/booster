@@ -706,6 +706,7 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 // flattenSystemdTPM2 copies all fields from raw and, if present, flattens the nested node
 // "systemd-tpm2" / "systemd_tpm2" to the same level (without overwriting existing keys).
+// After flattening, the wrapper key is removed from the output.
 func flattenSystemdTPM2(raw map[string]any) map[string]any {
 	out := make(map[string]any, len(raw))
 	for k, v := range raw {
@@ -714,12 +715,19 @@ func flattenSystemdTPM2(raw map[string]any) map[string]any {
 	// Possible container names used by systemd
 	for _, wrapper := range []string{"systemd-tpm2", "systemd_tpm2"} {
 		v, ok := raw[wrapper]
-		if !ok || v == nil {
+		if !ok {
+			continue
+		}
+		if v == nil {
+			// Remove the wrapper key if it's nil
+			delete(out, wrapper)
 			continue
 		}
 		switch sub := v.(type) {
 		case map[string]any:
-			for k, vv := range sub {
+			// Recursively flatten nested wrappers first
+			nested := flattenSystemdTPM2(sub)
+			for k, vv := range nested {
 				if _, exists := out[k]; !exists {
 					out[k] = vv
 				}
@@ -728,7 +736,9 @@ func flattenSystemdTPM2(raw map[string]any) map[string]any {
 			// sometimes it can be an array with a single object
 			if len(sub) > 0 {
 				if mm, ok := sub[0].(map[string]any); ok {
-					for k, vv := range mm {
+					// Recursively flatten nested wrappers
+					nested := flattenSystemdTPM2(mm)
+					for k, vv := range nested {
 						if _, exists := out[k]; !exists {
 							out[k] = vv
 						}
@@ -738,13 +748,17 @@ func flattenSystemdTPM2(raw map[string]any) map[string]any {
 		case json.RawMessage:
 			var mm map[string]any
 			if err := json.Unmarshal(sub, &mm); err == nil {
-				for k, vv := range mm {
+				// Recursively flatten nested wrappers
+				nested := flattenSystemdTPM2(mm)
+				for k, vv := range nested {
 					if _, exists := out[k]; !exists {
 						out[k] = vv
 					}
 				}
 			}
 		}
+		// Remove the wrapper key after flattening
+		delete(out, wrapper)
 	}
 	return out
 }

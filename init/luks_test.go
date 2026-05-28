@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -593,4 +594,229 @@ func TestTrySubmitPassphraseCancelsRegistrationOnSuccess(t *testing.T) {
 	names := pendingDeviceNames()
 	require.NotContains(t, names, "cancel-on-success",
 		"pendingDeviceNames must drop entries whose ctx is cancelled")
+}
+
+// ── flattenSystemdTPM2 ─────────────────────────────────────────────────────────
+
+func TestFlattenSystemdTPM2(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want map[string]any
+	}{
+		{
+			name: "flat token unchanged",
+			raw: map[string]any{
+				"tpm2-blob":   "abc",
+				"tpm2-pcrs":   []any{7},
+				"tpm2-pin":    true,
+			},
+			want: map[string]any{
+				"tpm2-blob": "abc",
+				"tpm2-pcrs": []any{7},
+				"tpm2-pin":   true,
+			},
+		},
+		{
+			name: "one level nesting with systemd-tpm2 wrapper",
+			raw: map[string]any{
+				"type": "systemd-tpm2",
+				"systemd-tpm2": map[string]any{
+					"tpm2-blob":     "nested-blob",
+					"tpm2-policy-hash": "deadbeef",
+				},
+			},
+			want: map[string]any{
+				"type":              "systemd-tpm2",
+				"tpm2-blob":         "nested-blob",
+				"tpm2-policy-hash":  "deadbeef",
+			},
+		},
+		{
+			name: "one level nesting with systemd_tpm2 wrapper",
+			raw: map[string]any{
+				"type": "systemd_tpm2",
+				"systemd_tpm2": map[string]any{
+					"tpm2-blob": "underscore-blob",
+				},
+			},
+			want: map[string]any{
+				"type":       "systemd_tpm2",
+				"tpm2-blob":  "underscore-blob",
+			},
+		},
+		{
+			name: "two level nesting flattens both",
+			raw: map[string]any{
+				"type": "container",
+				"systemd-tpm2": map[string]any{
+					"systemd_tpm2": map[string]any{
+						"tpm2-blob": "deep-blob",
+					},
+				},
+			},
+			want: map[string]any{
+				"type":       "container",
+				"tpm2-blob":  "deep-blob",
+			},
+		},
+		{
+			name: "json.RawMessage wrapper",
+			raw: map[string]any{
+				"type": "systemd-tpm2",
+				"systemd-tpm2": json.RawMessage(`{"tpm2-blob":"raw-blob","tpm2-pin":true}`),
+			},
+			want: map[string]any{
+				"type":       "systemd-tpm2",
+				"tpm2-blob":  "raw-blob",
+				"tpm2-pin":   true,
+			},
+		},
+		{
+			name: "array with single object wrapper",
+			raw: map[string]any{
+				"type": "systemd-tpm2",
+				"systemd-tpm2": []any{
+					map[string]any{
+						"tpm2-blob": "array-blob",
+					},
+				},
+			},
+			want: map[string]any{
+				"type":       "systemd-tpm2",
+				"tpm2-blob":  "array-blob",
+			},
+		},
+		{
+			name: "existing keys not overwritten by nested values",
+			raw: map[string]any{
+				"tpm2-blob":   "original",
+				"systemd-tpm2": map[string]any{
+					"tpm2-blob": "nested",
+				},
+			},
+			want: map[string]any{
+				"tpm2-blob": "original",
+			},
+		},
+		{
+			name: "nil wrapper ignored",
+			raw: map[string]any{
+				"tpm2-blob":     "present",
+				"systemd-tpm2": nil,
+			},
+			want: map[string]any{
+				"tpm2-blob": "present",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := flattenSystemdTPM2(tc.raw)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// ── PCR string parsing ──────────────────────────────────────────────────────────
+
+func TestPCRStringParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    []uint
+		wantErr bool
+	}{
+		{
+			name:  "single PCR",
+			input: "7",
+			want:  []uint{7},
+		},
+		{
+			name:  "two PCRs with plus",
+			input: "10+13",
+			want:  []uint{10, 13},
+		},
+		{
+			name:  "PCRs zero and seven",
+			input: "0+7",
+			want:  []uint{0, 7},
+		},
+		{
+			name:  "multiple PCRs",
+			input: "0+7+10+13",
+			want:  []uint{0, 7, 10, 13},
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  []uint{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parsePCRString(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// ── Policy hash parsing ────────────────────────────────────────────────────────
+
+func TestPolicyHashParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    []byte
+		wantErr bool
+	}{
+		{
+			name:  "hex string parsing",
+			input: "deadbeef",
+			want:  []byte{0xde, 0xad, 0xbe, 0xef},
+		},
+		{
+			name:  "hex string parsing long",
+			input: "abcdef0123456789",
+			want:  []byte{0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89},
+		},
+		{
+			name:  "empty string returns error",
+			input: "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid hex returns error",
+			input:   "gghhi",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parsePolicyHash(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }

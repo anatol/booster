@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/go-tpm/legacy/tpm2"
@@ -164,6 +167,40 @@ func parsePCRBank(bank string) tpm2.Algorithm {
 		return tpm2.AlgSHA256
 	}
 	return tpm2.AlgSHA256
+}
+
+// parsePCRString parses a PCR string like "10+13" into a slice of PCR indices.
+func parsePCRString(s string) ([]uint, error) {
+	if s == "" {
+		return []uint{}, nil
+	}
+	parts := strings.Split(s, "+")
+	pcrs := make([]uint, 0, len(parts))
+	for _, p := range parts {
+		pcr, err := strconv.ParseUint(p, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PCR number: %w", err)
+		}
+		pcrs = append(pcrs, uint(pcr))
+	}
+	return pcrs, nil
+}
+
+// parsePolicyHash parses a policy hash string. It first tries hex decoding,
+// and if that fails, it falls back to base64 decoding.
+func parsePolicyHash(s string) ([]byte, error) {
+	if s == "" {
+		return nil, fmt.Errorf("empty policy hash")
+	}
+	// Try hex first (systemd-cryptenroll uses hex by default)
+	if h, err := hex.DecodeString(s); err == nil {
+		return h, nil
+	}
+	// Fallback to base64 for some systemd versions
+	if h, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return h, nil
+	}
+	return nil, fmt.Errorf("invalid policy hash: not valid hex or base64")
 }
 
 // Returns session handle and policy digest.
