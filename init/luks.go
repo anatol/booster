@@ -576,23 +576,16 @@ func recoverSystemdFido2Password(ctx context.Context, t luks.Token, mappingName 
 
 	seenHidrawDevices := make(set)
 
-	// Defer the "No FIDO2 device found" hint so a parallel non-interactive
-	// token (TPM2, clevis) can win silently in the common case. Cap the wait
-	// at 10s so the message surfaces in time to inform the user before a
-	// long tokenTimeout completes. Suppressed on console-quiet (verbosity
-	// < info); Plymouth always shows because it's the only visibility
-	// layer under `quiet splash`.
-	//
-	// PIN-required tokens early-returned into recoverFido2WithEagerPrompt
-	// above and never reach this code — the eager PIN prompt is their
-	// affordance. The timer here serves only the pinless touch-anytime path.
+	// "No FIDO2 device found" hint, delayed tokenTimeout/2 with 10s floor:
+	// a fast non-interactive token (TPM2, clevis) should win silently before
+	// the hint fires. PIN-required tokens use the eager-prompt path above.
 	var noDeviceC <-chan time.Time
 	if len(dir) == 0 && (plymouthEnabled || verbosityLevel >= levelInfo) {
 		delay := 30 * time.Second
 		if config.TokenTimeout > 0 {
 			delay = time.Duration(config.TokenTimeout) * time.Second
 		}
-		if delay /= 2; delay > 10*time.Second {
+		if delay /= 2; delay < 10*time.Second {
 			delay = 10 * time.Second
 		}
 		noDeviceTimer := time.NewTimer(delay)
