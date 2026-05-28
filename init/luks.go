@@ -772,7 +772,7 @@ func recoverFido2WithEagerPrompt(ctx context.Context, mappingName string, credID
 	}
 
 	// No waitForUsbhid: findMatchingFido2Device below rescans /sys/class/hidraw
-	// on every PIN submission, so a late-arriving key is picked up next round.
+	// on every iteration, so a late-arriving key is picked up next round.
 
 	if err := acquireFido2Lock(ctx); err != nil {
 		info("FIDO2 unlock for %s cancelled waiting for assertion lock: %v", mappingName, err)
@@ -785,6 +785,20 @@ func recoverFido2WithEagerPrompt(ctx context.Context, mappingName string, credID
 	pinAttempts := 0
 
 	for {
+		// Pre-flight first so we never fire the PIN prompt for a token
+		// whose enrolled key isn't on any connected hidraw — the user
+		// shouldn't be asked to type a PIN that can't go anywhere. Also
+		// catches a device that gets unplugged mid-prompt: the next
+		// iteration's pre-flight exits cleanly instead of reprompting.
+		devName, err := findMatchingFido2Device(credID, relyingParty, userVerificationRequired)
+		if err != nil {
+			info("FIDO2 device discovery error: %v", err)
+			return nil, errFido2FallbackToKeyboard
+		}
+		if devName == "" {
+			return nil, errFido2FallbackToKeyboard
+		}
+
 		prompt := promptPrefix + "Enter FIDO2 PIN for " + mappingName + " (empty to skip):"
 		pinBytes, err := askFido2Pin(ctx, prompt, "")
 		if err != nil {
@@ -794,17 +808,6 @@ func recoverFido2WithEagerPrompt(ctx context.Context, mappingName string, credID
 			return nil, errFido2Skipped
 		}
 		pin := string(pinBytes)
-
-		devName, err := findMatchingFido2Device(credID, relyingParty, userVerificationRequired)
-		if err != nil {
-			info("FIDO2 device discovery error: %v", err)
-			promptPrefix = "FIDO2 device discovery error — "
-			continue
-		}
-		if devName == "" {
-			promptPrefix = "FIDO2 device not detected — "
-			continue
-		}
 
 		notifyTouch := func() {
 			statusMessage("Please touch the FIDO2 key for " + mappingName)

@@ -419,18 +419,19 @@ func TestEmptyHidrawAtEntryHotPlugNonMatchingKeepsWaiting(t *testing.T) {
 }
 
 // TestEagerPromptEmptyEnterReturnsFido2Skipped: when a PIN-required token's
-// PIN prompt is answered with empty Enter, the function returns
-// errFido2Skipped so the serial dispatcher can advance to the next
-// PIN-bearing token (TPM2-PIN, etc.) without waiting for a device. This is
-// the deadlock break: an empty hidraw at boot no longer parks the serial
-// loop for the full token-timeout.
+// enrolled key IS connected but the user empty-Enters at the PIN prompt, the
+// function returns errFido2Skipped so the serial dispatcher can advance to
+// the next PIN-bearing token (TPM2-PIN, etc.) without waiting for the full
+// token-timeout. This is the deadlock break the eager-prompt path exists for.
 func TestEagerPromptEmptyEnterReturnsFido2Skipped(t *testing.T) {
 	credID := []byte("our-credential")
-	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	fake := &fakeFidoForPreflight{
+		presentCreds: map[string]bool{"/dev/hidraw0:" + string(credID): true},
+	}
 	installFakeFido2Plugin(t, fake)
 	resp := withFakeFido2Pin(t, []string{""}) // empty Enter
 
-	withFakeHidrawDevices(t, []string{}, func() {
+	withFakeHidrawDevices(t, []string{"hidraw0"}, func() {
 		token := luks.Token{
 			Type:    "systemd-fido2",
 			ID:      0,
@@ -444,44 +445,31 @@ func TestEagerPromptEmptyEnterReturnsFido2Skipped(t *testing.T) {
 	})
 }
 
-// TestEagerPromptRepromptsWhenDeviceMissing: PIN prompt fires, user types PIN,
-// no FIDO2 device is plugged in → reprompt with "device not detected" prefix.
-// User plugs in the key (test injects it before second submission), types PIN
-// again → assertion fires against the now-present device.
-func TestEagerPromptRepromptsWhenDeviceMissing(t *testing.T) {
+// TestEagerPromptSkipsWhenNoMatchingDevice: pre-flight gate at the top of
+// the loop. When no connected hidraw holds this token's credential, the
+// function must return errFido2FallbackToKeyboard immediately without ever
+// firing the PIN prompt — typing a PIN for a key that can't validate it is
+// pure wasted UX. Reproduces the multi-Yubikey scenario where token #0 is
+// enrolled to a key not currently inserted; the user shouldn't have to
+// empty-Enter through a dead prompt to reach token #1.
+func TestEagerPromptSkipsWhenNoMatchingDevice(t *testing.T) {
 	credID := []byte("our-credential")
-	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}} // nothing present
 	installFakeFido2Plugin(t, fake)
-	resp := withFakeFido2Pin(t, []string{"1234", "1234"})
+	resp := withFakeFido2Pin(t, []string{}) // no replies expected — no prompt fires
 
-	// Start with empty hidraw; the beforeReply hook plugs hidraw1 in and
-	// flips presentCreds between the first and second PIN prompts.
-	tmp := t.TempDir()
-	prev := hidrawSysPath
-	hidrawSysPath = tmp + "/"
-	t.Cleanup(func() { hidrawSysPath = prev })
-
-	resp.beforeReply = func(call int) {
-		if call != 2 {
-			return
+	withFakeHidrawDevices(t, []string{}, func() {
+		token := luks.Token{
+			Type:    "systemd-fido2",
+			ID:      0,
+			Slots:   []int{2},
+			Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
 		}
-		devDir := filepath.Join(tmp, "hidraw1", "device")
-		require.NoError(t, os.MkdirAll(devDir, 0o755), "mkdir")
-		require.NoError(t, os.WriteFile(filepath.Join(devDir, "report_descriptor"), fidoHIDDescriptor, 0o644), "write desc")
-		fake.presentCreds["/dev/hidraw1:"+string(credID)] = true
-	}
-
-	token := luks.Token{
-		Type:    "systemd-fido2",
-		ID:      0,
-		Slots:   []int{2},
-		Payload: makeFido2TokenPayload(t, credID, []byte("salt"), "io.systemd.cryptsetup", true, true, false),
-	}
-	_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
-	require.NoError(t, err, "expected unlock to succeed after device arrived")
-	require.Equal(t, 1, fake.assertionCalls, "expected exactly one assertion call")
-	require.Equal(t, 2, resp.calls, "expected exactly 2 PIN prompts (initial + after device arrives)")
-	require.Contains(t, resp.prompts[1], "not detected", "expected second prompt to include 'not detected'")
+		_, err := recoverSystemdFido2Password(context.Background(), token, "cryptroot")
+		require.ErrorIs(t, err, errFido2FallbackToKeyboard, "expected fallback when credential not on any connected device")
+		require.Zero(t, resp.calls, "expected zero PIN prompts when no device holds the credential")
+		require.Zero(t, fake.assertionCalls, "expected zero assertion calls")
+	})
 }
 
 // TestEagerPromptInvalidPinExhaustsAt3Attempts: assertion returns PIN-invalid
@@ -516,9 +504,9 @@ func TestEagerPromptInvalidPinExhaustsAt3Attempts(t *testing.T) {
 	})
 }
 
-// TestEagerPromptFiresPromptBeforeUsbhidReady: the whole point of the
-// eager-prompt path is to surface a PIN prompt BEFORE any hardware bind, so
-// the user can type while the kernel is still loading usbhid. Regression
+// TestEagerPromptFiresPromptBeforeUsbhidReady: the eager-prompt path must
+// surface a PIN prompt without waiting on the usbhid uevent, so the user can
+// type as soon as pre-flight green-lights the connected key. Regression
 // guard: previous revisions called waitForUsbhid up-front, which in QEMU
 // (no USB HID device → no usbhid uevent → usbhidReady never closes) blocked
 // the goroutine until tokenTimeout, defeating the entire feature.
@@ -531,11 +519,13 @@ func TestEagerPromptFiresPromptBeforeUsbhidReady(t *testing.T) {
 	t.Cleanup(func() { usbhidReady = prevUsbhid })
 
 	credID := []byte("our-credential")
-	fake := &fakeFidoForPreflight{presentCreds: map[string]bool{}}
+	fake := &fakeFidoForPreflight{
+		presentCreds: map[string]bool{"/dev/hidraw0:" + string(credID): true},
+	}
 	installFakeFido2Plugin(t, fake)
 	resp := withFakeFido2Pin(t, []string{""}) // empty Enter → errFido2Skipped
 
-	withFakeHidrawDevices(t, []string{}, func() {
+	withFakeHidrawDevices(t, []string{"hidraw0"}, func() {
 		token := luks.Token{
 			Type:    "systemd-fido2",
 			ID:      0,
