@@ -1,6 +1,8 @@
 package main
 
 import (
+	"debug/elf"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,6 +59,201 @@ func TestParseThemeLogo(t *testing.T) {
 	})
 	t.Run("nonexistent file", func(t *testing.T) {
 		require.Equal(t, "", parseThemeLogo("/nonexistent/theme.plymouth"))
+	})
+}
+
+// makeMinimalELF writes a tiny but valid ELF64 shared library with a single
+// .rodata section containing the given byte slice.  This lets elfLogoPath unit
+// tests run without requiring Plymouth to be installed.
+func makeMinimalELF(t *testing.T, rodata []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.so")
+
+	// We build a minimal ELF64 LSB shared object by hand:
+	//   ELF header  (64 bytes)
+	//   .rodata     (len(rodata) bytes, at file offset 64)
+	//   Section header table: NULL + .rodata + .shstrtab  (3 × 64 bytes)
+	//   .shstrtab section (names: "\0.rodata\0.shstrtab\0")
+	shstrtab := []byte("\x00.rodata\x00.shstrtab\x00")
+	rodataOff := uint64(64)
+	rodataSize := uint64(len(rodata))
+	shstrtabOff := rodataOff + rodataSize
+	shstrtabSize := uint64(len(shstrtab))
+	shOff := shstrtabOff + shstrtabSize
+	// align shOff to 8
+	if shOff%8 != 0 {
+		shOff += 8 - shOff%8
+	}
+
+	le := binary.LittleEndian
+	buf := make([]byte, shOff+3*64)
+
+	// ELF ident
+	copy(buf[0:], []byte{0x7f, 'E', 'L', 'F'})
+	buf[4] = 2                 // ELFCLASS64
+	buf[5] = 1                 // ELFDATA2LSB
+	buf[6] = 1                 // EV_CURRENT
+	buf[7] = 0                 // ELFOSABI_NONE
+	le.PutUint16(buf[16:], 3)  // ET_DYN (shared object)
+	le.PutUint16(buf[18:], 62) // EM_X86_64
+	le.PutUint32(buf[20:], 1)  // EV_CURRENT
+	// e_entry, e_phoff = 0
+	le.PutUint64(buf[40:], shOff) // e_shoff
+	le.PutUint16(buf[52:], 64)    // e_ehsize
+	le.PutUint16(buf[54:], 56)    // e_phentsize
+	le.PutUint16(buf[56:], 0)     // e_phnum
+	le.PutUint16(buf[58:], 64)    // e_shentsize
+	le.PutUint16(buf[60:], 3)     // e_shnum (NULL + .rodata + .shstrtab)
+	le.PutUint16(buf[62:], 2)     // e_shstrndx = 2
+
+	// Section header 0: NULL (all zeros, already zero)
+
+	// Section header 1: .rodata
+	sh1 := buf[shOff+64:]
+	le.PutUint32(sh1[0:], 1)                        // sh_name = offset of ".rodata" in shstrtab = 1
+	le.PutUint32(sh1[4:], uint32(elf.SHT_PROGBITS)) // sh_type
+	le.PutUint64(sh1[8:], uint64(elf.SHF_ALLOC))    // sh_flags
+	le.PutUint64(sh1[24:], rodataOff)               // sh_offset
+	le.PutUint64(sh1[32:], rodataSize)              // sh_size
+	le.PutUint64(sh1[48:], 1)                       // sh_addralign
+
+	// Section header 2: .shstrtab
+	sh2 := buf[shOff+128:]
+	le.PutUint32(sh2[0:], 9) // sh_name = offset of ".shstrtab" in shstrtab = 9
+	le.PutUint32(sh2[4:], uint32(elf.SHT_STRTAB))
+	le.PutUint64(sh2[24:], shstrtabOff)  // sh_offset
+	le.PutUint64(sh2[32:], shstrtabSize) // sh_size
+	le.PutUint64(sh2[48:], 1)            // sh_addralign
+
+	// Write .rodata and .shstrtab into buf
+	copy(buf[rodataOff:], rodata)
+	copy(buf[shstrtabOff:], shstrtab)
+
+	require.NoError(t, os.WriteFile(path, buf, 0o644))
+	return path
+}
+
+func TestElfLogoPath(t *testing.T) {
+	t.Run("nonexistent file returns empty", func(t *testing.T) {
+		require.Equal(t, "", elfLogoPath("/nonexistent/space-flares.so"))
+	})
+
+	t.Run("non-ELF file returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "fake.so")
+		require.NoError(t, os.WriteFile(f, []byte("not an ELF file at all"), 0o644))
+		require.Equal(t, "", elfLogoPath(f))
+	})
+
+	t.Run("ELF with no .rodata section returns empty", func(t *testing.T) {
+		// Build an ELF with an empty rodata so the section exists but has no logo.
+		path := makeMinimalELF(t, []byte{})
+		require.Equal(t, "", elfLogoPath(path))
+	})
+
+	t.Run("ELF with logo path in rodata", func(t *testing.T) {
+		// Simulate PLYMOUTH_LOGO_FILE = "/usr/share/pixmaps/archlinux-logo.png"
+		// packed as a null-terminated string among other .rodata content.
+		var rodata []byte
+		rodata = append(rodata, []byte("some other string\x00")...)
+		rodata = append(rodata, []byte("/usr/share/pixmaps/archlinux-logo.png\x00")...)
+		rodata = append(rodata, []byte("another string\x00")...)
+
+		path := makeMinimalELF(t, rodata)
+		result := elfLogoPath(path)
+		require.Equal(t, "/usr/share/pixmaps/archlinux-logo.png", result)
+	})
+
+	t.Run("ELF with svg logo path in rodata", func(t *testing.T) {
+		var rodata []byte
+		rodata = append(rodata, []byte("/usr/share/pixmaps/fedora-logo.svg\x00")...)
+		path := makeMinimalELF(t, rodata)
+		require.Equal(t, "/usr/share/pixmaps/fedora-logo.svg", elfLogoPath(path))
+	})
+
+	t.Run("ELF without logo path returns empty", func(t *testing.T) {
+		// Absolute path but doesn't contain "logo".
+		var rodata []byte
+		rodata = append(rodata, []byte("/usr/share/pixmaps/archlinux.png\x00")...)
+		path := makeMinimalELF(t, rodata)
+		require.Equal(t, "", elfLogoPath(path))
+	})
+
+	t.Run("ELF with relative path ignored", func(t *testing.T) {
+		// Relative path should not be returned (must start with '/').
+		var rodata []byte
+		rodata = append(rodata, []byte("share/pixmaps/logo.png\x00")...)
+		path := makeMinimalELF(t, rodata)
+		require.Equal(t, "", elfLogoPath(path))
+	})
+
+	// Integration sub-test: runs only when space-flares.so is installed.
+	t.Run("real space-flares.so", func(t *testing.T) {
+		pluginsDir := plymouthPkgConfig("pluginsdir")
+		if pluginsDir == "" {
+			pluginsDir = "/usr/lib/plymouth"
+		}
+		soPath := filepath.Join(pluginsDir, "space-flares.so")
+		if _, err := os.Stat(soPath); err != nil {
+			t.Skip("space-flares.so not installed")
+		}
+		result := elfLogoPath(soPath)
+		t.Logf("elfLogoPath(%s) = %q", soPath, result)
+		if result != "" {
+			require.True(t, filepath.IsAbs(result), "logo path must be absolute: %q", result)
+			require.True(t,
+				len(result) > 4,
+				"logo path must be non-trivial: %q", result)
+		}
+		// result == "" is also acceptable on distros that patched out the constant.
+	})
+}
+
+func TestFindPlymouthLogoFile(t *testing.T) {
+	t.Run("returns empty for empty plugin dir", func(t *testing.T) {
+		result := findPlymouthLogoFile(t.TempDir())
+		// pkg-config logofile may or may not return something on this host,
+		// but with no .so files in the temp dir the ELF path returns "".
+		// We can only assert no panic here; the pkg-config path is untestable
+		// without mocking exec.Command.
+		_ = result
+	})
+
+	t.Run("returns logo from ELF when pkg-config unavailable", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Place a fake space-flares.so with a logo path in .rodata.
+		var rodata []byte
+		rodata = append(rodata, []byte("/usr/share/pixmaps/test-logo.png\x00")...)
+		soData, err := os.ReadFile(makeMinimalELF(t, rodata))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "space-flares.so"), soData, 0o644))
+
+		// pkg-config will return "" (ply-splash-core not installed in CI),
+		// so the ELF scan should kick in.
+		if plymouthPkgConfig("logofile") != "" {
+			t.Skip("pkg-config logofile is set on this host; ELF fallback not exercised")
+		}
+		result := findPlymouthLogoFile(dir)
+		require.Equal(t, "/usr/share/pixmaps/test-logo.png", result)
+	})
+
+	t.Run("prefers two-step.so when space-flares absent", func(t *testing.T) {
+		if plymouthPkgConfig("logofile") != "" {
+			t.Skip("pkg-config logofile is set on this host; ELF fallback not exercised")
+		}
+		dir := t.TempDir()
+
+		var rodata []byte
+		rodata = append(rodata, []byte("/usr/share/pixmaps/distro-logo.png\x00")...)
+		soData, err := os.ReadFile(makeMinimalELF(t, rodata))
+		require.NoError(t, err)
+		// Only write two-step.so, not space-flares.so.
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "two-step.so"), soData, 0o644))
+
+		result := findPlymouthLogoFile(dir)
+		require.Equal(t, "/usr/share/pixmaps/distro-logo.png", result)
 	})
 }
 

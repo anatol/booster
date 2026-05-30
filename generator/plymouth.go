@@ -1,6 +1,7 @@
 package main
 
 import (
+	"debug/elf"
 	"fmt"
 	"os"
 	"os/exec"
@@ -155,11 +156,16 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 	}
 
 	// Bundle the system-wide Plymouth logo file. Some plugins (space-flares,
-	// two-step) unconditionally load it outside the theme directory. Prefer
-	// a Logo= key in the theme file; fall back to the pkg-config logofile.
+	// two-step) unconditionally load it outside the theme directory.
+	//
+	// Discovery order (first non-empty path wins):
+	//   1. Logo= key in the theme's .plymouth file (theme-specific override)
+	//   2. pkg-config --variable=logofile ply-splash-core (works on some distros)
+	//   3. ELF .rodata scan of the plugin .so files (distro-agnostic fallback;
+	//      PLYMOUTH_LOGO_FILE is a compiled-in string literal in each plugin)
 	logoFile := parseThemeLogo(themePlymouthFile)
 	if logoFile == "" {
-		logoFile = plymouthPkgConfig("logofile")
+		logoFile = findPlymouthLogoFile(pluginDir)
 	}
 	if logoFile != "" {
 		if _, err := os.Stat(logoFile); err == nil {
@@ -267,6 +273,67 @@ func plymouthPkgConfig(variable string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// findPlymouthLogoFile returns the system-wide Plymouth logo file path.
+// It tries in order:
+//  1. pkg-config --variable=logofile ply-splash-core (works on some distros)
+//  2. ELF .rodata scan of space-flares.so and two-step.so (distro-agnostic)
+//
+// The Logo= theme-file key (highest priority) is handled by the caller via
+// parseThemeLogo before this function is called.
+func findPlymouthLogoFile(pluginDir string) string {
+	if path := plymouthPkgConfig("logofile"); path != "" {
+		return path
+	}
+	// PLYMOUTH_LOGO_FILE is compiled in as a string literal in the plugins
+	// that require it. Scan each plugin's .rodata to find the path without
+	// relying on pkg-config exposing it (Arch Linux does not).
+	for _, plugin := range []string{"space-flares.so", "two-step.so"} {
+		if path := elfLogoPath(filepath.Join(pluginDir, plugin)); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+// elfLogoPath scans the .rodata section of a Plymouth plugin shared library
+// for the compiled-in PLYMOUTH_LOGO_FILE path. It returns the first
+// null-terminated string in .rodata that looks like an absolute logo path
+// (starts with '/', contains "logo", ends with .png or .svg), or "" if none
+// is found or the file cannot be read.
+func elfLogoPath(soPath string) string {
+	f, err := elf.Open(soPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	sec := f.Section(".rodata")
+	if sec == nil {
+		return ""
+	}
+	data, err := sec.Data()
+	if err != nil {
+		return ""
+	}
+
+	// Walk the null-terminated C strings packed in .rodata.
+	start := 0
+	for i, b := range data {
+		if b == 0 {
+			if i > start {
+				s := string(data[start:i])
+				if s[0] == '/' &&
+					strings.Contains(s, "logo") &&
+					(strings.HasSuffix(s, ".png") || strings.HasSuffix(s, ".svg")) {
+					return s
+				}
+			}
+			start = i + 1
+		}
+	}
+	return ""
 }
 
 // parseThemeImageDir reads a .plymouth theme file and extracts the ImageDir= value.
