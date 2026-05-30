@@ -155,17 +155,20 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 		}
 	}
 
-	// Bundle the system-wide Plymouth logo file. Some plugins (space-flares,
-	// two-step) unconditionally load it outside the theme directory.
+	// Bundle the system-wide Plymouth logo file. The graphical splash plugins
+	// (space-flares, two-step, script, fade-throbber, …) load it from an
+	// absolute path that lives outside the theme directory, so copying the
+	// theme alone is not enough.
 	//
 	// Discovery order (first non-empty path wins):
 	//   1. Logo= key in the theme's .plymouth file (theme-specific override)
-	//   2. pkg-config --variable=logofile ply-splash-core (works on some distros)
-	//   3. ELF .rodata scan of the plugin .so files (distro-agnostic fallback;
-	//      PLYMOUTH_LOGO_FILE is a compiled-in string literal in each plugin)
+	//   2. pkg-config --variable=logofile ply-splash-core (rare; absent on Arch)
+	//   3. The PLYMOUTH_LOGO_FILE path baked into the active theme's plugin .so
+	//      (distro-agnostic — read straight out of the binary the boot uses)
+	themeModule := parseThemeModule(themePlymouthFile)
 	logoFile := parseThemeLogo(themePlymouthFile)
 	if logoFile == "" {
-		logoFile = findPlymouthLogoFile(pluginDir)
+		logoFile = findPlymouthLogoFile(pluginDir, themeModule)
 	}
 	if logoFile != "" {
 		if _, err := os.Stat(logoFile); err == nil {
@@ -275,21 +278,35 @@ func plymouthPkgConfig(variable string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// findPlymouthLogoFile returns the system-wide Plymouth logo file path.
-// It tries in order:
-//  1. pkg-config --variable=logofile ply-splash-core (works on some distros)
-//  2. ELF .rodata scan of space-flares.so and two-step.so (distro-agnostic)
+// findPlymouthLogoFile returns the absolute path of the system logo image that
+// Plymouth's splash plugins are compiled to load (the PLYMOUTH_LOGO_FILE build
+// constant). It tries in order:
+//  1. pkg-config --variable=logofile ply-splash-core (works on a few distros)
+//  2. the path baked into the plugin shared library the boot actually uses
+//
+// The constant is not exposed by pkg-config on most distributions — notably
+// Arch — so we recover it from the plugin itself, where it is a plain string
+// literal. activeModule is the theme's ModuleName (e.g. "space-flares",
+// "script"); when known we read only that plugin, because it is authoritative:
+// if it loads the logo the path is in its .so, and if it doesn't (text/details)
+// there is nothing to bundle and we must not drag in an unrelated plugin's
+// default. When the module is unknown we probe the graphical plugins that are
+// known to embed the constant.
 //
 // The Logo= theme-file key (highest priority) is handled by the caller via
 // parseThemeLogo before this function is called.
-func findPlymouthLogoFile(pluginDir string) string {
+func findPlymouthLogoFile(pluginDir, activeModule string) string {
 	if path := plymouthPkgConfig("logofile"); path != "" {
 		return path
 	}
-	// PLYMOUTH_LOGO_FILE is compiled in as a string literal in the plugins
-	// that require it. Scan each plugin's .rodata to find the path without
-	// relying on pkg-config exposing it (Arch Linux does not).
-	for _, plugin := range []string{"space-flares.so", "two-step.so"} {
+
+	var plugins []string
+	if activeModule != "" {
+		plugins = []string{activeModule + ".so"}
+	} else {
+		plugins = []string{"space-flares.so", "two-step.so", "script.so", "fade-throbber.so"}
+	}
+	for _, plugin := range plugins {
 		if path := elfLogoPath(filepath.Join(pluginDir, plugin)); path != "" {
 			return path
 		}
@@ -297,11 +314,14 @@ func findPlymouthLogoFile(pluginDir string) string {
 	return ""
 }
 
-// elfLogoPath scans the .rodata section of a Plymouth plugin shared library
-// for the compiled-in PLYMOUTH_LOGO_FILE path. It returns the first
-// null-terminated string in .rodata that looks like an absolute logo path
-// (starts with '/', contains "logo", ends with .png or .svg), or "" if none
-// is found or the file cannot be read.
+// elfLogoPath scans a Plymouth plugin shared library for the compiled-in
+// PLYMOUTH_LOGO_FILE path and returns it, or "" if none is found or the file
+// cannot be read as ELF.
+//
+// The literal lives in a read-only data section whose name is toolchain
+// dependent (.rodata, .rodata.str1.1, .data.rel.ro, …), so rather than
+// hardcoding a section name we walk every allocated, non-executable PROGBITS
+// section and inspect the null-terminated C strings packed inside.
 func elfLogoPath(soPath string) string {
 	f, err := elf.Open(soPath)
 	if err != nil {
@@ -309,28 +329,65 @@ func elfLogoPath(soPath string) string {
 	}
 	defer f.Close()
 
-	sec := f.Section(".rodata")
-	if sec == nil {
-		return ""
+	for _, sec := range f.Sections {
+		if sec.Type != elf.SHT_PROGBITS ||
+			sec.Flags&elf.SHF_ALLOC == 0 ||
+			sec.Flags&elf.SHF_EXECINSTR != 0 {
+			continue
+		}
+		data, err := sec.Data()
+		if err != nil {
+			continue
+		}
+		if path := scanLogoString(data); path != "" {
+			return path
+		}
 	}
-	data, err := sec.Data()
+	return ""
+}
+
+// scanLogoString walks the null-terminated strings in a blob of section data
+// and returns the first one that looks like an absolute logo image path.
+func scanLogoString(data []byte) string {
+	start := 0
+	for i, b := range data {
+		if b != 0 {
+			continue
+		}
+		if i > start && looksLikeLogoPath(string(data[start:i])) {
+			return string(data[start:i])
+		}
+		start = i + 1
+	}
+	return ""
+}
+
+// looksLikeLogoPath reports whether s is plausibly a PLYMOUTH_LOGO_FILE value:
+// an absolute path to a PNG/SVG whose name mentions "logo". It rejects trace
+// and format strings (which contain spaces or printf directives) so a line like
+// "%-75.75s: loading logo image" is never mistaken for the real path.
+func looksLikeLogoPath(s string) bool {
+	if len(s) < 6 || s[0] != '/' || strings.ContainsAny(s, " \t\n%") {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(s), "logo") {
+		return false
+	}
+	return strings.HasSuffix(s, ".png") || strings.HasSuffix(s, ".svg")
+}
+
+// parseThemeModule reads a .plymouth theme file and extracts the ModuleName=
+// value — the splash plugin the theme drives (e.g. "space-flares", "script").
+// Returns empty string if the file cannot be read or has no ModuleName key.
+func parseThemeModule(plymouthFile string) string {
+	data, err := os.ReadFile(plymouthFile)
 	if err != nil {
 		return ""
 	}
-
-	// Walk the null-terminated C strings packed in .rodata.
-	start := 0
-	for i, b := range data {
-		if b == 0 {
-			if i > start {
-				s := string(data[start:i])
-				if s[0] == '/' &&
-					strings.Contains(s, "logo") &&
-					(strings.HasSuffix(s, ".png") || strings.HasSuffix(s, ".svg")) {
-					return s
-				}
-			}
-			start = i + 1
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "ModuleName="); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	return ""

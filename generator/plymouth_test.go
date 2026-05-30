@@ -210,50 +210,87 @@ func TestElfLogoPath(t *testing.T) {
 	})
 }
 
+// writeFakePlugin writes a minimal ELF .so at <dir>/<name> whose read-only
+// data contains the given logo path string (plus some decoy strings).
+func writeFakePlugin(t *testing.T, dir, name, logoPath string) {
+	t.Helper()
+	var rodata []byte
+	rodata = append(rodata, []byte("%-75.75s: loading logo image\x00")...) // trace decoy
+	rodata = append(rodata, []byte("plugin->logo_image != NULL\x00")...)   // assert decoy
+	if logoPath != "" {
+		rodata = append(rodata, []byte(logoPath+"\x00")...)
+	}
+	soData, err := os.ReadFile(makeMinimalELF(t, rodata))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), soData, 0o644))
+}
+
 func TestFindPlymouthLogoFile(t *testing.T) {
+	// pkg-config exposing logofile would short-circuit the ELF scan and make
+	// these assertions about the fallback meaningless, so skip if it is set.
+	skipIfPkgConfigLogo := func(t *testing.T) {
+		if plymouthPkgConfig("logofile") != "" {
+			t.Skip("pkg-config logofile is set on this host; ELF fallback not exercised")
+		}
+	}
+
 	t.Run("returns empty for empty plugin dir", func(t *testing.T) {
-		result := findPlymouthLogoFile(t.TempDir())
-		// pkg-config logofile may or may not return something on this host,
-		// but with no .so files in the temp dir the ELF path returns "".
-		// We can only assert no panic here; the pkg-config path is untestable
-		// without mocking exec.Command.
-		_ = result
+		skipIfPkgConfigLogo(t)
+		require.Equal(t, "", findPlymouthLogoFile(t.TempDir(), "space-flares"))
 	})
 
-	t.Run("returns logo from ELF when pkg-config unavailable", func(t *testing.T) {
+	t.Run("reads logo from the active theme's plugin", func(t *testing.T) {
+		skipIfPkgConfigLogo(t)
 		dir := t.TempDir()
-
-		// Place a fake space-flares.so with a logo path in .rodata.
-		var rodata []byte
-		rodata = append(rodata, []byte("/usr/share/pixmaps/test-logo.png\x00")...)
-		soData, err := os.ReadFile(makeMinimalELF(t, rodata))
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "space-flares.so"), soData, 0o644))
-
-		// pkg-config will return "" (ply-splash-core not installed in CI),
-		// so the ELF scan should kick in.
-		if plymouthPkgConfig("logofile") != "" {
-			t.Skip("pkg-config logofile is set on this host; ELF fallback not exercised")
-		}
-		result := findPlymouthLogoFile(dir)
-		require.Equal(t, "/usr/share/pixmaps/test-logo.png", result)
+		writeFakePlugin(t, dir, "space-flares.so", "/usr/share/pixmaps/test-logo.png")
+		require.Equal(t, "/usr/share/pixmaps/test-logo.png",
+			findPlymouthLogoFile(dir, "space-flares"))
 	})
 
-	t.Run("prefers two-step.so when space-flares absent", func(t *testing.T) {
-		if plymouthPkgConfig("logofile") != "" {
-			t.Skip("pkg-config logofile is set on this host; ELF fallback not exercised")
-		}
+	t.Run("works for a script-based theme", func(t *testing.T) {
+		skipIfPkgConfigLogo(t)
 		dir := t.TempDir()
+		// The old implementation only scanned space-flares/two-step and would
+		// have missed this entirely.
+		writeFakePlugin(t, dir, "script.so", "/usr/share/plymouth/distro-logo.png")
+		require.Equal(t, "/usr/share/plymouth/distro-logo.png",
+			findPlymouthLogoFile(dir, "script"))
+	})
 
-		var rodata []byte
-		rodata = append(rodata, []byte("/usr/share/pixmaps/distro-logo.png\x00")...)
-		soData, err := os.ReadFile(makeMinimalELF(t, rodata))
-		require.NoError(t, err)
-		// Only write two-step.so, not space-flares.so.
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "two-step.so"), soData, 0o644))
+	t.Run("active text/details plugin without a logo bundles nothing", func(t *testing.T) {
+		skipIfPkgConfigLogo(t)
+		dir := t.TempDir()
+		// text.so carries no logo; a graphical plugin in the same dir does.
+		// We must NOT pull in the unrelated plugin's logo.
+		writeFakePlugin(t, dir, "text.so", "")
+		writeFakePlugin(t, dir, "space-flares.so", "/usr/share/pixmaps/test-logo.png")
+		require.Equal(t, "", findPlymouthLogoFile(dir, "text"))
+	})
 
-		result := findPlymouthLogoFile(dir)
-		require.Equal(t, "/usr/share/pixmaps/distro-logo.png", result)
+	t.Run("falls back to known plugins when module is unknown", func(t *testing.T) {
+		skipIfPkgConfigLogo(t)
+		dir := t.TempDir()
+		writeFakePlugin(t, dir, "two-step.so", "/usr/share/pixmaps/distro-logo.png")
+		require.Equal(t, "/usr/share/pixmaps/distro-logo.png",
+			findPlymouthLogoFile(dir, ""))
+	})
+}
+
+func TestParseThemeModule(t *testing.T) {
+	t.Run("module present", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "test.plymouth")
+		require.NoError(t, os.WriteFile(f, []byte("[Plymouth Theme]\nName=Solar\nModuleName=space-flares\n"), 0o644))
+		require.Equal(t, "space-flares", parseThemeModule(f))
+	})
+	t.Run("no module key", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "test.plymouth")
+		require.NoError(t, os.WriteFile(f, []byte("[Plymouth Theme]\nName=Solar\n"), 0o644))
+		require.Equal(t, "", parseThemeModule(f))
+	})
+	t.Run("nonexistent file", func(t *testing.T) {
+		require.Equal(t, "", parseThemeModule("/nonexistent/theme.plymouth"))
 	})
 }
 
