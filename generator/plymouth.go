@@ -154,6 +154,24 @@ func (img *Image) addPlymouthSupport(conf *generatorConfig) error {
 		}
 	}
 
+	// Bundle the system-wide Plymouth logo file. Some plugins (space-flares,
+	// two-step) unconditionally load it outside the theme directory. Prefer
+	// a Logo= key in the theme file; fall back to the pkg-config logofile.
+	logoFile := parseThemeLogo(themePlymouthFile)
+	if logoFile == "" {
+		logoFile = plymouthPkgConfig("logofile")
+	}
+	if logoFile != "" {
+		if _, err := os.Stat(logoFile); err == nil {
+			if err := img.AppendFile(logoFile); err != nil {
+				return fmt.Errorf("plymouth logo file %s: %v", logoFile, err)
+			}
+			debug("plymouth: bundled logo file %s", logoFile)
+		} else {
+			debug("plymouth: logo file %s configured but not found, skipping", logoFile)
+		}
+	}
+
 	// Resolve and install fonts to Plymouth's hardcoded lookup paths.
 	// Plymouth's label-freetype plugin looks for fonts at fixed paths:
 	//   /usr/share/fonts/Plymouth.ttf              (regular)
@@ -279,6 +297,22 @@ func fcMatch(pattern string) string {
 		return ""
 	}
 	return path
+}
+
+// parseThemeLogo reads a .plymouth theme file and extracts the Logo= value.
+// Returns empty string if absent.
+func parseThemeLogo(plymouthFile string) string {
+	data, err := os.ReadFile(plymouthFile)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "Logo="); ok {
+			return after
+		}
+	}
+	return ""
 }
 
 // parseThemeFonts reads a .plymouth theme file and extracts font family names

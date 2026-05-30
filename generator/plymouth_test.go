@@ -42,6 +42,24 @@ func TestExtractFontFamily(t *testing.T) {
 	}
 }
 
+func TestParseThemeLogo(t *testing.T) {
+	t.Run("logo present", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "test.plymouth")
+		require.NoError(t, os.WriteFile(f, []byte("[space-flares]\nLogo=/usr/share/pixmaps/archlinux-logo.png\n"), 0o644))
+		require.Equal(t, "/usr/share/pixmaps/archlinux-logo.png", parseThemeLogo(f))
+	})
+	t.Run("no logo key", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "test.plymouth")
+		require.NoError(t, os.WriteFile(f, []byte("[Plymouth Theme]\nName=Solar\n"), 0o644))
+		require.Equal(t, "", parseThemeLogo(f))
+	})
+	t.Run("nonexistent file", func(t *testing.T) {
+		require.Equal(t, "", parseThemeLogo("/nonexistent/theme.plymouth"))
+	})
+}
+
 func TestParseThemeFonts(t *testing.T) {
 	t.Run("typical theme file", func(t *testing.T) {
 		dir := t.TempDir()
