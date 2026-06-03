@@ -17,6 +17,7 @@ require (
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/keys-pub/go-libfido2 v1.5.3
 	github.com/klauspost/compress v1.18.6
+	github.com/moby/sys/mountinfo v0.7.2
 	github.com/stretchr/testify v1.11.1
 	github.com/ulikunitz/xz v0.5.15
 	github.com/vishvananda/netlink v1.3.1
