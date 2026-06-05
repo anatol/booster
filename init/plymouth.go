@@ -347,45 +347,57 @@ func isSimpledrm(devPath string) bool {
 	return filepath.Base(driverLink) == "simple-framebuffer"
 }
 
-// createDrmUdevEntries creates udev database files for DRM card devices.
-// Plymouth uses udev_device_get_is_initialized() to check whether a DRM
-// device is ready. This function checks for /run/udev/data/c<major>:<minor>
-// files. Without udevd running, these files don't exist and Plymouth skips
-// every DRM device, falling back to the details plugin (text-based fallback) after an 8s timeout.
+// createDrmUdevEntries creates udev database files for all DRM devices.
+// Without udevd running, the database files under /run/udev/data/ don't exist
+// and Plymouth fails two successive checks for every device:
 //
-// This follows the same pattern as devMapperUpdateUdevDb() in udev.go.
+//  1. udev_device_get_is_initialized() — requires any db file to exist (I:1).
+//  2. udev_device_has_tag(device, "seat") — requires a G:seat line in the db.
+//
+// Both checks must pass; if either fails Plymouth skips the device. With no
+// usable DRM device Plymouth falls back to the text (details) plugin.
+//
+// Three kinds of entries are needed:
+//   - Card devices (card0, card1): character devices → /run/udev/data/c<major>:<minor>
+//   - Render nodes (renderD128, ...): character devices → /run/udev/data/c<major>:<minor>
+//   - Connector/output entries (card0-eDP-1, card0-HDMI-A-1, ...): no dev
+//     file → /run/udev/data/+drm:<sysname>
+//
+// All three types need G:seat; card/render nodes also get G:uaccess (matching
+// what a real udevd would write via the 70-seat.rules / 73-seat-late.rules).
 func createDrmUdevEntries() {
 	if err := os.MkdirAll("/run/udev/data/", 0o755); err != nil {
 		warning("plymouth: failed to create /run/udev/data: %v", err)
 		return
 	}
 
-	cards, _ := filepath.Glob("/sys/class/drm/card[0-9]*")
-	for _, card := range cards {
-		cardName := filepath.Base(card)
+	entries, _ := filepath.Glob("/sys/class/drm/*")
+	for _, entry := range entries {
+		entryName := filepath.Base(entry)
 
-		// Skip DRM connector entries (card1-DP-1, card1-eDP-1, etc.)
-		// which don't have dev files. We only want card devices.
-		if strings.Contains(cardName, "-") {
-			continue
+		devBytes, err := os.ReadFile(filepath.Join(entry, "dev"))
+		if err == nil {
+			// Character device (card0, renderD128, …): use c<major>:<minor>.
+			devStr := strings.TrimSpace(string(devBytes))
+			if devStr == "" || !strings.Contains(devStr, ":") {
+				debug("plymouth: unexpected dev content for %s: %q", entryName, devStr)
+				continue
+			}
+			dbFile := "/run/udev/data/c" + devStr
+			if err := os.WriteFile(dbFile, []byte("I:1\nG:seat\nG:uaccess\n"), 0o644); err != nil {
+				warning("plymouth: failed to write %s: %v", dbFile, err)
+				continue
+			}
+			debug("plymouth: created udev db entry %s for %s", dbFile, entryName)
+		} else {
+			// Connector/output entry (card0-eDP-1, card0-HDMI-A-1, …): no dev
+			// file, so libudev uses +<subsystem>:<sysname> as the db key.
+			dbFile := "/run/udev/data/+drm:" + entryName
+			if err := os.WriteFile(dbFile, []byte("I:1\nG:seat\n"), 0o644); err != nil {
+				warning("plymouth: failed to write %s: %v", dbFile, err)
+				continue
+			}
+			debug("plymouth: created udev db entry %s for %s", dbFile, entryName)
 		}
-
-		devBytes, err := os.ReadFile(filepath.Join(card, "dev"))
-		if err != nil {
-			debug("plymouth: failed to read dev for %s: %v", cardName, err)
-			continue
-		}
-
-		devStr := strings.TrimSpace(string(devBytes))
-		if devStr == "" || !strings.Contains(devStr, ":") {
-			debug("plymouth: unexpected dev content for %s: %q", cardName, devStr)
-			continue
-		}
-		dbFile := "/run/udev/data/c" + devStr
-		if err := os.WriteFile(dbFile, []byte("I:1\nV:1\n"), 0o644); err != nil {
-			warning("plymouth: failed to write %s: %v", dbFile, err)
-			continue
-		}
-		debug("plymouth: created udev db entry %s", dbFile)
 	}
 }
