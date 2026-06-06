@@ -363,8 +363,9 @@ func isSimpledrm(devPath string) bool {
 //   - Connector/output entries (card0-eDP-1, card0-HDMI-A-1, ...): no dev
 //     file → /run/udev/data/+drm:<sysname>
 //
-// All three types need G:seat; card/render nodes also get G:uaccess (matching
-// what a real udevd would write via the 70-seat.rules / 73-seat-late.rules).
+// Card nodes get G:seat + G:uaccess; render nodes get only G:uaccess (real udev
+// does not seat-assign render nodes); connectors get G:seat (matching what a real
+// udevd writes via 70-seat.rules / 73-seat-late.rules).
 func createDrmUdevEntries() {
 	if err := os.MkdirAll("/run/udev/data/", 0o755); err != nil {
 		warning("plymouth: failed to create /run/udev/data: %v", err)
@@ -384,7 +385,11 @@ func createDrmUdevEntries() {
 				continue
 			}
 			dbFile := "/run/udev/data/c" + devStr
-			if err := os.WriteFile(dbFile, []byte("I:1\nG:seat\nG:uaccess\n"), 0o644); err != nil {
+			content := "I:1\nG:seat\nG:uaccess\n"
+			if strings.HasPrefix(entryName, "render") {
+				content = "I:1\nG:uaccess\n"
+			}
+			if err := os.WriteFile(dbFile, []byte(content), 0o644); err != nil {
 				warning("plymouth: failed to write %s: %v", dbFile, err)
 				continue
 			}
