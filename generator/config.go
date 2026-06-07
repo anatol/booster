@@ -64,7 +64,7 @@ type UserConfig struct {
 	ExtraFiles           string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
 	StripBinaries        bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
-	EnableLVM            bool   `yaml:"enable_lvm"`
+	EnableLVM            *bool  `yaml:"enable_lvm"`              // this is a pointer so that we can use unspecified as autodetect
 	EnableMdraid         bool   `yaml:"enable_mdraid"`
 	MdraidConfigPath     string `yaml:"mdraid_config_path"`
 	EnableZfs            bool   `yaml:"enable_zfs"`
@@ -229,7 +229,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readModprobeOptions = readModprobeOptions
 	conf.appendAllModAliases = u.AppendAllModAliases
 	conf.stripBinaries = u.StripBinaries || opts.BuildCommand.Strip
-	conf.enableLVM = u.EnableLVM
+	conf.enableLVM = u.EnableLVM != nil && *u.EnableLVM
+	conf.autoEnableLVM = u.EnableLVM == nil
 	conf.enableMdraid = u.EnableMdraid
 	conf.mdraidConfigPath = u.MdraidConfigPath
 	conf.enableZfs = u.EnableZfs

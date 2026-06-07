@@ -38,6 +38,7 @@ type generatorConfig struct {
 	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
 	enableLVM               bool
+	autoEnableLVM		bool
 	enableMdraid            bool
 	mdraidConfigPath        string
 	enableZfs               bool
@@ -197,6 +198,21 @@ func generateInitRamfs(conf *generatorConfig) error {
 	if conf.networkConfigType != netOff {
 		if err := kmod.activateModules(true, false, "kernel/drivers/net/ethernet/"); err != nil {
 			return err
+		}
+	}
+
+	// Detect if LVM is needed
+	if conf.autoEnableLVM {
+		if rootMount, err  := GetRootMountInfo(); err != nil {
+			warning("Failed to automatically determine LVM requirement: %v", err)
+		} else {
+			for _, dev := range rootMount.parentDevices {
+				if dev.devtype == "lvm" {
+					debug("Automatically enabling LVM as root device %s requires it", rootMount.rootMountInfo.Source)
+					conf.enableLVM = true
+					break
+				}
+			}
 		}
 	}
 
