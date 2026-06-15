@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/go-tpm/legacy/tpm2"
@@ -160,6 +162,114 @@ func parsePCRBank(bank string) tpm2.Algorithm {
 		return tpm2.AlgSHA256
 	}
 	return tpm2.AlgSHA256
+}
+
+// pcrSystemIdentity is the PCR systemd reserves as "system-identity": it is
+// populated (not consumed) by FDE so later objects can be bound to the unlocked
+// volume. Booster extends it after unseal to close the TPM re-unseal oracle.
+const pcrSystemIdentity = 15
+
+// xescapeColon mirrors systemd's xescape(s, ":") (src/basic/escape.c): it
+// escapes ':' (the delimiter), '\\', control bytes (<0x20) and high/DEL bytes
+// (>=0x7f) as lowercase \xNN, copying everything else verbatim. Used to build
+// the volume-key measurement message byte-compatibly with systemd-cryptsetup.
+func xescapeColon(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f || c == '\\' || c == ':' {
+			fmt.Fprintf(&b, "\\x%02x", c)
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// cryptoHashForPCRBank maps a TPM PCR bank algorithm to its crypto.Hash.
+// ok is false for algorithms booster cannot handle, letting the caller fail
+// closed rather than silently leave that bank's PCR un-extended.
+func cryptoHashForPCRBank(alg tpm2.Algorithm) (h crypto.Hash, ok bool) {
+	switch alg {
+	case tpm2.AlgSHA1:
+		return crypto.SHA1, true
+	case tpm2.AlgSHA256:
+		return crypto.SHA256, true
+	case tpm2.AlgSHA384:
+		return crypto.SHA384, true
+	case tpm2.AlgSHA512:
+		return crypto.SHA512, true
+	}
+	return 0, false
+}
+
+// activePCRBanks returns the hash algorithms of the TPM's allocated PCR banks.
+func activePCRBanks(dev io.ReadWriter) ([]tpm2.Algorithm, error) {
+	caps, _, err := tpm2.GetCapability(dev, tpm2.CapabilityPCRs, 64, 0)
+	if err != nil {
+		return nil, err
+	}
+	var banks []tpm2.Algorithm
+	for _, c := range caps {
+		sel, ok := c.(tpm2.PCRSelection)
+		if !ok || len(sel.PCRs) == 0 {
+			continue
+		}
+		banks = append(banks, sel.Hash)
+	}
+	return banks, nil
+}
+
+// volumeKeyHMACer computes HMAC(volume_key, message) with a caller-named hash
+// algorithm, without exposing the master key. luks.Volume implements it, so the
+// volume key never leaves the LUKS library — only the resulting digest (the
+// value measured into the PCR, which is not secret) crosses into booster. The
+// hash is a crypto.Hash identifier, not a constructor, so the caller cannot
+// supply an implementation that observes the key. This is stricter than
+// libcryptsetup's crypt_volume_key_get, which hands the raw key to the caller.
+type volumeKeyHMACer interface {
+	HMAC(h crypto.Hash, message []byte) ([]byte, error)
+}
+
+// measureVolumeKeyToPCR15 extends PCR15 with the systemd-compatible volume-key
+// measurement after a volume is unsealed, so a key sealed to an uninitialized
+// PCR15 cannot be re-unsealed for the rest of the boot. It matches
+// systemd-cryptsetup's tpm2-measure-pcr=yes: for every active PCR bank it
+// extends HMAC-<bank>(volume_key, "cryptsetup:" + name + ":" + uuid) using that
+// bank's own hash algorithm. Extending ALL active banks is required — a policy
+// satisfiable via an un-extended bank would otherwise be bypassable.
+func measureVolumeKeyToPCR15(k volumeKeyHMACer, volumeName, luksUUID string) error {
+	dev, err := openTPM()
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+
+	banks, err := activePCRBanks(dev)
+	if err != nil {
+		return fmt.Errorf("reading active PCR banks: %v", err)
+	}
+	if len(banks) == 0 {
+		return fmt.Errorf("no active PCR banks to extend")
+	}
+
+	msg := []byte("cryptsetup:" + xescapeColon(volumeName) + ":" + luksUUID)
+
+	for _, bank := range banks {
+		h, ok := cryptoHashForPCRBank(bank)
+		if !ok {
+			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcrSystemIdentity)
+		}
+		digest, err := k.HMAC(h, msg)
+		if err != nil {
+			return fmt.Errorf("computing PCR%d measurement for bank %v: %v", pcrSystemIdentity, bank, err)
+		}
+		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcrSystemIdentity), bank, digest, ""); err != nil {
+			return fmt.Errorf("extending PCR%d in bank %v: %v", pcrSystemIdentity, bank, err)
+		}
+	}
+	debug("PCR%d: extended across %d active bank(s) %v for %s", pcrSystemIdentity, len(banks), banks, volumeName)
+	return nil
 }
 
 // Returns session handle and policy digest.
