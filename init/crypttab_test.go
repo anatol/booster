@@ -116,6 +116,31 @@ func TestParseCrypttabKeySlotInvalid(t *testing.T) {
 	require.Contains(t, err.Error(), "key-slot=")
 }
 
+func TestParseCrypttabMeasurePCR(t *testing.T) {
+	const uuid = "UUID=ab6d7d78-b816-4495-928d-766d6607035e"
+	cases := []struct {
+		opt  string
+		want measurePCRSetting
+	}{
+		{"", measurePCRAuto},
+		{" tpm2-measure-pcr=yes", measurePCRForce},
+		{" tpm2-measure-pcr=no", measurePCRDisabled},
+	}
+	for _, c := range cases {
+		mappings, err := parseCrypttabReader(strings.NewReader("cryptroot " + uuid + " none" + c.opt + "\n"))
+		require.NoError(t, err, c.opt)
+		require.Len(t, mappings, 1)
+		require.Equal(t, c.want, mappings[0].measurePCR, c.opt)
+	}
+}
+
+func TestParseCrypttabMeasurePCRInvalid(t *testing.T) {
+	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tpm2-measure-pcr=maybe\n"
+	_, err := parseCrypttabReader(strings.NewReader(input))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tpm2-measure-pcr=")
+}
+
 func TestParseCrypttabNofail(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none nofail\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))

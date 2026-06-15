@@ -137,6 +137,15 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 					// accepted for compatibility; token detection uses LUKS2 header
 				case strings.HasPrefix(opt, "tpm2-device="):
 					// accepted for compatibility; token detection uses LUKS2 header
+				case strings.HasPrefix(opt, "tpm2-measure-pcr="):
+					// yes forces the volume-key measurement, no suppresses it;
+					// unset = auto (extend iff a token binds PCR15).
+					val := opt[len("tpm2-measure-pcr="):]
+					s, valid := parseMeasurePCR(val)
+					if !valid {
+						return nil, fmt.Errorf("crypttab: entry %q: invalid tpm2-measure-pcr= value %q", name, val)
+					}
+					m.measurePCR = s
 				case strings.HasPrefix(opt, "token-timeout="):
 					d, err := parseTokenTimeout(opt[14:])
 					if err != nil {
@@ -217,6 +226,9 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 	if dst.header == "" && src.header != "" {
 		dst.header = src.header
 		dst.headerDeviceRef = src.headerDeviceRef
+	}
+	if dst.measurePCR == measurePCRAuto && src.measurePCR != measurePCRAuto {
+		dst.measurePCR = src.measurePCR
 	}
 	dst.options = append(dst.options, src.options...)
 }
