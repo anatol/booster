@@ -1,11 +1,15 @@
 #!/usr/bin/bash -e
 
+# kernel-install initrd_generator plugin. Named 60- so it runs after
+# 50-depmod.install: booster resolves module dependencies from the kernel's
+# modules.dep, which depmod (re)generates earlier in the same kernel-install run.
+
 COMMAND="${1:?}"
 KERNEL_VERSION="${2:?}"
 BOOT_DIR="$3"
 KERNEL_IMAGE="$4"
 
-# If the initrd was provide don the command line, we shouldn't generate our own
+# If the initrd was provided on the command line, we shouldn't generate our own
 # If the supplied image is a UKI, we don't need to create an initrd
 if [[ "$COMMAND" != "add" || "$#" -gt 4  || "$KERNEL_INSTALL_IMAGE_TYPE" = "uki" ]]; then
     exit 0
@@ -16,14 +20,14 @@ if [[ "$KERNEL_INSTALL_INITRD_GENERATOR" != "booster" ]]; then
     exit 0
 fi
 
-existing_image="$KERNEL_IMAGE%/*}/initrd"
+existing_image="${KERNEL_IMAGE%/*}/initrd"
 output_path="$KERNEL_INSTALL_STAGING_AREA/initrd"
 if [[ -f "$existing_image" ]]; then
     # we found an initrd at the same place as the kernel
     # use this and don't generate a new one
-    [[ "$KERNEL_INSTALL_VERBOSE" == 1 ]] && printf "Thres is an initrd image at the same place as the kernel, skipping generating a new one"
+    [[ "$KERNEL_INSTALL_VERBOSE" == 1 ]] && printf "There is an initrd image at the same place as the kernel, skipping generating a new one"
     cp --reflink=auto --no-preserve=ownership "$existing_image" "$output_path"
-    chmod 0600 "$KERNEL_INSTALL_STAGING_AREA/$IMAGE"
+    chmod 0600 "$output_path"
     exit 0
 fi
 
