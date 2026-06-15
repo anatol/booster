@@ -4,8 +4,8 @@ github.com/anatol/devmapper.go v0.0.0-20260315162726-c47dfb6cf674 h1:hf8WYEOEPib
 github.com/anatol/devmapper.go v0.0.0-20260315162726-c47dfb6cf674/go.mod h1:IdTkstjXP4hR8GyVyk0+i5uHpGMPidNq78ghwCyF4zg=
 github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f h1:Dxki5W8sSFVyPkoYut11RXlIzouHVM5dX99qUL8xsGA=
 github.com/anatol/go-udev v0.0.0-20220806124306-5f28d899f64f/go.mod h1:xM57GU8ntwu+q88yo/exYza/WG1fKGxhJUtvtebxdXg=
-github.com/anatol/luks.go v0.0.0-20260315175739-98c0a50095cb h1:QY6+xwGNree0q4CiQXbxQ/uY63eGO97pGxJn2wcolNI=
-github.com/anatol/luks.go v0.0.0-20260315175739-98c0a50095cb/go.mod h1:lFWvMshFyjkl9gCaM8wfvBk06H7isWw4AuaHdFH0+QQ=
+github.com/anatol/luks.go v0.0.0-20260615185044-2658459c8ca5 h1:Qj6Lfxnswng3KCP3OsSyVwbbYh4UY3bQZaP1m6fCAGU=
+github.com/anatol/luks.go v0.0.0-20260615185044-2658459c8ca5/go.mod h1:lFWvMshFyjkl9gCaM8wfvBk06H7isWw4AuaHdFH0+QQ=
 github.com/anatol/smart.go v0.0.0-20260427185427-04c4679efd4e h1:bpQpdTe8DkhjYimnPoH+T1XkjXtLwyNtENPjoh9oNcI=
 github.com/anatol/smart.go v0.0.0-20260427185427-04c4679efd4e/go.mod h1:PrHdljtLe/VXVRH+zAJOcPjHkOHjF8/T2Arblruu/ac=
 github.com/anatol/tang.go v0.0.0-20260314012254-926d9c91008f h1:MxryJtS/foSbnan9IrdaOK9MtK4lOXr5eOq0Ztn552o=
