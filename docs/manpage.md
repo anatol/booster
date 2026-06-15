@@ -396,14 +396,38 @@ For example if a user manually added `ext4` and kernel build system says `ext` m
 `mbcache` and `jbd2` automatically added to the image.
 
 ## Unified Kernel Image
-A [Unified Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary that bundles various boot components (e.g. kernel, initrd, and an UEFI boot stub) as a single executable.
-This allows for booting directly through the firmware (UEFI) as well as authenticating all of the boot components at once for Secure Boot.
+A [Unified Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary that bundles the boot components (kernel, initrd, kernel command line, and a UEFI boot stub) as a single executable.
+This allows booting directly through the firmware (UEFI) and authenticating all of the boot components at once for Secure Boot.
 
-To generate UKIs in Booster, please install the systemd UKI generator (systemd-ukify) from your distribution's package manager and use `/usr/lib/booster/regenerate_uki`.
-It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager, then passes the result to systemd's UKI generator (ukify) as input.
-The script only passes a subset of boot components, namely the system's microcode(s), initrd, os-release file, boot splash image and kernel. Kernel command-line entries of the UKI are inherited from `/etc/booster.yaml`.
+The recommended, cross-distribution way to build UKIs with Booster is through systemd's [kernel-install(8)](https://man7.org/linux/man-pages/man8/kernel-install.8.html). Booster ships a kernel-install plugin that generates the initrd; systemd's `ukify` plugin then assembles and optionally signs the UKI. Configure `/etc/kernel/install.conf`:
 
-Please note that to boot the UKI by default, it may be necessary to configure your system's boot loader configuration file(s) accordingly.
+    layout=uki
+    initrd_generator=booster
+    uki_generator=ukify
+
+The kernel command line is read from `/etc/kernel/cmdline` and embedded into the UKI:
+
+    # /etc/kernel/cmdline
+    rd.luks.uuid=<luks-uuid> root=UUID=<fs-uuid> rw
+
+Microcode and Secure Boot signing are configured in `/etc/kernel/uki.conf`, which `ukify` consumes (see [ukify(1)](https://man7.org/linux/man-pages/man1/ukify.1.html)):
+
+    [UKI]
+    Microcode=/boot/intel-ucode.img
+    SecureBootPrivateKey=/etc/kernel/secureboot/db.key
+    SecureBootCertificate=/etc/kernel/secureboot/db.crt
+
+Booster does not bundle CPU microcode into its initramfs, so point `Microcode=` at your distribution's early-microcode image (e.g. `/boot/intel-ucode.img` or `/boot/amd-ucode.img`); `ukify` adds it as the UKI's `.ucode` section. Set the kernel command line in `/etc/kernel/cmdline`, not in `uki.conf`.
+
+`ukify` can also sign TPM2 PCR policies (`PCRPrivateKey=`/`PCRBanks=`) for measured-boot binding.
+
+Distributions that already drive kernel installation through `kernel-install` (e.g. Fedora) build the UKI automatically. On Arch-based distributions, which use pacman hooks rather than `kernel-install`, a hook such as the AUR `pacman-hook-kernel-install` runs it on kernel updates; booster's own pacman hook can stay enabled (it then builds an unused plain initrd next to the UKI) or be disabled to avoid the redundant build.
+
+Embedding the command line matters for security. A UKI with no embedded command line accepts one from the boot loader at runtime, which is not part of the signed and measured image: an attacker could append e.g. `init=/bin/sh` and obtain a root shell on the decrypted filesystem after a TPM2 auto-unlock, because the measured boot chain — and therefore the TPM policy — is unchanged. When the command line is embedded it is measured into PCR 11, and under Secure Boot systemd-stub ignores any externally supplied command line.
+
+The legacy Arch-only helper `/usr/lib/booster/regenerate_uki` is deprecated: it does not embed the kernel command line and is therefore vulnerable to the injection described above. Prefer `kernel-install`.
+
+To boot the UKI by default you may also need to adjust your boot loader configuration.
 
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
@@ -489,9 +513,9 @@ So /boot/loader/entries/booster.conf should look like this:
 
 Booster has no built-in Btrfs subvolume default. If `subvol=` (or `subvolid=`) is omitted, the kernel mounts the filesystem's configured default subvolume — set with `btrfs subvolume set-default <id> <path>` — falling back to the top-level subvolume (ID 5) when no default has been configured. Distro conventions like `@` (Arch), `root` (some Debian-derived installers), or `@/.snapshots/N/snapshot` (openSUSE) must be set explicitly in your bootloader entry; both `subvol=NAME` and `subvolid=ID` are accepted.
 
-Create a Unified Kernel Image and write the result to /boot/EFI/Linux:
+Build a Unified Kernel Image via kernel-install (with `/etc/kernel/install.conf` configured for the UKI layout as described under UNIFIED KERNEL IMAGE):
 
-    $ /usr/lib/booster/regenerate_uki build /boot/EFI/Linux
+    # kernel-install add "$(uname -r)" /usr/lib/modules/"$(uname -r)"/vmlinuz
 
 ## COPYRIGHT
 Booster is Copyright (C) 2020 Anatol Pomazau <http://github.com/anatol>

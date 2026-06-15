@@ -25,6 +25,11 @@ usage() {
 }
 
 main() {
+  echo "regenerate_uki is DEPRECATED (booster#324) and will be removed in a future release." >&2
+  echo "It does not embed the kernel command line, so the resulting UKI is vulnerable to" >&2
+  echo "cmdline injection (e.g. init=/bin/sh) under TPM2 auto-unlock (booster#379)." >&2
+  echo "Use systemd kernel-install instead (layout=uki, initrd_generator=booster); see booster(1)." >&2
+
   local esp
   local package
   esp=$(pwd)
