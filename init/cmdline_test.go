@@ -43,6 +43,28 @@ func TestParseParams(t *testing.T) {
 	require.Equal(t, "7f28c723-fd6b-4640-bc94-9366edd8880d", cache.ref.data.(UUID).toString())
 }
 
+func TestParseParamsMeasurePCR(t *testing.T) {
+	const base = "rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"
+
+	luksMappings = nil
+	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=yes"))
+	require.Len(t, luksMappings, 1)
+	require.Equal(t, measurePCRForce, luksMappings[0].measurePCR)
+
+	luksMappings = nil
+	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=no"))
+	require.Equal(t, measurePCRDisabled, luksMappings[0].measurePCR)
+
+	// Unset on the cmdline leaves the auto default (crypttab/token-binding decides).
+	luksMappings = nil
+	require.NoError(t, parseParams(base))
+	require.Equal(t, measurePCRAuto, luksMappings[0].measurePCR)
+
+	// Invalid value is rejected (not silently dropped).
+	luksMappings = nil
+	require.Error(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=bogus"))
+}
+
 func TestGetNextParam(t *testing.T) {
 	type test struct {
 		input    string

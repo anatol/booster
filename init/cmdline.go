@@ -175,6 +175,7 @@ func parseParams(params string) error {
 	var luksOptions []string
 	var tokenTimeout time.Duration
 	var tokenTimeoutExplicit bool
+	measurePCR := measurePCRAuto
 
 	var key, value string
 	i := 0
@@ -252,6 +253,14 @@ func parseParams(params string) error {
 					}
 					tokenTimeout = d
 					tokenTimeoutExplicit = true
+					continue
+				}
+				if after, ok := strings.CutPrefix(o, "tpm2-measure-pcr="); ok {
+					s, valid := parseMeasurePCR(after)
+					if !valid {
+						return fmt.Errorf("invalid tpm2-measure-pcr in rd.luks.options: %q", after)
+					}
+					measurePCR = s
 					continue
 				}
 				// Accept fido2-device= and tpm2-device= for compatibility with
@@ -360,6 +369,9 @@ func parseParams(params string) error {
 		if tokenTimeoutExplicit {
 			luksMappings[i].tokenTimeout = tokenTimeout
 			luksMappings[i].tokenTimeoutExplicit = true
+		}
+		if measurePCR != measurePCRAuto {
+			luksMappings[i].measurePCR = measurePCR
 		}
 	}
 
