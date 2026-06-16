@@ -48,6 +48,10 @@ type luksMapping struct {
 	noFail        bool  // non-fatal unlock failure — boot continues on error
 	keyfileOffset int64 // bytes to skip at start of keyfile
 	keyfileSize   int64 // max bytes to read from keyfile (0 = all)
+
+	// measurePCR is the tpm2-measure-pcr= setting for the PCR15 latch.
+	// Zero value = measurePCRAuto (extend iff a token binds PCR15).
+	measurePCR measurePCRSetting
 }
 
 // tryPassphraseAgainstSlots tries password against each slot, sending the opened
@@ -881,6 +885,82 @@ func findMatchingFido2Device(credID []byte, relyingParty string, userVerificatio
 	return "", nil
 }
 
+// measurePCRSetting is the tpm2-measure-pcr= setting controlling the PCR15 latch.
+type measurePCRSetting int
+
+const (
+	measurePCRAuto     measurePCRSetting = iota // unset: extend iff a token binds PCR15
+	measurePCRForce                             // tpm2-measure-pcr=yes
+	measurePCRDisabled                          // tpm2-measure-pcr=no
+)
+
+func (s measurePCRSetting) String() string {
+	switch s {
+	case measurePCRForce:
+		return "yes"
+	case measurePCRDisabled:
+		return "no"
+	default:
+		return "auto"
+	}
+}
+
+// parseMeasurePCR maps a tpm2-measure-pcr= value to its setting; ok is false for
+// unrecognized values.
+func parseMeasurePCR(val string) (setting measurePCRSetting, ok bool) {
+	switch val {
+	case "yes":
+		return measurePCRForce, true
+	case "no":
+		return measurePCRDisabled, true
+	}
+	return measurePCRAuto, false
+}
+
+// tokenBindsPCR reports whether a systemd-tpm2 token's policy binds the given PCR.
+func tokenBindsPCR(t luks.Token, pcr int) bool {
+	if t.Type != "systemd-tpm2" {
+		return false
+	}
+	var node struct {
+		PCRs []int `json:"tpm2-pcrs"`
+	}
+	if err := json.Unmarshal(t.Payload, &node); err != nil {
+		return false
+	}
+	for _, p := range node.PCRs {
+		if p == pcr {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenBindsPCR15 reports whether a systemd-tpm2 token binds PCR15 — the signal
+// that the user enrolled the uninitialized-PCR15 latch.
+func tokenBindsPCR15(t luks.Token) bool {
+	return tokenBindsPCR(t, pcrSystemIdentity)
+}
+
+// shouldMeasureVolumeKey decides whether to extend PCR15: tpm2-measure-pcr=
+// overrides; otherwise extend iff a systemd-tpm2 token binds PCR15 (the
+// zero-config default).
+func shouldMeasureVolumeKey(tokens []luks.Token, setting measurePCRSetting) bool {
+	switch setting {
+	case measurePCRForce:
+		return true
+	case measurePCRDisabled:
+		return false
+	default:
+		for _, t := range tokens {
+			if tokenBindsPCR15(t) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"` // base64
@@ -1600,6 +1680,21 @@ func luksOpen(dev string, mapping *luksMapping) error {
 	}
 
 	module.Wait()
+
+	// PCR15 latch: once the volume key is recovered, extend PCR15 with the
+	// systemd-compatible volume-key measurement so a key sealed to an
+	// uninitialized PCR15 can't be re-unsealed for the rest of the boot. Done
+	// before SetupMapper/pivot. Fail closed: if a key bound to PCR15 can't be
+	// latched, abort rather than boot with the oracle left open.
+	if shouldMeasureVolumeKey(tokens, mapping.measurePCR) {
+		if err := measureVolumeKeyToPCR15(v, mapping.name, v.UUID); err != nil {
+			return fmt.Errorf("measuring volume key to PCR%d for %s: %v", pcrSystemIdentity, mapping.name, err)
+		}
+		debug("PCR%d re-unseal latch engaged for %s", pcrSystemIdentity, mapping.name)
+	} else {
+		debug("PCR%d latch not engaged for %s (tpm2-measure-pcr=%s; no token binds PCR%d)", pcrSystemIdentity, mapping.name, mapping.measurePCR, pcrSystemIdentity)
+	}
+
 	return v.SetupMapper(mapping.name)
 }
 
