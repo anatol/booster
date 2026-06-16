@@ -44,13 +44,13 @@ func (o *RootMountInfo) GetRootDevice() (error) {
 }
 
 func (o *RootMountInfo) GetBlockDeviceInfo(devPath string) (*BlockDeviceInfo, error) {
-	fpDevNum, err := os.Open(devPath + "/dev")
+	devNum, err := os.ReadFile(devPath + "/dev")
 	if err != nil {
 		return nil, err
 	}
 
 	var devMajor, devMinor uint32
-	num, err := fmt.Fscanf(fpDevNum, "%d:%d", &devMajor, &devMinor)
+	num, err := fmt.Sscanf(string(devNum), "%d:%d", &devMajor, &devMinor)
 	if err != nil {
 		return nil, err
 	}
