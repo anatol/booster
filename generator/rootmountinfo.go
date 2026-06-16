@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"strconv"
+	"strings"
 
 	"github.com/moby/sys/mountinfo"
 )
@@ -20,17 +20,17 @@ type RootMountInfo struct {
 }
 
 type BlockDeviceInfo struct {
-	name string
-	major uint32
-	minor uint32
+	name    string
+	major   uint32
+	minor   uint32
 	devtype string
 }
 
-func (o *RootMountInfo) GetSysfsPath(majmin string) (string) {
+func (o *RootMountInfo) GetSysfsPath(majmin string) string {
 	return "/sys/dev/block/" + majmin
 }
 
-func (o *RootMountInfo) GetRootDevice() (error) {
+func (o *RootMountInfo) GetRootDevice() error {
 	mnts, err := mountinfo.GetMounts(mountinfo.SingleEntryFilter("/"))
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func (o *RootMountInfo) GetDeviceParents(devPath string) ([]*BlockDeviceInfo, er
 	return devs, nil
 }
 
-func (o *RootMountInfo) realpath(path string) (string) {
+func (o *RootMountInfo) realpath(path string) string {
 	if resolvedPath, err := filepath.EvalSymlinks(path); err == nil {
 		if absPath, err := filepath.Abs(resolvedPath); err == nil {
 			return absPath
@@ -113,7 +113,7 @@ func (o *RootMountInfo) realpath(path string) (string) {
 	return path
 }
 
-func (o *BlockDeviceInfo) GetDeviceType(devPath string) (string) {
+func (o *BlockDeviceInfo) GetDeviceType(devPath string) string {
 	var devType []byte
 	var err error
 
