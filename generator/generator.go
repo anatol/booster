@@ -38,7 +38,7 @@ type generatorConfig struct {
 	readModprobeOptions     func() (map[string]string, error)
 	stripBinaries           bool
 	enableLVM               bool
-	autoEnableLVM		bool
+	autoEnableLVM           bool
 	enableMdraid            bool
 	mdraidConfigPath        string
 	enableZfs               bool
@@ -203,7 +203,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	// Detect if LVM is needed
 	if conf.autoEnableLVM {
-		if rootMount, err  := GetRootMountInfo(); err != nil {
+		if rootMount, err := GetRootMountInfo(); err != nil {
 			warning("Failed to automatically determine LVM requirement: %v", err)
 		} else {
 			for _, dev := range rootMount.parentDevices {
