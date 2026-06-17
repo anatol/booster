@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-tpm/legacy/tpm2"
@@ -169,6 +170,22 @@ func parsePCRBank(bank string) tpm2.Algorithm {
 // volume. Booster extends it after unseal to close the TPM re-unseal oracle.
 const pcrSystemIdentity = 15
 
+// pcrKernelBoot is PCR 11 ("kernel-boot"): systemd-stub measures the UKI's
+// sections into it at boot, and systemd-pcrphase extends boot-phase words into
+// it as barriers. A signed PCR policy binds the volume key to this PCR, so its
+// value at unseal must match systemd's — which, in the initrd, is the UKI
+// measurement plus the "enter-initrd" phase word.
+const pcrKernelBoot = 11
+
+// Boot-phase words measured into PCR 11. enter-initrd is extended before
+// unsealing a PCR11-bound volume so the live PCR matches systemd's signed
+// policy; leave-initrd after, at switch_root, as a forward-lock that bars
+// re-unsealing the initrd key once the host has taken over.
+const (
+	phaseEnterInitrd = "enter-initrd"
+	phaseLeaveInitrd = "leave-initrd"
+)
+
 // xescapeColon mirrors systemd's xescape(s, ":") (src/basic/escape.c): it
 // escapes ':' (the delimiter), '\\', control bytes (<0x20) and high/DEL bytes
 // (>=0x7f) as lowercase \xNN, copying everything else verbatim. Used to build
@@ -270,6 +287,66 @@ func measureVolumeKeyToPCR15(k volumeKeyHMACer, volumeName, luksUUID string) err
 	}
 	debug("PCR%d: extended across %d active bank(s) %v for %s", pcrSystemIdentity, len(banks), banks, volumeName)
 	return nil
+}
+
+// measurePhaseToPCR11 extends PCR11 with a boot-phase word, byte-compatible with
+// systemd-pcrextend (src/shared/tpm2-util.c tpm2_pcr_extend_bytes, secret=NULL):
+// for every active bank it extends bankHash(word) — the raw ASCII word, no NUL
+// terminator and a plain digest rather than the HMAC the PCR15 latch uses.
+// Booster, not being systemd, runs no systemd-pcrphase, so it extends
+// "enter-initrd" itself before unsealing a PCR11-bound key and "leave-initrd" at
+// switch_root; all active banks are extended so the policy can't be satisfied
+// via an un-extended bank. Fails closed: any extend error aborts the caller.
+func measurePhaseToPCR11(word string) error {
+	dev, err := openTPM()
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+
+	banks, err := activePCRBanks(dev)
+	if err != nil {
+		return fmt.Errorf("reading active PCR banks: %v", err)
+	}
+	if len(banks) == 0 {
+		return fmt.Errorf("no active PCR banks to extend")
+	}
+
+	for _, bank := range banks {
+		h, ok := cryptoHashForPCRBank(bank)
+		if !ok {
+			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcrKernelBoot)
+		}
+		hh := h.New()
+		hh.Write([]byte(word))
+		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcrKernelBoot), bank, hh.Sum(nil), ""); err != nil {
+			return fmt.Errorf("extending PCR%d in bank %v: %v", pcrKernelBoot, bank, err)
+		}
+	}
+	debug("PCR%d: extended phase %q across %d active bank(s) %v", pcrKernelBoot, word, len(banks), banks)
+	return nil
+}
+
+var (
+	enterInitrdOnce    sync.Once
+	enterInitrdErr     error
+	enterInitrdApplied bool // true once "enter-initrd" was extended, so switch_root can apply the "leave-initrd" forward-lock
+)
+
+// ensureEnterInitrdBarrier extends PCR11 with "enter-initrd" exactly once for the
+// boot, before the first PCR11-bound unseal, so the live PCR11 equals the value a
+// systemd signed policy (signed for the enter-initrd phase) is bound to.
+// systemd-pcrphase-initrd.service does this Before=cryptsetup.target; booster
+// runs no pcrphase, so it does it here. Idempotent across volumes and PIN
+// retries — PCR extension is monotonic, so extending twice would be the wrong
+// value. Fails closed: the error propagates so the caller aborts the unseal.
+func ensureEnterInitrdBarrier() error {
+	enterInitrdOnce.Do(func() {
+		if enterInitrdErr = measurePhaseToPCR11(phaseEnterInitrd); enterInitrdErr == nil {
+			enterInitrdApplied = true
+		}
+	})
+	return enterInitrdErr
 }
 
 // Returns session handle and policy digest.

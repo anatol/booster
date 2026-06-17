@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"net"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,12 +51,101 @@ func startSwtpmTCPForTest(t *testing.T) {
 
 func readPCR15(t *testing.T, bank tpm2.Algorithm) []byte {
 	t.Helper()
+	return readPCRIndex(t, bank, 15)
+}
+
+func readPCRIndex(t *testing.T, bank tpm2.Algorithm, idx int) []byte {
+	t.Helper()
 	dev, err := openTPM()
 	require.NoError(t, err)
 	defer dev.Close()
-	pcrs, err := tpm2.ReadPCRs(dev, tpm2.PCRSelection{Hash: bank, PCRs: []int{15}})
+	pcrs, err := tpm2.ReadPCRs(dev, tpm2.PCRSelection{Hash: bank, PCRs: []int{idx}})
 	require.NoError(t, err)
-	return pcrs[15]
+	return pcrs[idx]
+}
+
+// TestMeasurePhaseToPCR11 pins the boot-phase barrier byte format: booster
+// extends PCR11 with a phase word exactly as systemd-pcrextend does — the raw
+// ASCII word (no NUL terminator, no HMAC, unlike the PCR15 volume-key
+// measurement), hashed per active bank, then PCR-extended. This is what makes a
+// PCR11-bound (signed) key match systemd's "enter-initrd" phase value at unlock.
+// Expected values are pinned to systemd's formula (src/shared/tpm2-util.c
+// tpm2_pcr_extend_bytes with secret=NULL):
+//
+//	extend value = bankHash(word)              // e.g. SHA256("enter-initrd")
+//	PCR11_new    = bankHash(PCR11_old || extend value)
+func TestMeasurePhaseToPCR11(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	require.Equal(t, make([]byte, 32), readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "sha256:11 must start zero")
+	require.Equal(t, make([]byte, 20), readPCRIndex(t, tpm2.AlgSHA1, pcrKernelBoot), "sha1:11 must start zero")
+
+	require.NoError(t, measurePhaseToPCR11(phaseEnterInitrd))
+
+	// sha256 bank: PCR11 = SHA256(zeros32 || SHA256("enter-initrd"))
+	d256 := sha256.Sum256([]byte(phaseEnterInitrd))
+	e256 := sha256.New()
+	e256.Write(make([]byte, 32))
+	e256.Write(d256[:])
+	require.Equal(t, e256.Sum(nil), readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot),
+		"sha256 bank must extend PCR11 with the plain SHA256(word), no NUL, no HMAC")
+
+	// sha1 bank: PCR11 = SHA1(zeros20 || SHA1("enter-initrd")) — all active banks.
+	d1 := sha1.Sum([]byte(phaseEnterInitrd))
+	e1 := sha1.New()
+	e1.Write(make([]byte, 20))
+	e1.Write(d1[:])
+	require.Equal(t, e1.Sum(nil), readPCRIndex(t, tpm2.AlgSHA1, pcrKernelBoot),
+		"sha1 bank must be extended too (a policy satisfiable via an un-extended bank is bypassable)")
+}
+
+// TestMeasurePhaseToPCR11FailsClosedWhenTPMUnavailable pins the fail-safe
+// contract: if the phase barrier cannot be applied, the extend must error so the
+// caller aborts rather than unsealing against an un-barriered PCR11. Here the TPM
+// is unreachable (emulator dial to :2321 with no swtpm running).
+func TestMeasurePhaseToPCR11FailsClosedWhenTPMUnavailable(t *testing.T) {
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	require.Error(t, measurePhaseToPCR11(phaseEnterInitrd),
+		"phase barrier must fail closed when it cannot be applied")
+}
+
+func resetEnterInitrdBarrier() {
+	enterInitrdOnce = sync.Once{}
+	enterInitrdErr = nil
+	enterInitrdApplied = false
+}
+
+// TestEnsureEnterInitrdBarrierOnce pins the idempotency the unlock path relies
+// on: the barrier extends "enter-initrd" into PCR11 exactly ONCE per boot, no
+// matter how many PCR11-bound volumes or PIN retries call it. PCR extension is
+// monotonic, so a second extend would push PCR11 to the wrong value and break
+// every signed unseal. It must also record that it ran, so switch_root can apply
+// the matching "leave-initrd" forward-lock.
+func TestEnsureEnterInitrdBarrierOnce(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+	resetEnterInitrdBarrier()
+	t.Cleanup(resetEnterInitrdBarrier)
+
+	require.NoError(t, ensureEnterInitrdBarrier())
+	require.True(t, enterInitrdApplied, "barrier must record that it ran (for the leave-initrd forward-lock)")
+
+	d := sha256.Sum256([]byte(phaseEnterInitrd))
+	e := sha256.New()
+	e.Write(make([]byte, 32))
+	e.Write(d[:])
+	want := e.Sum(nil)
+	require.Equal(t, want, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "first call extends enter-initrd")
+
+	// Repeated calls must NOT extend again — PCR11 stays put.
+	require.NoError(t, ensureEnterInitrdBarrier())
+	require.NoError(t, ensureEnterInitrdBarrier())
+	require.Equal(t, want, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "barrier must extend exactly once per boot")
 }
 
 // rawKeyHMACer is a test volumeKeyHMACer backed by a raw key, mirroring what
