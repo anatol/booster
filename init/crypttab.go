@@ -146,6 +146,10 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid tpm2-measure-pcr= value %q", name, val)
 					}
 					m.measurePCR = s
+				case strings.HasPrefix(opt, "tpm2-signature="):
+					// signed PCR policy: path to a systemd PCR signature JSON,
+					// "false" to disable, unset to auto-discover.
+					m.tpm2Signature = opt[len("tpm2-signature="):]
 				case strings.HasPrefix(opt, "token-timeout="):
 					d, err := parseTokenTimeout(opt[14:])
 					if err != nil {
@@ -229,6 +233,9 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 	}
 	if dst.measurePCR == measurePCRAuto && src.measurePCR != measurePCRAuto {
 		dst.measurePCR = src.measurePCR
+	}
+	if dst.tpm2Signature == "" && src.tpm2Signature != "" {
+		dst.tpm2Signature = src.tpm2Signature
 	}
 	dst.options = append(dst.options, src.options...)
 }
