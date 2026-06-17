@@ -151,7 +151,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
     * **Initramfs file** — an absolute path (e.g. `/etc/luks/root.hdr`) to a header file bundled into the initramfs at build time via `extra_files`.
     * **Raw block device** — a device path (e.g. `/dev/sdb`) where the LUKS header begins at byte offset 0. Booster waits for the device to appear and passes it directly to cryptsetup without mounting.
     * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
- * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`. `token-timeout=<duration>` sets how long to wait for hardware tokens (FIDO2, TPM2) before also prompting for a keyboard passphrase. Accepts a decimal number followed by a unit (`s`, `m`, `h`), or a bare integer treated as seconds. Default is 30 s. `tpm2-measure-pcr=yes` or `tpm2-measure-pcr=no` forces or suppresses the PCR 15 re-unseal latch for the device (see **TPM2 unlock and the PCR 15 latch**); the command-line value takes precedence over crypttab. `tpm2-signature=<path>` (or `false`) selects or disables the PCR signature file for a signed (authorized) policy enrollment.
+ * `rd.luks.options=opt1,opt2` a comma-separated list of LUKS flags. Supported options are `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`. `token-timeout=<duration>` sets how long to wait for hardware tokens (FIDO2, TPM2) before also prompting for a keyboard passphrase. Accepts a decimal number followed by a unit (`s`, `m`, `h`), or a bare integer treated as seconds. Default is 30 s. `tpm2-measure-pcr=yes` or `tpm2-measure-pcr=no` forces or suppresses the PCR 15 re-unseal latch for the device (see **TPM2 auto-unlock and supplantation defense**); the command-line value takes precedence over crypttab. `tpm2-signature=<path>` (or `false`) selects or disables the PCR signature file for a signed (authorized) policy enrollment.
     Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any command-line options are added on top of the persistent flags.
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  * `resume=$deviceref` device reference to suspend-to-disk device.
@@ -255,8 +255,8 @@ Booster-specific behaviour for selected options:
  * **`header=`** — if the path is a plain absolute path the generator bundles the file into the initramfs automatically. The `/path:deviceref` form mounts the device at boot; `/dev/...` uses the raw block device directly.
  * **`fido2-device=`** — when this option appears in a crypttab entry, the generator automatically bundles `fido2plugin.so`; no `enable_fido2: true` in the config file is required. Both `fido2-device=` and `tpm2-device=` are otherwise accepted for compatibility; booster discovers enrolled tokens from the LUKS2 header, not from the crypttab option value.
  * **`keyfile-timeout=`** / **`token-timeout=`** — accept a bare integer (seconds) or any duration string accepted by Go's `time.ParseDuration` (e.g. `30s`, `2m`).
- * **`tpm2-measure-pcr=`** — `yes` or `no`. Overrides the PCR 15 re-unseal latch (see **TPM2 unlock and the PCR 15 latch**). When unset, booster extends PCR 15 automatically if the device's `systemd-tpm2` token is bound to PCR 15; `yes` forces the extend, `no` suppresses it. The same option on the kernel command line (`rd.luks.options=`) takes precedence.
- * **`tpm2-signature=`** — path to a systemd PCR signature JSON for a signed (authorized) PCR policy (see **TPM2 unlock and the PCR 15 latch**); `false` disables signed-policy unlock. When unset, booster reads the signature that systemd-stub unpacks from the UKI into the initramfs at `/.extra/tpm2-pcr-signature.json`. **A non-UKI boot populates no such file**, so there you must supply it explicitly with `tpm2-signature=<path>` (generate it with `systemd-measure sign`) or signed-policy unlock falls through to the passphrase. Also accepted on the kernel command line via `rd.luks.options=`.
+ * **`tpm2-measure-pcr=`** — `yes` or `no`. Overrides the PCR 15 re-unseal latch (see **TPM2 auto-unlock and supplantation defense**). When unset, booster extends PCR 15 automatically if the device's `systemd-tpm2` token is bound to PCR 15; `yes` forces the extend, `no` suppresses it. The same option on the kernel command line (`rd.luks.options=`) takes precedence.
+ * **`tpm2-signature=`** — path to a systemd PCR signature JSON for a signed (authorized) PCR policy (see **TPM2 auto-unlock and supplantation defense**); `false` disables signed-policy unlock. When unset, booster reads the signature that systemd-stub unpacks from the UKI into the initramfs at `/.extra/tpm2-pcr-signature.json`. **A non-UKI boot populates no such file**, so there you must supply it explicitly with `tpm2-signature=<path>` (generate it with `systemd-measure sign`) or signed-policy unlock falls through to the passphrase. Also accepted on the kernel command line via `rd.luks.options=`.
 
 ## REMOTE UNLOCK
 
@@ -401,50 +401,34 @@ For example if a user manually added `ext4` and kernel build system says `ext` m
 A [Unified Kernel Image](https://uapi-group.org/specifications/specs/unified_kernel_image/) (UKI) is a PE binary that bundles the boot components (kernel, initrd, kernel command line, and a UEFI boot stub) as a single executable.
 This allows booting directly through the firmware (UEFI) and authenticating all of the boot components at once for Secure Boot.
 
-The recommended, cross-distribution way to build UKIs with Booster is through systemd's [kernel-install(8)](https://man7.org/linux/man-pages/man8/kernel-install.8.html). Booster ships a kernel-install plugin that generates the initrd; systemd's `ukify` plugin then assembles and optionally signs the UKI. Configure `/etc/kernel/install.conf`:
-
-    layout=uki
-    initrd_generator=booster
-    uki_generator=ukify
-
-The kernel command line is read from `/etc/kernel/cmdline` and embedded into the UKI:
-
-    # /etc/kernel/cmdline
-    rd.luks.uuid=<luks-uuid> root=UUID=<fs-uuid> rw
-
-Microcode and Secure Boot signing are configured in `/etc/kernel/uki.conf`, which `ukify` consumes (see [ukify(1)](https://man7.org/linux/man-pages/man1/ukify.1.html)):
-
-    [UKI]
-    Microcode=/boot/intel-ucode.img
-    SecureBootPrivateKey=/etc/kernel/secureboot/db.key
-    SecureBootCertificate=/etc/kernel/secureboot/db.crt
-
-Booster does not bundle CPU microcode into its initramfs, so point `Microcode=` at your distribution's early-microcode image (e.g. `/boot/intel-ucode.img` or `/boot/amd-ucode.img`); `ukify` adds it as the UKI's `.ucode` section. Set the kernel command line in `/etc/kernel/cmdline`, not in `uki.conf`.
-
-`ukify` can also sign TPM2 PCR policies (`PCRPrivateKey=`/`PCRBanks=`) for measured-boot binding.
+The recommended, cross-distribution way to build UKIs with Booster is through systemd's [kernel-install(8)](https://man7.org/linux/man-pages/man8/kernel-install.8.html): booster ships a kernel-install plugin that generates the initrd, and systemd's [ukify(1)](https://man7.org/linux/man-pages/man1/ukify.1.html) plugin assembles and optionally signs the UKI. See the **Unified Kernel Image** example under **EXAMPLES** for the concrete `install.conf`, the embedded `/etc/kernel/cmdline`, the `uki.conf`, and the build command. Booster does not bundle CPU microcode into its initramfs, so point `ukify`'s `Microcode=` at your distribution's early-microcode image (`/boot/intel-ucode.img` or `/boot/amd-ucode.img`). `ukify` can also Secure-Boot-sign the UKI and sign TPM2 PCR policies for measured-boot binding — see **TPM2 auto-unlock and supplantation defense** for what that buys you and the headless example for the configuration.
 
 Distributions that already drive kernel installation through `kernel-install` (e.g. Fedora) build the UKI automatically. On Arch-based distributions, which use pacman hooks rather than `kernel-install`, a hook such as the AUR `pacman-hook-kernel-install` runs it on kernel updates; booster's own pacman hook can stay enabled (it then builds an unused plain initrd next to the UKI) or be disabled to avoid the redundant build.
 
-Embedding the command line matters for security. A UKI with no embedded command line accepts one from the boot loader at runtime, which is not part of the signed and measured image: an attacker could append e.g. `init=/bin/sh` and obtain a root shell on the decrypted filesystem after a TPM2 auto-unlock, because the measured boot chain — and therefore the TPM policy — is unchanged. When the command line is embedded it is measured into PCR 11, and under Secure Boot systemd-stub ignores any externally supplied command line. PCR 11 is also the measurement a TPM2 key can be bound to so a supplanted kernel or initrd is rejected — see **TPM2 unlock and the PCR 15 latch** for binding and its fragility under kernel updates.
+Embedding the command line matters for security. A UKI with no embedded command line accepts one from the boot loader at runtime, which is not part of the signed and measured image: an attacker could append e.g. `init=/bin/sh` and obtain a root shell on the decrypted filesystem after a TPM2 auto-unlock, because the measured boot chain — and therefore the TPM policy — is unchanged. When the command line is embedded it is measured into PCR 11, and under Secure Boot systemd-stub ignores any externally supplied command line. PCR 11 is also the measurement a TPM2 key can be bound to so a supplanted kernel or initrd is rejected — see **TPM2 auto-unlock and supplantation defense** for binding and its fragility under kernel updates.
 
 The legacy Arch-only helper `/usr/lib/booster/regenerate_uki` is deprecated: it does not embed the kernel command line and is therefore vulnerable to the injection described above. Prefer `kernel-install`.
 
 To boot the UKI by default you may also need to adjust your boot loader configuration.
 
-## TPM2 unlock and the PCR 15 latch
-When booster unseals a volume key from a `systemd-tpm2` token it extends PCR 15 — the "system-identity" PCR — with the same measurement systemd-cryptsetup writes for `tpm2-measure-pcr=yes`: `HMAC(volume_key, "cryptsetup:" + name + ":" + uuid)`, in every active PCR bank, before handing off to the real root. A TPM attests the boot *path*, not the data it releases, so a key sealed to an uninitialized PCR 15 can otherwise be unsealed again within the same boot; extending PCR 15 makes the unseal single-use.
+## TPM2 auto-unlock and supplantation defense
+Booster can unseal a LUKS volume key from a `systemd-tpm2` token and unlock the root with no passphrase. What makes pinless auto-unlock safe is the defense against *filesystem supplantation* — an attacker who boots a substituted kernel or initrd to make the TPM hand over the key. Booster seals the key to a chain of TPM PCRs measured across the boot; the TPM releases it only if every bound PCR matches. The bindings track the boot in order — the **Headless TPM2** example under **EXAMPLES** has the commands, and this section explains why each PCR is bound the way it is.
 
-The latch engages automatically when the token's policy is bound to PCR 15 — the enrollment is the signal, so no configuration is needed. `tpm2-measure-pcr=yes` (in crypttab or `rd.luks.options=`) forces the extend even when the token is not bound to PCR 15; `tpm2-measure-pcr=no` suppresses it. A measurement failure aborts the unlock (fail closed); `tpm2-measure-pcr=no` is the escape hatch for a deliberately TPM-less or non-latched device.
+**Secure Boot → PCR 7 (firmware-measured, bound live).** Before any OS code runs, firmware measures the Secure Boot policy into PCR 7, so a key bound to it is withheld if Secure Boot is disabled or its keys change. PCR 7 is bound to its *live* value — firmware produces the same measurement on the running host and in the initramfs — and is only meaningful with Secure Boot enabled and your own keys enrolled.
 
-**The latch is not a supplantation defense on its own.** PCR 15 resets to zero on every power cycle, so an attacker who reboots into a malicious initrd that dumps the key sees a fresh PCR 15 and can unseal again — unless the key is *also* bound to a PCR that covers the kernel and initrd. That is PCR 11, the UKI measurement (see **Unified Kernel Image**): a substituted kernel or initrd yields a different PCR 11 and the TPM refuses to release the key. Enroll the token against PCR 7 (Secure Boot state), 11 (the UKI), and 15, for example:
+**Kernel + initrd → PCR 11 (UKI measurement, signed).** Under a UKI, `systemd-stub` measures the kernel, initrd, embedded command line and other sections into PCR 11. This is the supplantation barrier itself: a substituted kernel or initrd produces a different PCR 11 and the TPM withholds the key. systemd then advances PCR 11 through boot *phases* and unlocks the root at the `enter-initrd` phase; booster runs no `systemd-pcrphase`, so it extends `enter-initrd` into PCR 11 itself just before the unseal so the live value matches the signed one (keep `ukify`'s default phases — a `Phases=` that drops `enter-initrd` yields a signature booster cannot match). PCR 11 must be bound through a **signed (authorized) policy**, never literally: a literal `--tpm2-pcrs=11` records the host's fully phase-advanced value, which booster never reproduces in the initrd, so it would never unseal. With a signed policy (`--tpm2-public-key=`), `ukify`/`systemd-measure` re-sign the new PCR 11 value on every build, so the same sealed blob keeps unsealing across kernel and initrd updates with no re-enrollment. Booster reads the signature from `/.extra/tpm2-pcr-signature.json` (unpacked from the UKI by systemd-stub); a non-UKI boot must supply it with `tpm2-signature=<path>`. RSA keys only.
 
-    # systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7+11+15 /dev/sda2
+**The unseal.** The TPM releases the key only when PCR 7, the signed PCR 11, and PCR 15 all match — plus a PIN if one is enrolled. The token composes the checks in systemd's order: `TPM2_PolicyAuthorize` (signed PCR 11), then `TPM2_PolicyPCR` (literal PCR 7 and 15), then `TPM2_PolicyAuthValue` (PIN) — so one token can carry signed PCR 11, live PCR 7, the PCR 15 latch and a PIN together.
 
-See [systemd-cryptenroll(1)](https://man7.org/linux/man-pages/man1/systemd-cryptenroll.1.html). PCR 7 records the Secure Boot policy, so the binding also refuses the key if Secure Boot is disabled or its keys change — it is only meaningful with Secure Boot enabled. PCR 11 is only populated with the kernel and initrd measurement when the kernel boots as a UKI; without one the co-binding is hollow. Bind PCR 15 while it is still uninitialized (its state on a normal boot before any volume's latch has run); the value the latch later writes is derived from the volume key and cannot be predicted in advance.
+**Single-use latch → PCR 15.** PCR 15 is zero at power-on, and the key is sealed to that **virgin all-zero** value — so it unseals only while PCR 15 is still zero. The moment it unseals, booster extends PCR 15 — the "system-identity" PCR — with `HMAC(volume_key, "cryptsetup:" + name + ":" + uuid)` in every active bank (the measurement systemd-cryptsetup writes for `tpm2-measure-pcr=yes`); PCR 15 is now non-zero, so the same blob cannot be unsealed again this boot — the latch is closed, making each unseal single-use. (A TPM attests the boot path, not the data it releases, so without this the key could be re-unsealed within the same boot.) The latch engages automatically when the token binds PCR 15; `tpm2-measure-pcr=yes`/`no` (crypttab or `rd.luks.options=`) force or suppress it, and a measurement failure aborts the unlock (fail closed). Enroll against the all-zero value, not PCR 15's *live* host value — `systemd-pcrmachine`/`systemd-pcrfs` and the latch itself advance it past zero on a running host, but booster always unseals at the power-on zero (`15:sha256=<zeros>`, see the example). The HMAC the latch writes is volume-key-derived and unpredictable, so it is never itself part of the binding.
 
-**Re-enrollment on kernel updates, and how to avoid it.** A *literal* PCR binding pins the key to one exact kernel+initrd: every kernel or initrd change alters PCR 11 and the token must be re-enrolled (see **TPM recovery**). Avoid this with a **signed (authorized) policy** — enroll with `systemd-cryptenroll --tpm2-public-key=` so the key is bound to a public key instead of to literal PCR values. `ukify`/`systemd-measure` then re-sign the new PCR values into a signature on each build, and the *same* sealed blob keeps unsealing with no re-enrollment. Booster reads that signature from `/.extra/tpm2-pcr-signature.json` — the section systemd-stub unpacks from the UKI into the initramfs — so a UKI boot needs no configuration; a non-UKI boot has no such file and must point booster at one with `tpm2-signature=<path>`. Booster satisfies the policy with `TPM2_PolicyAuthorize`. RSA signing keys only. A PIN may be combined with a signed policy (the policy then chains `TPM2_PolicyAuthorize` and `TPM2_PolicyAuthValue`), giving the TPM+PIN+PCR setup with no re-enrollment on kernel updates.
+**Forward-lock → PCR 11 (at switch_root).** Handing off to the real root, booster extends `leave-initrd` into PCR 11, advancing it so the key can no longer be unsealed once the host has taken over — the phase-based counterpart of the PCR 15 latch.
 
-**TPM recovery.** Until you re-enroll — and on any other PCR mismatch — a passphrase keyslot is the fallback: it unlocks regardless of PCR state. On an interactive system it is typed at the console; on a headless or remote machine it can be submitted over the network via booster's **Remote Unlock** (SSH). Where someone is present at unlock, a TPM2-PIN (`systemd-cryptenroll --tpm2-with-pin=yes`) is recommended.
+**Why all three PCRs.** The PCR 15 latch alone is not a supplantation defense — PCR 15 resets to zero on every power cycle, so an attacker who reboots into a malicious initrd sees a fresh PCR 15 and could unseal again. PCR 11 is what stops that (a substituted kernel or initrd changes it), PCR 7 anchors the chain to Secure Boot, and the PCR 15 latch makes each unseal single-use within a boot.
+
+**Recovery.** On any PCR mismatch — a kernel or firmware change, a hardware swap, or tampering — a passphrase keyslot is the fallback: it unlocks regardless of PCR state, typed at the console or, on a headless box, submitted over the network via booster's **Remote Unlock** (SSH). Where someone is present at unlock, a TPM2 PIN (`systemd-cryptenroll --tpm2-with-pin=yes`) adds an off-TPM secret.
+
+**Multiple volumes.** *Secondary* volumes need no TPM token of their own — TPM-unlock the root, store a keyfile on it, and unlock the rest from that keyfile through the running system's `/etc/crypttab` (keyfile entries, not `x-initrd.attach`). A *multi-device root* (e.g. btrfs RAID), where every member must unlock in the initramfs, instead binds each member to **signed PCR 11 + PCR 7** *without* the PCR 15 latch: the latch is single-volume — the first member to unseal dirties PCR 15, so the rest, sealed to zero, then fail. If such members were already enrolled binding PCR 15, set `tpm2-measure-pcr=no` to suppress the latch so they all unseal.
 
 ## DEBUGGING
 If you have a problem with booster boot tool you can enable debug mode to get more
@@ -468,6 +452,8 @@ The logs will be in `/srv/atftp` on the server.
 If you got `booster: Timeout waiting for root filesystem` error please add `append_all_modaliases` config flag and rebuild the image. With this flag you'll get a list of modules that were requested by the kernel but absent in the booster image. Some of these modules might be required to boot your system.
 
 ## EXAMPLES
+
+### Building images
 Create an initramfs file specific for the current kernel/host. The output file is booster.img:
 
     $ booster build booster.img
@@ -480,6 +466,7 @@ Create an initramfs for kernel version 5.4.91-1-lts and copy it to /boot/booster
 
     $ booster build --kernel-version 5.4.91-1-lts /boot/booster-lts.img
 
+### systemd-boot entry
 Here is a `systemd-boot` configuration stored at /boot/loader/entries/booster.conf. In this example e122d09e-87a9-4b35-83f7-2592ef40cefa is a UUID for the LUKS partition and 08684949-bcbb-47bb-1c17-089aaa59e17e is a UUID for the encrypted filesystem (e.g. ext4). Please refer to your bootloader documentation for more info about its configuration.
 
     title Linux with Booster
@@ -487,6 +474,7 @@ Here is a `systemd-boot` configuration stored at /boot/loader/entries/booster.co
     initrd /booster-linux.img
     options rd.luks.uuid=e122d09e-87a9-4b35-83f7-2592ef40cefa root=UUID=08684949-bcbb-47bb-1c17-089aaa59e17e rw
 
+### FIDO2 unlock
 For hardware-token unlock with a FIDO2 device, enroll the LUKS slot once with `systemd-cryptenroll`:
 
     $ systemd-cryptenroll --fido2-device=auto /dev/sda2
@@ -502,6 +490,7 @@ The bootloader entry points `root=` at the future mapper node:
     initrd /booster-linux.img
     options root=/dev/mapper/cryptroot rw
 
+### GPT root autodiscovery
 Boot with no `root=` on the kernel cmdline at all using GPT autodiscovery. Tag the root partition with the per-architecture GUID — on x86-64 that's `4f68bce3-e8cd-4db1-96e7-fbcaf984b709`:
 
     $ sgdisk --typecode=2:4f68bce3-e8cd-4db1-96e7-fbcaf984b709 /dev/sda
@@ -517,6 +506,7 @@ The bootloader entry then carries only the mount-style flags:
     initrd /booster-linux.img
     options rw
 
+### Btrfs subvolume root
 Users of the Btrfs filesystem with a system installed on a subvolume should add rootflags corresponding to their entry in /etc/fstab. In this example 69bc4dd2-7f6c-4821-aa6b-d80d9c97d470 is a UUID for Btrfs partition, with the system installed on subvolume called root and /etc/fstab looks like this:
 
     UUID=69bc4dd2-7f6c-4821-aa6b-d80d9c97d470	/         	btrfs     	rw,relatime,autodefrag,compress=zstd:2,space_cache,subvol=root	0 0
@@ -530,29 +520,66 @@ So /boot/loader/entries/booster.conf should look like this:
 
 Booster has no built-in Btrfs subvolume default. If `subvol=` (or `subvolid=`) is omitted, the kernel mounts the filesystem's configured default subvolume — set with `btrfs subvolume set-default <id> <path>` — falling back to the top-level subvolume (ID 5) when no default has been configured. Distro conventions like `@` (Arch), `root` (some Debian-derived installers), or `@/.snapshots/N/snapshot` (openSUSE) must be set explicitly in your bootloader entry; both `subvol=NAME` and `subvolid=ID` are accepted.
 
-Build a Unified Kernel Image via kernel-install (with `/etc/kernel/install.conf` configured for the UKI layout as described under UNIFIED KERNEL IMAGE):
+### Unified Kernel Image
+Build a UKI through systemd's `kernel-install` (see **Unified Kernel Image** for why). Set the layout in `/etc/kernel/install.conf`:
+
+    layout=uki
+    initrd_generator=booster
+    uki_generator=ukify
+
+Put the kernel command line — including `rd.luks.uuid=` and `root=` — in `/etc/kernel/cmdline`, so it is embedded and measured rather than supplied untrusted by the boot loader:
+
+    rd.luks.uuid=<luks-uuid> root=UUID=<fs-uuid> rw
+
+Point `ukify` at your microcode in `/etc/kernel/uki.conf` (omit if your distribution bundles microcode another way):
+
+    [UKI]
+    Microcode=/boot/amd-ucode.img   # or intel-ucode.img; optional
+
+Build it:
 
     # kernel-install add "$(uname -r)" /usr/lib/modules/"$(uname -r)"/vmlinuz
 
-Headless server: pinless TPM2 auto-unlock with SSH recovery (see **TPM2 unlock and the PCR 15 latch** for the rationale and caveats). The box unseals from the TPM unattended; if the TPM withholds the key for any reason — a kernel or firmware change, a hardware swap, or tampering — the volume waits for the passphrase, which is supplied over SSH. Enroll the TPM pinless, co-bound to the Secure Boot state, the UKI, and the system-identity PCR; keep the existing passphrase keyslot as the recovery credential:
+No `/etc/crypttab` entry is needed: the embedded `rd.luks.uuid=` unlocks the LUKS device and `root=UUID=` mounts the decrypted filesystem. (You only need crypttab to set per-volume options or a fixed mapper name — see **CRYPTTAB**.)
 
-    # systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7+11+15 /dev/sda2
+### Headless TPM2 auto-unlock with SSH recovery
+Pinless TPM2 auto-unlock for a headless box, building on the **Unified Kernel Image** example above (see **TPM2 auto-unlock and supplantation defense** for the rationale and caveats). The box unseals from the TPM unattended; if the TPM withholds the key — a kernel or firmware change, a hardware swap, or tampering — the volume waits for the passphrase, supplied over SSH. The binding (signed PCR 11, live PCR 7, all-zero PCR 15) is what makes it both correct and maintenance-free across kernel updates.
 
-The crypttab entry needs no extra option — the token is read from the LUKS header and the latch engages because it is bound to PCR 15:
+1. Generate an RSA key pair to sign the PCR policy with. The mechanism is RSA-only (`--tpm2-public-key=` and booster both require RSA); 2048 bits is the universally TPM-supported floor, 3072/4096 for more margin if your TPM supports it:
 
-    cryptroot  UUID=<luks-uuid>  none  x-initrd.attach
+        # openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -out /etc/kernel/pcr-private.pem
+        # openssl rsa -pubout -in /etc/kernel/pcr-private.pem -out /etc/kernel/pcr-public.pem
 
-Enable remote unlock in `/etc/booster.yaml` with a dedicated initramfs host key and the operator's public key (see **Remote Unlock**):
+2. Extend the `/etc/kernel/uki.conf` from the UKI example — add the Secure Boot keys to its `[UKI]` section and a new `[PCRSignature:initrd]` section (`ukify` accepts the trailing `#` comments). **Secure Boot signing** makes the UKI trusted, so the **PCR 7** binding is meaningful — Secure Boot must be enabled in firmware with your keys, or that binding is hollow. The `db` key/certificate are *your own* Secure Boot signing keys, not auto-created — generate and enroll them with a tool such as `sbctl` (`sbctl create-keys`, then `sbctl enroll-keys` with the firmware in Secure Boot setup mode), then point these paths at the result (sbctl puts them under `/var/lib/sbctl/keys/db/`). It is a one-time setup independent of booster; see your distribution's Secure Boot documentation. **PCR signing** embeds the `.pcrsig` section and re-signs the **PCR 11** value on every build:
 
-    network:
-      dhcp: on
-      ssh_host_key: /etc/booster/ssh_host_ed25519_key
-      ssh_authorized_keys: /etc/booster/authorized_keys
+        [UKI]
+        Microcode=/boot/amd-ucode.img                         # or intel-ucode.img; optional
+        SecureBootPrivateKey=/etc/kernel/secureboot/db.key    # backs PCR 7
+        SecureBootCertificate=/etc/kernel/secureboot/db.crt   # backs PCR 7
+        PCRBanks=sha256
 
-Build the kernel as a UKI so PCR 11 is populated (see **Unified Kernel Image**). Booster binds a literal PCR policy and does not consume systemd's signed-policy auto-resign, so a change to a bound PCR (a kernel update moves PCR 11) needs re-enrollment — done over SSH:
+        [PCRSignature:initrd]
+        PCRPrivateKey=/etc/kernel/pcr-private.pem             # signs PCR 11
+        PCRPublicKey=/etc/kernel/pcr-public.pem               # signs PCR 11
 
-    $ ssh root@host        # submit the LUKS passphrase to finish boot
-    # systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+11+15 /dev/sda2
+3. Rebuild the UKI so PCR 11 is populated and the signature embedded (PCR 7 is measured by firmware at boot, not here):
+
+        # kernel-install add "$(uname -r)" /usr/lib/modules/"$(uname -r)"/vmlinuz
+
+4. Enroll the TPM pinless — PCR 7 (Secure Boot state, live), signed PCR 11, and the all-zero PCR 15 latch (see **TPM2 auto-unlock and supplantation defense** for why 7 is live but 15 is zeros; `15:sha256=` takes PCR 15's full 32-byte value, here 64 hex zeros). Keep the passphrase keyslot as recovery — do not wipe it. At boot booster auto-discovers this token, reads the signature the stub unpacked from the UKI, and engages the PCR 15 latch — no crypttab entry or extra configuration:
+
+        # systemd-cryptenroll --tpm2-device=auto \
+              --tpm2-pcrs=7+15:sha256=0000000000000000000000000000000000000000000000000000000000000000 \
+              --tpm2-public-key=/etc/kernel/pcr-public.pem --tpm2-public-key-pcrs=11 /dev/sda2
+
+5. Enable remote unlock in `/etc/booster.yaml` (see **Remote Unlock**):
+
+        network:
+          dhcp: on
+          ssh_host_key: /etc/booster/ssh_host_ed25519_key
+          ssh_authorized_keys: /etc/booster/authorized_keys
+
+Kernel updates need no re-enrollment — `ukify` re-signs PCR 11 on each build, so the same token keeps unsealing. If the TPM ever withholds the key (e.g. a Secure Boot change moves PCR 7), the box falls back to the passphrase, which you submit over SSH (step 5); once unlocked, re-enroll the token or fix the TPM state.
 
 ## COPYRIGHT
 Booster is Copyright (C) 2020 Anatol Pomazau <http://github.com/anatol>
