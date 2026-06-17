@@ -181,12 +181,6 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	if bankName == "" {
 		return nil, fmt.Errorf("systemd-tpm2 token has no PCR bank")
 	}
-	if len(pin) > 0 {
-		// Signed policy + PIN needs PolicyAuthValue plus the PIN carried in the
-		// unseal session auth; not yet wired. Reject so the caller falls through
-		// to the next unlock method rather than silently mis-unsealing.
-		return nil, fmt.Errorf("signed PCR policy with a TPM2 PIN is not yet supported")
-	}
 	sigs, err := parseSignatureJSON(sigJSON)
 	if err != nil {
 		return nil, err
@@ -203,7 +197,7 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	// feeds the key Name that PolicyAuthorize checks, so try 0x10001 then 0.
 	var lastErr error
 	for _, exp := range []uint32{0x10001, 0} {
-		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, pubkeyPCRs)
+		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, pubkeyPCRs, pin)
 		if err == nil {
 			return out, nil
 		}
@@ -212,8 +206,14 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	return nil, lastErr
 }
 
-func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, pubkeyPCRs []int) ([]byte, error) {
-	sess, cleanup, err := tpm2.PolicySession(t, tpm2.TPMAlgSHA256, 16)
+func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, pubkeyPCRs []int, pin []byte) ([]byte, error) {
+	// With a PIN, the session carries the object's auth value so the trailing
+	// PolicyAuthValue (composed after PolicyAuthorize, matching systemd) is satisfied.
+	var sessOpts []tpm2.AuthOption
+	if len(pin) > 0 {
+		sessOpts = append(sessOpts, tpm2.Auth(pin))
+	}
+	sess, cleanup, err := tpm2.PolicySession(t, tpm2.TPMAlgSHA256, 16, sessOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +268,12 @@ func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string]
 		return nil, fmt.Errorf("PolicyAuthorize: %v", err)
 	}
 
+	if len(pin) > 0 {
+		if _, err := (&tpm2.PolicyAuthValue{PolicySession: sess.Handle()}).Execute(t); err != nil {
+			return nil, fmt.Errorf("PolicyAuthValue: %v", err)
+		}
+	}
+
 	unseal, err := (&tpm2.Unseal{ItemHandle: tpm2.AuthHandle{
 		Handle: obj.Handle,
 		Name:   obj.Name,
@@ -314,13 +320,11 @@ func loadSignedSRK(t transport.TPM, srkHandle uint32) (tpm2.NamedHandle, func(),
 }
 
 // recoverSignedTPM2Password unseals a signed-policy systemd-tpm2 token. The
-// caller supplies the parsed blob sections, SRK handle, bank, and signing key;
-// this builds the new-API types, opens the TPM, and runs the PolicyAuthorize
-// unseal. Returns the base64-encoded volume key, matching the literal path.
-func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubkeyPCRs []int, verifyKey *rsa.PublicKey, srkHandle uint32, tpm2Signature string, hasPin bool) ([]byte, error) {
-	if hasPin {
-		return nil, fmt.Errorf("signed PCR policy with a TPM2 PIN is not yet supported")
-	}
+// caller supplies the parsed blob sections, SRK handle, bank, signing key, and
+// the PIN auth value (nil when the token has no PIN); this builds the new-API
+// types, opens the TPM, and runs the PolicyAuthorize unseal. Returns the raw
+// volume key (the caller base64-encodes, matching the literal path).
+func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubkeyPCRs []int, verifyKey *rsa.PublicKey, srkHandle uint32, tpm2Signature string, pinAuth []byte) ([]byte, error) {
 	sigJSON, enabled, err := resolveSignature(tpm2Signature)
 	if err != nil {
 		return nil, err
@@ -347,9 +351,9 @@ func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubke
 	}
 	defer flush()
 
-	key, err := signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, pcrBankName, sigJSON, nil)
+	key, err := signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, pcrBankName, sigJSON, pinAuth)
 	if err != nil {
 		return nil, err
 	}
-	return []byte(base64.StdEncoding.EncodeToString(key)), nil
+	return key, nil
 }
