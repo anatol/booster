@@ -52,6 +52,10 @@ type luksMapping struct {
 	// measurePCR is the tpm2-measure-pcr= setting for the PCR15 latch.
 	// Zero value = measurePCRAuto (extend iff a token binds PCR15).
 	measurePCR measurePCRSetting
+
+	// tpm2Signature is the tpm2-signature= setting (signed PCR policy): a path to
+	// a systemd PCR signature JSON, "false" to disable, or "" to auto-discover.
+	tpm2Signature string
 }
 
 // tryPassphraseAgainstSlots tries password against each slot, sending the opened

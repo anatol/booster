@@ -134,6 +134,24 @@ func TestParseCrypttabMeasurePCR(t *testing.T) {
 	}
 }
 
+func TestParseCrypttabSignature(t *testing.T) {
+	const uuid = "UUID=ab6d7d78-b816-4495-928d-766d6607035e"
+	cases := []struct {
+		opt  string
+		want string
+	}{
+		{"", ""},
+		{" tpm2-signature=/etc/foo.json", "/etc/foo.json"},
+		{" tpm2-signature=false", "false"},
+	}
+	for _, c := range cases {
+		mappings, err := parseCrypttabReader(strings.NewReader("cryptroot " + uuid + " none" + c.opt + "\n"))
+		require.NoError(t, err, c.opt)
+		require.Len(t, mappings, 1)
+		require.Equal(t, c.want, mappings[0].tpm2Signature, c.opt)
+	}
+}
+
 func TestParseCrypttabMeasurePCRInvalid(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none tpm2-measure-pcr=maybe\n"
 	_, err := parseCrypttabReader(strings.NewReader(input))
