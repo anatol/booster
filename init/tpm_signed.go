@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/google/go-tpm/tpm2"
 )
 
 // pcrSignatureSearchPaths is the default location booster reads the PCR
@@ -121,4 +123,31 @@ func selectSignature(sigs map[string][]pcrSignature, bank string, pub *rsa.Publi
 		}
 	}
 	return pcrSignature{}, fmt.Errorf("no PCR signature for bank %q matching key %s and policy %s", bank, fp, want)
+}
+
+// rsaPublicArea builds the TPM public area for an external RSA verification key,
+// matching how systemd loads the signed-policy public key: SHA256 name algorithm,
+// NULL scheme and symmetric, sign+decrypt+userWithAuth. The TPM derives the key
+// Name from these exact fields, and that Name feeds the PolicyAuthorize digest, so
+// it must byte-match systemd's. The RSA exponent is encoded ambiguously across TPM
+// implementations: callers try 0x10001, then 0, because the Name differs between them.
+func rsaPublicArea(pub *rsa.PublicKey, exponent uint32) tpm2.TPMTPublic {
+	return tpm2.TPMTPublic{
+		Type:    tpm2.TPMAlgRSA,
+		NameAlg: tpm2.TPMAlgSHA256,
+		ObjectAttributes: tpm2.TPMAObject{
+			SignEncrypt:  true,
+			Decrypt:      true,
+			UserWithAuth: true,
+		},
+		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgRSA, &tpm2.TPMSRSAParms{
+			Symmetric: tpm2.TPMTSymDefObject{Algorithm: tpm2.TPMAlgNull},
+			Scheme:    tpm2.TPMTRSAScheme{Scheme: tpm2.TPMAlgNull},
+			KeyBits:   tpm2.TPMIRSAKeyBits(pub.N.BitLen()),
+			Exponent:  exponent,
+		}),
+		Unique: tpm2.NewTPMUPublicID(tpm2.TPMAlgRSA, &tpm2.TPM2BPublicKeyRSA{
+			Buffer: pub.N.Bytes(),
+		}),
+	}
 }

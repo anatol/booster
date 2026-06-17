@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-tpm/tpm2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,4 +105,27 @@ func TestResolveSignature(t *testing.T) {
 	_, enabled, err = resolveSignature("")
 	require.NoError(t, err)
 	require.False(t, enabled)
+}
+
+func TestRSAPublicArea(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	area := rsaPublicArea(&key.PublicKey, 0x10001)
+	require.Equal(t, tpm2.TPMAlgRSA, area.Type)
+	require.Equal(t, tpm2.TPMAlgSHA256, area.NameAlg)
+	require.True(t, area.ObjectAttributes.SignEncrypt)
+	require.True(t, area.ObjectAttributes.Decrypt)
+	require.True(t, area.ObjectAttributes.UserWithAuth)
+
+	// The modulus is embedded and the area marshals.
+	marshaled := tpm2.Marshal(area)
+	require.NotEmpty(t, marshaled)
+	require.True(t, bytes.Contains(marshaled, key.PublicKey.N.Bytes()), "modulus must be embedded in the public area")
+
+	// Exponent 0x10001 vs 0 marshal differently — the reason the unseal path retries
+	// with 0 when the key Name doesn't match.
+	require.NotEqual(t,
+		tpm2.Marshal(rsaPublicArea(&key.PublicKey, 0x10001)),
+		tpm2.Marshal(rsaPublicArea(&key.PublicKey, 0)))
 }
