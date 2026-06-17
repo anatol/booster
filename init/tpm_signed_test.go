@@ -3,8 +3,10 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,5 +36,32 @@ func TestParseSignedToken(t *testing.T) {
 
 	// Malformed base64 pubkey -> error.
 	_, _, _, err = parseSignedToken([]byte(`{"tpm2_pubkey":"!!notb64!!"}`))
+	require.Error(t, err)
+}
+
+func TestSelectSignature(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	fp := rsaPublicKeyFingerprint(&key.PublicKey)
+	pol := sha256.Sum256([]byte("policy"))
+	polHex := hex.EncodeToString(pol[:])
+
+	// "YWJj" == base64("abc")
+	js := []byte(`{"sha256":[{"pcrs":[11],"pkfp":"` + fp + `","pol":"` + polHex + `","sig":"YWJj"}]}`)
+	sigs, err := parseSignatureJSON(js)
+	require.NoError(t, err)
+
+	e, err := selectSignature(sigs, "sha256", &key.PublicKey, pol[:])
+	require.NoError(t, err)
+	require.Equal(t, []int{11}, e.PCRs)
+	require.Equal(t, []byte("abc"), e.Sig)
+
+	// Wrong policy digest -> no match.
+	other := sha256.Sum256([]byte("other"))
+	_, err = selectSignature(sigs, "sha256", &key.PublicKey, other[:])
+	require.Error(t, err)
+
+	// Wrong bank -> no match.
+	_, err = selectSignature(sigs, "sha384", &key.PublicKey, pol[:])
 	require.Error(t, err)
 }
