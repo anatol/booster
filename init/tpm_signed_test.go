@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,4 +66,41 @@ func TestSelectSignature(t *testing.T) {
 	// Wrong bank -> no match.
 	_, err = selectSignature(sigs, "sha384", &key.PublicKey, pol[:])
 	require.Error(t, err)
+}
+
+func TestResolveSignature(t *testing.T) {
+	dir := t.TempDir()
+	sig := filepath.Join(dir, "sig.json")
+	require.NoError(t, os.WriteFile(sig, []byte(`{"sha256":[]}`), 0600))
+
+	// "false" -> disabled.
+	_, enabled, err := resolveSignature("false")
+	require.NoError(t, err)
+	require.False(t, enabled)
+
+	// Explicit path -> read it.
+	data, enabled, err := resolveSignature(sig)
+	require.NoError(t, err)
+	require.True(t, enabled)
+	require.Contains(t, string(data), "sha256")
+
+	// Explicit missing path -> error.
+	_, _, err = resolveSignature(filepath.Join(dir, "nope.json"))
+	require.Error(t, err)
+
+	old := pcrSignatureSearchPaths
+	defer func() { pcrSignatureSearchPaths = old }()
+
+	// Auto-discover finds the second candidate.
+	pcrSignatureSearchPaths = []string{filepath.Join(dir, "nope.json"), sig}
+	data, enabled, err = resolveSignature("")
+	require.NoError(t, err)
+	require.True(t, enabled)
+	require.Contains(t, string(data), "sha256")
+
+	// Auto-discover finds nothing -> not enabled, no error (caller falls through).
+	pcrSignatureSearchPaths = []string{filepath.Join(dir, "nope.json")}
+	_, enabled, err = resolveSignature("")
+	require.NoError(t, err)
+	require.False(t, enabled)
 }
