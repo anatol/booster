@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/google/go-tpm/tpm2"
+	"github.com/google/go-tpm/tpm2/transport"
 )
 
 // pcrSignatureSearchPaths is the default location booster reads the PCR
@@ -150,4 +151,144 @@ func rsaPublicArea(pub *rsa.PublicKey, exponent uint32) tpm2.TPMTPublic {
 			Buffer: pub.N.Bytes(),
 		}),
 	}
+}
+
+// rsassaSHA256Sig wraps a raw RSA signature as a TPMT_SIGNATURE (RSASSA, SHA256)
+// — the scheme systemd signs PCR policies with.
+func rsassaSHA256Sig(sig []byte) tpm2.TPMTSignature {
+	return tpm2.TPMTSignature{
+		SigAlg: tpm2.TPMAlgRSASSA,
+		Signature: tpm2.NewTPMUSignature(tpm2.TPMAlgRSASSA, &tpm2.TPMSSignatureRSA{
+			Hash: tpm2.TPMAlgSHA256,
+			Sig:  tpm2.TPM2BPublicKeyRSA{Buffer: sig},
+		}),
+	}
+}
+
+func flushHandle(t transport.TPM, h tpm2.TPMHandle) {
+	_, _ = (&tpm2.FlushContext{FlushHandle: h}).Execute(t)
+}
+
+// signedTPM2Unseal unseals a blob whose authPolicy is PolicyAuthorize(verifyKey)
+// — i.e. enrolled by systemd-cryptenroll --tpm2-public-key. It satisfies the
+// authorized policy at runtime with a signature (from the systemd PCR signature
+// JSON) over the *current* PolicyPCR digest, so the same blob keeps unsealing
+// across kernel updates as long as a fresh signature for the new PCRs exists.
+//
+// bankName is systemd's bank string ("sha256", …); srk is the loaded storage
+// parent the blob was sealed under.
+func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPublic, private tpm2.TPM2BPrivate, verifyKey *rsa.PublicKey, pubkeyPCRs []int, bankName string, sigJSON []byte, pin []byte) ([]byte, error) {
+	if bankName == "" {
+		return nil, fmt.Errorf("systemd-tpm2 token has no PCR bank")
+	}
+	if len(pin) > 0 {
+		// Signed policy + PIN needs PolicyAuthValue plus the PIN carried in the
+		// unseal session auth; not yet wired. Reject so the caller falls through
+		// to the next unlock method rather than silently mis-unsealing.
+		return nil, fmt.Errorf("signed PCR policy with a TPM2 PIN is not yet supported")
+	}
+	sigs, err := parseSignatureJSON(sigJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	loadRsp, err := (&tpm2.Load{ParentHandle: srk, InPrivate: private, InPublic: public}).Execute(t)
+	if err != nil {
+		return nil, fmt.Errorf("loading sealed object: %v", err)
+	}
+	defer flushHandle(t, loadRsp.ObjectHandle)
+	obj := tpm2.NamedHandle{Handle: loadRsp.ObjectHandle, Name: loadRsp.Name}
+
+	// The RSA exponent is encoded ambiguously across TPM implementations and it
+	// feeds the key Name that PolicyAuthorize checks, so try 0x10001 then 0.
+	var lastErr error
+	for _, exp := range []uint32{0x10001, 0} {
+		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, pubkeyPCRs)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, pubkeyPCRs []int) ([]byte, error) {
+	sess, cleanup, err := tpm2.PolicySession(t, tpm2.TPMAlgSHA256, 16)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	pcrsU := make([]uint, len(pubkeyPCRs))
+	for i, p := range pubkeyPCRs {
+		pcrsU[i] = uint(p)
+	}
+	sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+		Hash:      pcrBankAlgID(bankName),
+		PCRSelect: tpm2.PCClientCompatible.PCRs(pcrsU...),
+	}}}
+	if _, err := (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: sel}).Execute(t); err != nil {
+		return nil, fmt.Errorf("PolicyPCR: %v", err)
+	}
+
+	pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess.Handle()}).Execute(t)
+	if err != nil {
+		return nil, err
+	}
+	approved := pgd.PolicyDigest.Buffer
+
+	entry, err := selectSignature(sigs, bankName, verifyKey, approved)
+	if err != nil {
+		return nil, err
+	}
+
+	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(verifyKey, exp)), Hierarchy: tpm2.TPMRHOwner}).Execute(t)
+	if err != nil {
+		return nil, fmt.Errorf("loading verification key: %v", err)
+	}
+	defer flushHandle(t, le.ObjectHandle)
+
+	h := sha256.Sum256(approved)
+	vs, err := (&tpm2.VerifySignature{
+		KeyHandle: le.ObjectHandle,
+		Digest:    tpm2.TPM2BDigest{Buffer: h[:]},
+		Signature: rsassaSHA256Sig(entry.Sig),
+	}).Execute(t)
+	if err != nil {
+		return nil, fmt.Errorf("verifying PCR signature: %v", err)
+	}
+
+	if _, err := (&tpm2.PolicyAuthorize{
+		PolicySession:  sess.Handle(),
+		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: approved},
+		PolicyRef:      tpm2.TPM2BDigest{},
+		KeySign:        le.Name,
+		CheckTicket:    vs.Validation,
+	}).Execute(t); err != nil {
+		return nil, fmt.Errorf("PolicyAuthorize: %v", err)
+	}
+
+	unseal, err := (&tpm2.Unseal{ItemHandle: tpm2.AuthHandle{
+		Handle: obj.Handle,
+		Name:   obj.Name,
+		Auth:   sess,
+	}}).Execute(t)
+	if err != nil {
+		return nil, fmt.Errorf("unseal: %v", err)
+	}
+	return unseal.OutData.Buffer, nil
+}
+
+// pcrBankAlgID maps a systemd tpm2-pcr-bank string to its TPM algorithm id,
+// defaulting to SHA-256 (systemd's default bank).
+func pcrBankAlgID(s string) tpm2.TPMAlgID {
+	switch s {
+	case "sha1":
+		return tpm2.TPMAlgSHA1
+	case "sha384":
+		return tpm2.TPMAlgSHA384
+	case "sha512":
+		return tpm2.TPMAlgSHA512
+	}
+	return tpm2.TPMAlgSHA256
 }
