@@ -1046,7 +1046,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 
 		var password []byte
 		if signed {
-			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, verifyKey, uint32(srkHandle), tpm2Signature, authValue)
+			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, node.PCRs, verifyKey, uint32(srkHandle), tpm2Signature, authValue)
 		} else {
 			password, err = tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
 		}
