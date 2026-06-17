@@ -8,8 +8,42 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
+
+// pcrSignatureSearchPaths is the default location booster reads the PCR
+// signature from when tpm2-signature= is unset: the file systemd-stub unpacks
+// from the UKI's .pcrsig section into the initramfs (the kernel concatenates the
+// stub's synthetic cpio, so it is present with no userspace). Overridable in tests.
+var pcrSignatureSearchPaths = []string{
+	"/.extra/tpm2-pcr-signature.json",
+}
+
+// resolveSignature loads the PCR signature JSON for the tpm2-signature= setting:
+// "false" disables signed policy (enabled=false); an explicit path is read (and
+// a read error is fatal — the admin asked for it); "" auto-discovers the
+// standard locations and, if none exist, returns enabled=false so the caller
+// falls through to the next unlock method.
+func resolveSignature(opt string) (data []byte, enabled bool, err error) {
+	switch {
+	case opt == "false":
+		return nil, false, nil
+	case opt != "":
+		data, err := os.ReadFile(opt)
+		if err != nil {
+			return nil, false, fmt.Errorf("tpm2-signature=%s: %v", opt, err)
+		}
+		return data, true, nil
+	default:
+		for _, p := range pcrSignatureSearchPaths {
+			if data, err := os.ReadFile(p); err == nil {
+				return data, true, nil
+			}
+		}
+		return nil, false, nil
+	}
+}
 
 // parseSignedToken extracts the signed (authorized) PCR policy fields from a
 // systemd-tpm2 token payload. A token is "signed" when it carries tpm2_pubkey
