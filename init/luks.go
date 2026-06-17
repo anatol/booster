@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1014,6 +1015,16 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload)
 	if err != nil {
 		return nil, err
+	}
+
+	// A signed policy bound to PCR11 is signed for systemd's "enter-initrd" boot
+	// phase, so the live PCR11 must hold that phase value before the unseal.
+	// systemd-pcrphase-initrd extends it Before=cryptsetup.target; booster runs
+	// no pcrphase, so it applies the barrier here (once per boot). Fail closed.
+	if signed && slices.Contains(pubkeyPCRs, pcrKernelBoot) {
+		if err := ensureEnterInitrdBarrier(); err != nil {
+			return nil, fmt.Errorf("applying enter-initrd PCR%d barrier: %v", pcrKernelBoot, err)
+		}
 	}
 
 	var salt []byte
