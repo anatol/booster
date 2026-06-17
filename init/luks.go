@@ -1007,13 +1007,13 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		srkHandle = extractSRKHandle(srkBytes)
 	}
 
-	// Signed (authorized) policy token: enrolled with --tpm2-public-key. Its blob
-	// is bound to the key via PolicyAuthorize, not to literal PCR values, so it
-	// unseals through the signed-policy path rather than literal PolicyPCR.
-	if verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload); err != nil {
+	// Signed (authorized) policy token (enrolled with --tpm2-public-key): its blob
+	// is bound to the key via PolicyAuthorize, not literal PCR values. Detected by
+	// tpm2_pubkey and routed to the signed-policy unseal in the loop below, which
+	// shares the PIN prompt/retry so signed+PIN works the same as literal+PIN.
+	verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload)
+	if err != nil {
 		return nil, err
-	} else if signed {
-		return recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, verifyKey, uint32(srkHandle), tpm2Signature, node.Pin)
 	}
 
 	var salt []byte
@@ -1044,7 +1044,12 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 			authValue = tpm2PINAuthValue(pin, salt)
 		}
 
-		password, err := tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
+		var password []byte
+		if signed {
+			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, verifyKey, uint32(srkHandle), tpm2Signature, authValue)
+		} else {
+			password, err = tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
+		}
 		if err == nil {
 			return []byte(base64.StdEncoding.EncodeToString(password)), nil
 		}

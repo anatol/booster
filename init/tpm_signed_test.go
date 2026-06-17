@@ -251,3 +251,82 @@ func TestSignedUnsealSurvivesPCRChange(t *testing.T) {
 	_, err = signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, "sha256", sigJSON(pol2, bad), nil)
 	require.Error(t, err, "a tampered signature must not unseal")
 }
+
+// TestSignedUnsealWithPIN covers a signed policy combined with a PIN
+// (TPM+PIN+PCR): the blob's authPolicy is PolicyAuthorize(key) then
+// PolicyAuthValue, and the object carries the PIN as its auth value. The
+// correct PIN unseals; a wrong PIN does not.
+func TestSignedUnsealWithPIN(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	dev, err := openTPM()
+	require.NoError(t, err)
+	defer dev.Close()
+	thetpm := transport.FromReadWriteCloser(dev)
+
+	srkRsp, err := (&tpm2.CreatePrimary{PrimaryHandle: tpm2.TPMRHOwner, InPublic: tpm2.New2B(tpm2.ECCSRKTemplate)}).Execute(thetpm)
+	require.NoError(t, err)
+	srk := tpm2.NamedHandle{Handle: srkRsp.ObjectHandle, Name: srkRsp.Name}
+	defer flushHandle(thetpm, srkRsp.ObjectHandle)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(&key.PublicKey, 0x10001)), Hierarchy: tpm2.TPMRHOwner}).Execute(thetpm)
+	require.NoError(t, err)
+	keyName := le.Name
+	flushHandle(thetpm, le.ObjectHandle)
+
+	// authPolicy = PolicyAuthorize(key) THEN PolicyAuthValue — systemd's order.
+	pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+	require.NoError(t, err)
+	require.NoError(t, (&tpm2.PolicyAuthorize{KeySign: keyName, PolicyRef: tpm2.TPM2BDigest{}}).Update(pol))
+	require.NoError(t, (&tpm2.PolicyAuthValue{}).Update(pol))
+	authPolicy := pol.Hash().Digest
+
+	pin := []byte("1234")
+	secret := []byte("super-secret-volume-key-0123456")
+	createRsp, err := (&tpm2.Create{
+		ParentHandle: srk,
+		InSensitive: tpm2.TPM2BSensitiveCreate{Sensitive: &tpm2.TPMSSensitiveCreate{
+			UserAuth: tpm2.TPM2BAuth{Buffer: pin},
+			Data:     tpm2.NewTPMUSensitiveCreate(&tpm2.TPM2BSensitiveData{Buffer: secret}),
+		}},
+		InPublic: tpm2.New2B(tpm2.TPMTPublic{
+			Type: tpm2.TPMAlgKeyedHash, NameAlg: tpm2.TPMAlgSHA256,
+			ObjectAttributes: tpm2.TPMAObject{FixedTPM: true, FixedParent: true},
+			AuthPolicy:       tpm2.TPM2BDigest{Buffer: authPolicy},
+		}),
+	}).Execute(thetpm)
+	require.NoError(t, err)
+
+	const debugPCR = 16
+	pubkeyPCRs := []int{debugPCR}
+	bank := tpm2.TPMAlgSHA256
+
+	// Sign the current PolicyPCR digest.
+	sess, cleanup, err := tpm2.PolicySession(thetpm, tpm2.TPMAlgSHA256, 16)
+	require.NoError(t, err)
+	sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{Hash: bank, PCRSelect: tpm2.PCClientCompatible.PCRs(debugPCR)}}}
+	_, err = (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: sel}).Execute(thetpm)
+	require.NoError(t, err)
+	pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess.Handle()}).Execute(thetpm)
+	require.NoError(t, err)
+	approved := pgd.PolicyDigest.Buffer
+	require.NoError(t, cleanup())
+	hh := sha256.Sum256(approved)
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hh[:])
+	require.NoError(t, err)
+	sigJSON := []byte(fmt.Sprintf(`{"sha256":[{"pcrs":[%d],"pkfp":"%s","pol":"%s","sig":"%s"}]}`,
+		debugPCR, rsaPublicKeyFingerprint(&key.PublicKey), hex.EncodeToString(approved), base64.StdEncoding.EncodeToString(sig)))
+
+	// Correct PIN unseals.
+	out, err := signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, "sha256", sigJSON, pin)
+	require.NoError(t, err)
+	require.Equal(t, secret, out)
+
+	// Wrong PIN does not.
+	_, err = signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, "sha256", sigJSON, []byte("9999"))
+	require.Error(t, err, "a wrong PIN must not unseal")
+}
