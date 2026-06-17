@@ -292,3 +292,64 @@ func pcrBankAlgID(s string) tpm2.TPMAlgID {
 	}
 	return tpm2.TPMAlgSHA256
 }
+
+// loadSignedSRK resolves the storage parent the sealed blob lives under. A
+// non-zero srkHandle is the persistent SRK (systemd v252+ tokens) — read its
+// Name. A zero handle means derive the standard transient primary; the returned
+// cleanup flushes it.
+func loadSignedSRK(t transport.TPM, srkHandle uint32) (tpm2.NamedHandle, func(), error) {
+	noop := func() {}
+	if srkHandle != 0 {
+		rp, err := (&tpm2.ReadPublic{ObjectHandle: tpm2.TPMHandle(srkHandle)}).Execute(t)
+		if err != nil {
+			return tpm2.NamedHandle{}, noop, fmt.Errorf("reading SRK %#x: %v", srkHandle, err)
+		}
+		return tpm2.NamedHandle{Handle: tpm2.TPMHandle(srkHandle), Name: rp.Name}, noop, nil
+	}
+	cp, err := (&tpm2.CreatePrimary{PrimaryHandle: tpm2.TPMRHOwner, InPublic: tpm2.New2B(tpm2.ECCSRKTemplate)}).Execute(t)
+	if err != nil {
+		return tpm2.NamedHandle{}, noop, fmt.Errorf("creating SRK: %v", err)
+	}
+	return tpm2.NamedHandle{Handle: cp.ObjectHandle, Name: cp.Name}, func() { flushHandle(t, cp.ObjectHandle) }, nil
+}
+
+// recoverSignedTPM2Password unseals a signed-policy systemd-tpm2 token. The
+// caller supplies the parsed blob sections, SRK handle, bank, and signing key;
+// this builds the new-API types, opens the TPM, and runs the PolicyAuthorize
+// unseal. Returns the base64-encoded volume key, matching the literal path.
+func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubkeyPCRs []int, verifyKey *rsa.PublicKey, srkHandle uint32, tpm2Signature string, hasPin bool) ([]byte, error) {
+	if hasPin {
+		return nil, fmt.Errorf("signed PCR policy with a TPM2 PIN is not yet supported")
+	}
+	sigJSON, enabled, err := resolveSignature(tpm2Signature)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, fmt.Errorf("signed systemd-tpm2 token but no PCR signature found (set tpm2-signature= or provide tpm2-pcr-signature.json)")
+	}
+
+	pubArea, err := tpm2.Unmarshal[tpm2.TPMTPublic](public)
+	if err != nil {
+		return nil, fmt.Errorf("parsing sealed object public area: %v", err)
+	}
+
+	dev, err := openTPM()
+	if err != nil {
+		return nil, err
+	}
+	defer dev.Close()
+	thetpm := transport.FromReadWriteCloser(dev)
+
+	srk, flush, err := loadSignedSRK(thetpm, srkHandle)
+	if err != nil {
+		return nil, err
+	}
+	defer flush()
+
+	key, err := signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, pcrBankName, sigJSON, nil)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(base64.StdEncoding.EncodeToString(key)), nil
+}

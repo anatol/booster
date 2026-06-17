@@ -965,7 +965,7 @@ func shouldMeasureVolumeKey(tokens []luks.Token, setting measurePCRSetting) bool
 	}
 }
 
-func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string) ([]byte, error) {
+func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string, tpm2Signature string) ([]byte, error) {
 	var node struct {
 		Blob       string `json:"tpm2-blob"` // base64
 		PCRs       []int  `json:"tpm2-pcrs"`
@@ -1005,6 +1005,15 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 			return nil, fmt.Errorf("tpm2_srk: %v", err)
 		}
 		srkHandle = extractSRKHandle(srkBytes)
+	}
+
+	// Signed (authorized) policy token: enrolled with --tpm2-public-key. Its blob
+	// is bound to the key via PolicyAuthorize, not to literal PCR values, so it
+	// unseals through the signed-policy path rather than literal PolicyPCR.
+	if verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload); err != nil {
+		return nil, err
+	} else if signed {
+		return recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, verifyKey, uint32(srkHandle), tpm2Signature, node.Pin)
 	}
 
 	var salt []byte
@@ -1168,7 +1177,7 @@ func pinDelay(serialize, hasParallelToken bool) time.Duration {
 	return time.Duration(config.PinDelay) * time.Second
 }
 
-func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string) bool {
+func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, t luks.Token, mappingName string, tpm2Signature string) bool {
 	var password []byte
 	var err error
 
@@ -1178,7 +1187,7 @@ func recoverTokenPassword(ctx context.Context, volumes chan *luks.Volume, d luks
 	case "systemd-fido2":
 		password, err = recoverSystemdFido2Password(ctx, t, mappingName)
 	case "systemd-tpm2":
-		password, err = recoverSystemdTPM2Password(ctx, t, mappingName)
+		password, err = recoverSystemdTPM2Password(ctx, t, mappingName, tpm2Signature)
 	default:
 		info("token #%d has unknown type: %s", t.ID, t.Type)
 		return false
@@ -1523,7 +1532,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		go func() {
 			defer senderWg.Done()
 			defer tokenWg.Done()
-			if recoverTokenPassword(ctx, volumes, d, t, mapping.name) {
+			if recoverTokenPassword(ctx, volumes, d, t, mapping.name, mapping.tpm2Signature) {
 				cancel()
 			}
 		}()
@@ -1573,7 +1582,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 				if pt := perTokenTimeout(t); pt > 0 {
 					tctx, tcancel = context.WithTimeout(ctx, pt)
 				}
-				ok := recoverTokenPassword(tctx, volumes, d, t, mapping.name)
+				ok := recoverTokenPassword(tctx, volumes, d, t, mapping.name, mapping.tpm2Signature)
 				if tcancel != nil {
 					tcancel()
 				}
