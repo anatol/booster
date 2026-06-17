@@ -439,3 +439,185 @@ func TestSignedUnsealWithLiteralPCRComposition(t *testing.T) {
 	_, err = signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, literalPCRs, "sha256", sigJSON, nil)
 	require.Error(t, err, "once the PCR 15 latch extends, the literal binding must block re-unseal")
 }
+
+// TestSignedUnsealAtEnterInitrdBarrier is the end-to-end proof of the fix, bound
+// to the REAL PCR 11. A signed policy is signed for systemd's "enter-initrd"
+// boot phase, and systemd unlocks the root only after PCR 11 has been extended
+// with that word (systemd-pcrphase-initrd runs Before=cryptsetup.target). Booster
+// runs no pcrphase, so it applies the same barrier itself. This test pins both
+// halves: a signature for the BARE PCR 11 (what our earlier implementation
+// matched) does NOT unseal once the barrier is applied — that was the bug — and a
+// signature for the post-barrier enter-initrd value DOES.
+func TestSignedUnsealAtEnterInitrdBarrier(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	dev, err := openTPM()
+	require.NoError(t, err)
+	defer dev.Close()
+	thetpm := transport.FromReadWriteCloser(dev)
+
+	srkRsp, err := (&tpm2.CreatePrimary{PrimaryHandle: tpm2.TPMRHOwner, InPublic: tpm2.New2B(tpm2.ECCSRKTemplate)}).Execute(thetpm)
+	require.NoError(t, err)
+	srk := tpm2.NamedHandle{Handle: srkRsp.ObjectHandle, Name: srkRsp.Name}
+	defer flushHandle(thetpm, srkRsp.ObjectHandle)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(&key.PublicKey, 0x10001)), Hierarchy: tpm2.TPMRHOwner}).Execute(thetpm)
+	require.NoError(t, err)
+	keyName := le.Name
+	flushHandle(thetpm, le.ObjectHandle)
+
+	pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+	require.NoError(t, err)
+	require.NoError(t, (&tpm2.PolicyAuthorize{KeySign: keyName, PolicyRef: tpm2.TPM2BDigest{}}).Update(pol))
+	authPolicy := pol.Hash().Digest
+
+	secret := []byte("super-secret-volume-key-0123456")
+	createRsp, err := (&tpm2.Create{
+		ParentHandle: srk,
+		InSensitive: tpm2.TPM2BSensitiveCreate{Sensitive: &tpm2.TPMSSensitiveCreate{
+			Data: tpm2.NewTPMUSensitiveCreate(&tpm2.TPM2BSensitiveData{Buffer: secret}),
+		}},
+		InPublic: tpm2.New2B(tpm2.TPMTPublic{
+			Type: tpm2.TPMAlgKeyedHash, NameAlg: tpm2.TPMAlgSHA256,
+			ObjectAttributes: tpm2.TPMAObject{FixedTPM: true, FixedParent: true},
+			AuthPolicy:       tpm2.TPM2BDigest{Buffer: authPolicy},
+		}),
+	}).Execute(thetpm)
+	require.NoError(t, err)
+
+	pubkeyPCRs := []int{pcrKernelBoot} // bind to the REAL PCR 11
+	bank := tpm2.TPMAlgSHA256
+
+	policyDigestNow := func() []byte {
+		sess, cleanup, err := tpm2.PolicySession(thetpm, tpm2.TPMAlgSHA256, 16)
+		require.NoError(t, err)
+		defer cleanup()
+		sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+			Hash: bank, PCRSelect: tpm2.PCClientCompatible.PCRs(uint(pcrKernelBoot)),
+		}}}
+		_, err = (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: sel}).Execute(thetpm)
+		require.NoError(t, err)
+		pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess.Handle()}).Execute(thetpm)
+		require.NoError(t, err)
+		return pgd.PolicyDigest.Buffer
+	}
+	sigJSON := func(policy []byte) []byte {
+		hh := sha256.Sum256(policy)
+		sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hh[:])
+		require.NoError(t, err)
+		return []byte(fmt.Sprintf(`{"sha256":[{"pcrs":[%d],"pkfp":"%s","pol":"%s","sig":"%s"}]}`,
+			pcrKernelBoot, rsaPublicKeyFingerprint(&key.PublicKey),
+			hex.EncodeToString(policy), base64.StdEncoding.EncodeToString(sig)))
+	}
+
+	// Signature for the BARE PCR 11 value (pre-barrier) — what the earlier
+	// implementation would have matched.
+	bareSig := sigJSON(policyDigestNow())
+
+	// Extend "enter-initrd" into PCR 11 over the shared connection (swtpm's TCP
+	// server is single-client, so the barrier's own connection can't be opened
+	// while holding thetpm). This is byte-identical to measurePhaseToPCR11,
+	// proven in TestMeasurePhaseToPCR11. PCR 11 now equals systemd's enter-initrd
+	// phase value, exactly as in a real initrd before unlock.
+	extendPhasePCR11(t, thetpm, phaseEnterInitrd)
+
+	// The bare-value signature must NOT unseal now: the barrier advanced PCR 11.
+	_, err = signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, nil, "sha256", bareSig, nil)
+	require.Error(t, err, "a bare-PCR11 signature must not unseal after the enter-initrd barrier")
+
+	// A signature for the post-barrier (enter-initrd) value unseals — the
+	// standard systemd case.
+	out, err := signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, nil, "sha256", sigJSON(policyDigestNow()), nil)
+	require.NoError(t, err)
+	require.Equal(t, secret, out, "a signature for the enter-initrd PCR11 value must unseal")
+}
+
+// TestLeaveInitrdForwardLock pins the forward-lock booster applies at
+// switch_root. A root key signed only for the "enter-initrd" phase (as
+// systemd-measure --phase=enter-initrd produces for an initrd-only secret)
+// unseals while PCR 11 holds the enter-initrd value, but once "leave-initrd" is
+// extended the same signature no longer matches the advanced PCR 11 — so the key
+// cannot be unsealed after the host takes over. PolicyAuthorize would accept any
+// signed value, so the lock is enforced by the absence of a signature for later
+// phases, exactly as in systemd.
+func TestLeaveInitrdForwardLock(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	dev, err := openTPM()
+	require.NoError(t, err)
+	defer dev.Close()
+	thetpm := transport.FromReadWriteCloser(dev)
+
+	srkRsp, err := (&tpm2.CreatePrimary{PrimaryHandle: tpm2.TPMRHOwner, InPublic: tpm2.New2B(tpm2.ECCSRKTemplate)}).Execute(thetpm)
+	require.NoError(t, err)
+	srk := tpm2.NamedHandle{Handle: srkRsp.ObjectHandle, Name: srkRsp.Name}
+	defer flushHandle(thetpm, srkRsp.ObjectHandle)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(&key.PublicKey, 0x10001)), Hierarchy: tpm2.TPMRHOwner}).Execute(thetpm)
+	require.NoError(t, err)
+	keyName := le.Name
+	flushHandle(thetpm, le.ObjectHandle)
+
+	pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+	require.NoError(t, err)
+	require.NoError(t, (&tpm2.PolicyAuthorize{KeySign: keyName, PolicyRef: tpm2.TPM2BDigest{}}).Update(pol))
+	authPolicy := pol.Hash().Digest
+
+	secret := []byte("super-secret-volume-key-0123456")
+	createRsp, err := (&tpm2.Create{
+		ParentHandle: srk,
+		InSensitive: tpm2.TPM2BSensitiveCreate{Sensitive: &tpm2.TPMSSensitiveCreate{
+			Data: tpm2.NewTPMUSensitiveCreate(&tpm2.TPM2BSensitiveData{Buffer: secret}),
+		}},
+		InPublic: tpm2.New2B(tpm2.TPMTPublic{
+			Type: tpm2.TPMAlgKeyedHash, NameAlg: tpm2.TPMAlgSHA256,
+			ObjectAttributes: tpm2.TPMAObject{FixedTPM: true, FixedParent: true},
+			AuthPolicy:       tpm2.TPM2BDigest{Buffer: authPolicy},
+		}),
+	}).Execute(thetpm)
+	require.NoError(t, err)
+
+	pubkeyPCRs := []int{pcrKernelBoot}
+	bank := tpm2.TPMAlgSHA256
+	policyDigestNow := func() []byte {
+		sess, cleanup, err := tpm2.PolicySession(thetpm, tpm2.TPMAlgSHA256, 16)
+		require.NoError(t, err)
+		defer cleanup()
+		sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+			Hash: bank, PCRSelect: tpm2.PCClientCompatible.PCRs(uint(pcrKernelBoot)),
+		}}}
+		_, err = (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: sel}).Execute(thetpm)
+		require.NoError(t, err)
+		pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess.Handle()}).Execute(thetpm)
+		require.NoError(t, err)
+		return pgd.PolicyDigest.Buffer
+	}
+
+	// enter-initrd: sign the root key for this phase only, and unseal succeeds.
+	extendPhasePCR11(t, thetpm, phaseEnterInitrd)
+	enterPolicy := policyDigestNow()
+	hh := sha256.Sum256(enterPolicy)
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hh[:])
+	require.NoError(t, err)
+	enterSig := []byte(fmt.Sprintf(`{"sha256":[{"pcrs":[%d],"pkfp":"%s","pol":"%s","sig":"%s"}]}`,
+		pcrKernelBoot, rsaPublicKeyFingerprint(&key.PublicKey),
+		hex.EncodeToString(enterPolicy), base64.StdEncoding.EncodeToString(sig)))
+
+	out, err := signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, nil, "sha256", enterSig, nil)
+	require.NoError(t, err)
+	require.Equal(t, secret, out, "the enter-initrd-signed key unseals during the initrd")
+
+	// switch_root extends leave-initrd; the enter-initrd-only signature — the
+	// only one that exists for this key — can no longer satisfy the policy.
+	extendPhasePCR11(t, thetpm, phaseLeaveInitrd)
+	_, err = signedTPM2Unseal(thetpm, srk, createRsp.OutPublic, createRsp.OutPrivate, &key.PublicKey, pubkeyPCRs, nil, "sha256", enterSig, nil)
+	require.Error(t, err, "after leave-initrd the enter-initrd-only signature must not unseal (forward-lock)")
+}
