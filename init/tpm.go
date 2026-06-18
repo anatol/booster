@@ -292,11 +292,9 @@ func measureVolumeKeyToPCR15(k volumeKeyHMACer, volumeName, luksUUID string) err
 // measurePhaseToPCR11 extends PCR11 with a boot-phase word, byte-compatible with
 // systemd-pcrextend (src/shared/tpm2-util.c tpm2_pcr_extend_bytes, secret=NULL):
 // for every active bank it extends bankHash(word) — the raw ASCII word, no NUL
-// terminator and a plain digest rather than the HMAC the PCR15 latch uses.
-// Booster, not being systemd, runs no systemd-pcrphase, so it extends
-// "enter-initrd" itself before unsealing a PCR11-bound key and "leave-initrd" at
-// switch_root; all active banks are extended so the policy can't be satisfied
-// via an un-extended bank. Fails closed: any extend error aborts the caller.
+// terminator and a plain digest rather than the HMAC the PCR15 latch uses. All
+// active banks are extended so a policy can't be satisfied via an un-extended
+// bank. Fails closed: any extend error aborts the caller.
 func measurePhaseToPCR11(word string) error {
 	dev, err := openTPM()
 	if err != nil {

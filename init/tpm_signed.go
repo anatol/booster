@@ -379,9 +379,5 @@ func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubke
 	}
 	defer flush()
 
-	key, err := signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, literalPCRs, pcrBankName, sigJSON, pinAuth)
-	if err != nil {
-		return nil, err
-	}
-	return key, nil
+	return signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, literalPCRs, pcrBankName, sigJSON, pinAuth)
 }
