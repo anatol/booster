@@ -1000,9 +1000,9 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		PCRBank    string          `json:"tpm2-pcr-bank"`    // either sha1 or sha256
 		PolicyHash json.RawMessage `json:"tpm2-policy-hash"` // hex string, or array when sharded
 		Pin        bool            `json:"tpm2-pin"`
-		Salt       string          `json:"tpm2_salt"`     // base64 random salt; systemd v255+ PIN tokens
-		Srk        string          `json:"tpm2_srk"`      // base64 IESYS bytes; systemd v252+ tokens
-		Pcrlock    bool            `json:"tpm2_pcrlock"`  // sealed via PolicyAuthorizeNV; unsupported
+		Salt       string          `json:"tpm2_salt"`    // base64 random salt; systemd v255+ PIN tokens
+		Srk        string          `json:"tpm2_srk"`     // base64 IESYS bytes; systemd v252+ tokens
+		Pcrlock    bool            `json:"tpm2_pcrlock"` // sealed via PolicyAuthorizeNV; unsupported
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
@@ -1065,10 +1065,8 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		}
 	}
 
-	// A signed policy bound to PCR11 is signed for systemd's "enter-initrd" boot
-	// phase, so the live PCR11 must hold that phase value before the unseal.
-	// systemd-pcrphase-initrd extends it Before=cryptsetup.target; booster runs
-	// no pcrphase, so it applies the barrier here (once per boot). Fail closed.
+	// A PCR11-bound signed policy is signed for the enter-initrd phase, so extend
+	// it before the unseal (see ensureEnterInitrdBarrier). Fail closed.
 	if signed && slices.Contains(pubkeyPCRs, pcrKernelBoot) {
 		if err := ensureEnterInitrdBarrier(); err != nil {
 			return nil, fmt.Errorf("applying enter-initrd PCR%d barrier: %v", pcrKernelBoot, err)
