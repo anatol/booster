@@ -81,6 +81,11 @@ var assetGenerators = map[string]assetGenerator{
 	// PCR15 re-unseal latch. At enroll/boot PCR15 is uninitialized (0); booster
 	// must extend it after unseal so the key can't be re-unsealed.
 	"systemd-tpm2-pcr15.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=7a9f3c21-5e84-4d16-b2c7-1f0a9e6d4b33", "FS_UUID=8b0a4d32-6f95-4e27-93d8-2a1baf7e5c44", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PCRS=10+13+15"}},
+	// systemd-tpm2-signed.img: volume key enrolled to a signed (authorized) PCR
+	// policy (systemd-cryptenroll --tpm2-public-key, bound to PCR 11) with a
+	// detached systemd-measure signature for the enter-initrd phase. The only
+	// test that drives booster's signed path against real systemd artifacts.
+	"systemd-tpm2-signed.img": {"systemd_tpm2_signed.sh", []string{"LUKS_UUID=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60", "FS_UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42", "LUKS_PASSWORD=567"}},
 	// systemd-tpm2-legacy-pin.img: v252-254 format token — tpm2_srk present but
 	// no tpm2_salt, PIN auth via SHA256(pin) without PBKDF2.  Generated with
 	// raw tpm2-tools rather than systemd-cryptenroll to be independent of the

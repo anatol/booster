@@ -3,6 +3,7 @@ package tests
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -61,6 +62,45 @@ func TestSystemdTPM2(t *testing.T) {
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-tpm2.img",
 		kernelArgs: []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSystemdTPM2SignedPolicy boots a volume enrolled to a signed (authorized)
+// PCR policy: a real systemd-cryptenroll --tpm2-public-key token bound to PCR 11,
+// unsealed with a real systemd-measure signature for the enter-initrd phase. This
+// is the integration counterpart to the swtpm units in init/tpm_signed_test.go —
+// it proves booster parses a genuine signed token (the base64(PEM) tpm2_pubkey
+// format that once slipped past a green unit suite) and satisfies
+// TPM2_PolicyAuthorize end-to-end.
+//
+// There is no UKI here, so the systemd-stub signature location
+// (/.extra/tpm2-pcr-signature.json) does not exist; the signature is embedded
+// into the initramfs via extra_files and selected with rd.luks.options=
+// tpm2-signature=. See generators/systemd_tpm2_signed.sh for why the enter-initrd
+// phase value still matches without a stub measuring the UKI sections into PCR 11.
+func TestSystemdTPM2SignedPolicy(t *testing.T) {
+	swtpm, params, err := startSwtpm()
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	// The generator wrote the detached signature here; embed it and point booster
+	// at it. AppendFile preserves the absolute path, so booster opens the same one.
+	sigPath, err := filepath.Abs("assets/systemd-tpm2-signed.pcrsig.json")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/systemd-tpm2-signed.img",
+		kernelArgs: []string{
+			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
+			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
+			"rd.luks.options=tpm2-signature=" + sigPath,
+		},
+		extraFiles: sigPath,
 		params:     params,
 	})
 	require.NoError(t, err)
