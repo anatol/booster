@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"strings"
@@ -68,9 +69,16 @@ func parseSignedToken(payload []byte) (pub *rsa.PublicKey, pubkeyPCRs []int, ok 
 	if node.Pubkey == "" {
 		return nil, nil, false, nil
 	}
-	der, err := base64.StdEncoding.DecodeString(node.Pubkey)
+	raw, err := base64.StdEncoding.DecodeString(node.Pubkey)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("tpm2_pubkey: %v", err)
+	}
+	// systemd-cryptenroll stores the public key PEM-encoded (the token field is
+	// base64 of the PEM text, decoded with PEM_read_PUBKEY); accept a raw DER
+	// body too so callers that pass DER still work.
+	der := raw
+	if block, _ := pem.Decode(raw); block != nil {
+		der = block.Bytes
 	}
 	key, err := x509.ParsePKIXPublicKey(der)
 	if err != nil {
