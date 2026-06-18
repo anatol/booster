@@ -9,6 +9,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,16 +26,25 @@ func TestParseSignedToken(t *testing.T) {
 	require.NoError(t, err)
 	spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	require.NoError(t, err)
-	b64 := base64.StdEncoding.EncodeToString(spki)
 
-	// Signed token: has tpm2_pubkey + tpm2_pubkey_pcrs.
-	signed := []byte(`{"tpm2_pubkey":"` + b64 + `","tpm2_pubkey_pcrs":[11]}`)
+	// Real systemd-cryptenroll format: tpm2_pubkey is base64 of the *PEM* text
+	// (systemd stores the PEM and reads it back with PEM_read_PUBKEY). This is the
+	// case a real on-disk token exercises.
+	pemB64 := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: spki}))
+	signed := []byte(`{"tpm2_pubkey":"` + pemB64 + `","tpm2_pubkey_pcrs":[11]}`)
 	pub, pcrs, ok, err := parseSignedToken(signed)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, []int{11}, pcrs)
 	require.Equal(t, key.PublicKey.N, pub.N)
 	require.Equal(t, key.PublicKey.E, pub.E)
+
+	// Robustness: a raw-DER body (no PEM wrapper) is also accepted.
+	derB64 := base64.StdEncoding.EncodeToString(spki)
+	pub2, _, ok2, err := parseSignedToken([]byte(`{"tpm2_pubkey":"` + derB64 + `","tpm2_pubkey_pcrs":[11]}`))
+	require.NoError(t, err)
+	require.True(t, ok2)
+	require.Equal(t, key.PublicKey.N, pub2.N)
 
 	// Literal-PCR token: no tpm2_pubkey -> not signed (handled by the legacy path).
 	literal := []byte(`{"tpm2-pcrs":[7]}`)
@@ -44,6 +55,50 @@ func TestParseSignedToken(t *testing.T) {
 	// Malformed base64 pubkey -> error.
 	_, _, _, err = parseSignedToken([]byte(`{"tpm2_pubkey":"!!notb64!!"}`))
 	require.Error(t, err)
+}
+
+// TestParseRealSystemdArtifacts runs booster's signed-policy parsers against
+// fixtures captured from a REAL `systemd-cryptenroll --tpm2-public-key` token and
+// a REAL ukify/systemd-measure `.pcrsig` (systemd 260, in init/testdata/). Unlike
+// the synthetic tests, the input is bytes systemd actually wrote, so it catches
+// interop format drift — it is exactly the test that would have caught the
+// base64-of-PEM tpm2_pubkey bug that the DER-based synthetic test masked.
+func TestParseRealSystemdArtifacts(t *testing.T) {
+	tokenJSON, err := os.ReadFile("testdata/systemd260-signed-token.json")
+	require.NoError(t, err)
+	sigJSON, err := os.ReadFile("testdata/systemd260-pcrsig.json")
+	require.NoError(t, err)
+
+	// 1. the real token is recognized as signed and bound to PCR 11.
+	pub, pubkeyPCRs, ok, err := parseSignedToken(tokenJSON)
+	require.NoError(t, err, "real systemd tpm2_pubkey (base64 of PEM) must parse")
+	require.True(t, ok)
+	require.Equal(t, []int{11}, pubkeyPCRs)
+
+	// 2. the literal PCR fields (hyphenated json tags) parse from the real token.
+	var node struct {
+		PCRs    []int  `json:"tpm2-pcrs"`
+		PCRBank string `json:"tpm2-pcr-bank"`
+	}
+	require.NoError(t, json.Unmarshal(tokenJSON, &node))
+	require.Equal(t, []int{7, 15}, node.PCRs)
+	require.Equal(t, "sha256", node.PCRBank)
+
+	// 3. the real signature parses, and the key booster decoded produces the same
+	//    fingerprint systemd wrote into the .pcrsig (end-to-end pubkey+pkfp match).
+	sigs, err := parseSignatureJSON(sigJSON)
+	require.NoError(t, err)
+	require.Len(t, sigs["sha256"], 4, "ukify default phase set is 4 sha256 entries")
+	require.Equal(t, sigs["sha256"][0].Pkfp, rsaPublicKeyFingerprint(pub),
+		"booster's key fingerprint must match systemd's pkfp in the real signature")
+
+	// 4. selectSignature finds the real entry for the real key + its policy digest.
+	pol, err := hex.DecodeString(sigs["sha256"][0].Pol)
+	require.NoError(t, err)
+	entry, err := selectSignature(sigs, "sha256", pub, pol)
+	require.NoError(t, err)
+	require.Equal(t, []int{11}, entry.PCRs)
+	require.NotEmpty(t, entry.Sig)
 }
 
 func TestSelectSignature(t *testing.T) {
