@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -966,33 +967,62 @@ func shouldMeasureVolumeKey(tokens []luks.Token, setting measurePCRSetting) bool
 	}
 }
 
+// unmarshalTPM2Field decodes a systemd-tpm2 token field that is normally a single
+// JSON string but is a JSON array of strings when the token is sharded (a
+// signed-PCR + pcrlock combined enrollment). It returns the first element and
+// whether the field held more than one.
+func unmarshalTPM2Field(raw json.RawMessage) (value string, sharded bool, err error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false, nil
+	}
+	if raw[0] == '[' {
+		var a []string
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return "", false, err
+		}
+		if len(a) == 0 {
+			return "", false, nil
+		}
+		return a[0], len(a) > 1, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false, err
+	}
+	return s, false, nil
+}
+
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string, tpm2Signature string) ([]byte, error) {
 	var node struct {
-		Blob       string `json:"tpm2-blob"` // base64
-		PCRs       []int  `json:"tpm2-pcrs"`
-		PCRBank    string `json:"tpm2-pcr-bank"`    // either sha1 or sha256
-		PolicyHash string `json:"tpm2-policy-hash"` // hex
-		Pin        bool   `json:"tpm2-pin"`
-		Salt       string `json:"tpm2_salt"` // base64 random salt; systemd v255+ PIN tokens
-		Srk        string `json:"tpm2_srk"`  // base64 IESYS bytes; systemd v252+ tokens
+		Blob       json.RawMessage `json:"tpm2-blob"` // base64 string, or array of strings when sharded
+		PCRs       []int           `json:"tpm2-pcrs"`
+		PCRBank    string          `json:"tpm2-pcr-bank"`    // either sha1 or sha256
+		PolicyHash json.RawMessage `json:"tpm2-policy-hash"` // hex string, or array when sharded
+		Pin        bool            `json:"tpm2-pin"`
+		Salt       string          `json:"tpm2_salt"`     // base64 random salt; systemd v255+ PIN tokens
+		Srk        string          `json:"tpm2_srk"`      // base64 IESYS bytes; systemd v252+ tokens
+		Pcrlock    bool            `json:"tpm2_pcrlock"`  // sealed via PolicyAuthorizeNV; unsupported
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
 	}
 
-	blob, err := base64.StdEncoding.DecodeString(node.Blob)
+	// Reject sharded / pcrlock-bound tokens: booster can neither reconstruct a
+	// sharded secret nor satisfy pcrlock's PolicyAuthorizeNV, so fail with a clear
+	// message rather than a cryptic JSON-unmarshal error.
+	blobStr, blobSharded, err := unmarshalTPM2Field(node.Blob)
+	if err != nil {
+		return nil, err
+	}
+	if node.Pcrlock || blobSharded {
+		return nil, fmt.Errorf("tpm2 pcrlock-bound tokens are not supported")
+	}
+	blob, err := base64.StdEncoding.DecodeString(blobStr)
 	if err != nil {
 		return nil, err
 	}
 	private, public, err := parseSystemdTPM2Blob(blob)
-	if err != nil {
-		return nil, err
-	}
-
-	if node.PolicyHash == "" {
-		return nil, fmt.Errorf("empty policy hash")
-	}
-	policyHash, err := hex.DecodeString(node.PolicyHash)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,6 +1045,24 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload)
 	if err != nil {
 		return nil, err
+	}
+
+	// tpm2-policy-hash is the precomputed literal-PCR policy digest; only the
+	// literal path needs it (the signed path recomputes via PolicyGetDigest), so
+	// decode and require it only when the token is not signed.
+	var policyHash []byte
+	if !signed {
+		policyHashStr, _, err := unmarshalTPM2Field(node.PolicyHash)
+		if err != nil {
+			return nil, err
+		}
+		if policyHashStr == "" {
+			return nil, fmt.Errorf("empty policy hash")
+		}
+		policyHash, err = hex.DecodeString(policyHashStr)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// A signed policy bound to PCR11 is signed for systemd's "enter-initrd" boot
