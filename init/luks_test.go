@@ -594,3 +594,47 @@ func TestTrySubmitPassphraseCancelsRegistrationOnSuccess(t *testing.T) {
 	require.NotContains(t, names, "cancel-on-success",
 		"pendingDeviceNames must drop entries whose ctx is cancelled")
 }
+
+func TestUnmarshalTPM2Field(t *testing.T) {
+	// the common, non-sharded case: a single JSON string
+	v, sharded, err := unmarshalTPM2Field([]byte(`"aGVsbG8="`))
+	require.NoError(t, err)
+	require.False(t, sharded)
+	require.Equal(t, "aGVsbG8=", v)
+
+	// sharded array (signed-PCR + pcrlock combined enrollment) -> first shard + sharded
+	v, sharded, err = unmarshalTPM2Field([]byte(`["aaaa","bbbb"]`))
+	require.NoError(t, err)
+	require.True(t, sharded)
+	require.Equal(t, "aaaa", v)
+
+	// single-element array -> not sharded
+	v, sharded, err = unmarshalTPM2Field([]byte(`["only"]`))
+	require.NoError(t, err)
+	require.False(t, sharded)
+	require.Equal(t, "only", v)
+
+	// absent / null -> empty, no error
+	for _, raw := range [][]byte{nil, []byte("null"), []byte(" ")} {
+		v, sharded, err = unmarshalTPM2Field(raw)
+		require.NoError(t, err)
+		require.False(t, sharded)
+		require.Equal(t, "", v)
+	}
+}
+
+// TestRecoverSystemdTPM2RejectsPcrlock pins that a pcrlock-bound token (which
+// booster cannot satisfy — it needs PolicyAuthorizeNV) is rejected with a clear
+// message before any TPM work, instead of the cryptic JSON-unmarshal error the
+// sharded array form used to produce.
+func TestRecoverSystemdTPM2RejectsPcrlock(t *testing.T) {
+	// sharded tpm2-blob (array) = signed-PCR + pcrlock combined enrollment
+	shardedTok := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-blob":["AA==","BB=="],"tpm2-policy-hash":["dead","beef"],"tpm2-pcrs":[7]}`)}
+	_, err := recoverSystemdTPM2Password(context.Background(), shardedTok, "cryptroot", "")
+	require.ErrorContains(t, err, "pcrlock")
+
+	// pcrlock-only token (single blob, tpm2_pcrlock=true)
+	pcrlockTok := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-blob":"AA==","tpm2_pcrlock":true}`)}
+	_, err = recoverSystemdTPM2Password(context.Background(), pcrlockTok, "cryptroot", "")
+	require.ErrorContains(t, err, "pcrlock")
+}
