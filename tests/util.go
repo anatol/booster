@@ -209,6 +209,7 @@ func generateInitRamfs(workDir string, opts Opts) (string, error) {
 	generatorArgs = append(generatorArgs, "--crypttab", crypttabArg)
 	generatorArgs = append(generatorArgs, output)
 	cmd := exec.Command(binariesDir+"/generator", generatorArgs...)
+	cmd.Env = append(os.Environ(), opts.generatorEnvvars...)
 	if testing.Verbose() {
 		log.Print("Create booster.img with " + cmd.String())
 		cmd.Stdout = os.Stdout
@@ -272,7 +273,7 @@ type GeneratorConfig struct {
 	ExtraFiles           string         `yaml:"extra_files,omitempty"`
 	StripBinaries        bool           `yaml:"strip,omitempty"` // strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole bool           `yaml:"vconsole,omitempty"`
-	EnableLVM            bool           `yaml:"enable_lvm"`
+	EnableLVM            *bool          `yaml:"enable_lvm"`
 	EnableMdraid         bool           `yaml:"enable_mdraid"`
 	MdraidConfigPath     string         `yaml:"mdraid_config_path"`
 	EnableZfs            bool           `yaml:"enable_zfs"`
@@ -310,7 +311,9 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.ExtraFiles = opts.extraFiles
 	conf.StripBinaries = opts.stripBinaries
 	conf.EnableVirtualConsole = opts.enableVirtualConsole
-	conf.EnableLVM = opts.enableLVM
+	if !opts.enableAutoLVM {
+		conf.EnableLVM = &opts.enableLVM
+	}
 	conf.EnableMdraid = opts.enableMdraid
 	conf.MdraidConfigPath = opts.mdraidConf
 	conf.EnableZfs = opts.enableZfs
@@ -347,6 +350,7 @@ type Opts struct {
 	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
+	generatorEnvvars     []string
 	mountTimeout         int           // in seconds
 	vmTimeout            time.Duration // QEMU VM timeout; 0 = use default (40s)
 	appendAllModAliases  bool
@@ -361,6 +365,7 @@ type Opts struct {
 	zfsCachePath         string // TODO: do we need any of these parameters?
 	crypttabFile         string // path to host crypttab to bundle; overrides /etc/crypttab
 	enableFido2          bool
+	enableAutoLVM        bool // separate flag so that we don't change the behaviour of other tests
 
 	// SSH remote-unlock options. Paths are passed through to the generator,
 	// which embeds the file contents into the initramfs config.
