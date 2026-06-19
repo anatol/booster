@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anatol/booster/generator/quirk"
 	"github.com/moby/sys/mountinfo"
 )
 
@@ -31,7 +32,14 @@ func (o *RootMountInfo) GetSysfsPath(majmin string) string {
 }
 
 func (o *RootMountInfo) GetRootDevice() error {
-	mnts, err := mountinfo.GetMounts(mountinfo.SingleEntryFilter("/"))
+	mntPoint := "/"
+	if quirk.TestEnabled {
+		if tmpMnt := os.Getenv("BOOSTER_TEST_ROOT_MOUNTPOINT"); tmpMnt != "" {
+			mntPoint = tmpMnt
+		}
+	}
+
+	mnts, err := mountinfo.GetMounts(mountinfo.SingleEntryFilter(mntPoint))
 	if err != nil {
 		return err
 	} else if len(mnts) == 0 {
