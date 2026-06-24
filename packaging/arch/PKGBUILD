@@ -37,23 +37,29 @@ build() {
       -buildmode=pie \
       -mod=readonly \
       -modcacherw \
-      -ldflags "-linkmode external -extldflags \"${LDFLAGS}\""
+      -ldflags "-linkmode external -buildid='' -extldflags \"${LDFLAGS}\""
 
   cd ../init
   CGO_ENABLED=1 go build -trimpath -mod=readonly -modcacherw
 
   cd fido2plugin
   CGO_ENABLED=1 CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}" \
-    go build -trimpath -mod=readonly -modcacherw -buildmode=plugin -o ../fido2plugin.so .
-  cd ../..
+    go build -trimpath -mod=readonly -modcacherw -buildmode=plugin \
+       -ldflags="-linkmode external -buildid='' -extldflags \"${LDFLAGS}\"" \
+       -o ../fido2plugin.so .
 
+  cd ../..
   ronn docs/manpage.md
 }
 
 check() {
-  cd booster/tests
+  cd booster
+
+  # (cd init; go test)
+  # (cd generator; go test)
+
   # arch chroot does not allow access to KVM
-  # TEST_DISABLE_KVM=1 go test -v # integration tests require a lot of time and space to build 10G images
+  # (cd tests; TEST_DISABLE_KVM=1 go test -v) # disable integration tests for now as it require a lot of time and space to build 10G images
 }
 
 package() {
