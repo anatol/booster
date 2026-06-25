@@ -948,22 +948,36 @@ func tokenBindsPCR15(t luks.Token) bool {
 	return tokenBindsPCR(t, pcrSystemIdentity)
 }
 
-// shouldMeasureVolumeKey decides whether to extend PCR15: tpm2-measure-pcr=
-// overrides; otherwise extend iff a systemd-tpm2 token binds PCR15 (the
-// zero-config default).
-func shouldMeasureVolumeKey(tokens []luks.Token, setting measurePCRSetting) bool {
+// latchMode is the outcome of the PCR15 latch decision: whether to extend, and
+// whether a failure to extend must abort the unlock.
+type latchMode int
+
+const (
+	latchNone     latchMode = iota // do not extend PCR15
+	latchRequired                  // extend, fail-closed (the key is bound to PCR15)
+	latchDefensive                 // extend, best-effort (no PCR15 token, but a TPM is present)
+)
+
+// volumeKeyLatchMode maps the unlock context to a latch mode. tpm2-measure-pcr=
+// yes/no force required/none. Otherwise: required when a systemd-tpm2 token binds
+// PCR15, defensive when no token binds PCR15 but a TPM is present, none when no
+// TPM is present.
+func volumeKeyLatchMode(tokens []luks.Token, setting measurePCRSetting, tpmPresent bool) latchMode {
 	switch setting {
 	case measurePCRForce:
-		return true
+		return latchRequired
 	case measurePCRDisabled:
-		return false
+		return latchNone
 	default:
 		for _, t := range tokens {
 			if tokenBindsPCR15(t) {
-				return true
+				return latchRequired
 			}
 		}
-		return false
+		if tpmPresent {
+			return latchDefensive
+		}
+		return latchNone
 	}
 }
 
@@ -1756,18 +1770,25 @@ func luksOpen(dev string, mapping *luksMapping) error {
 
 	module.Wait()
 
-	// PCR15 latch: once the volume key is recovered, extend PCR15 with the
-	// systemd-compatible volume-key measurement so a key sealed to an
-	// uninitialized PCR15 can't be re-unsealed for the rest of the boot. Done
-	// before SetupMapper/pivot. Fail closed: if a key bound to PCR15 can't be
-	// latched, abort rather than boot with the oracle left open.
-	if shouldMeasureVolumeKey(tokens, mapping.measurePCR) {
+	// Extend PCR15 with the systemd-compatible volume-key measurement, after the
+	// volume key is recovered and before SetupMapper/pivot. volumeKeyLatchMode
+	// selects the mode: a required measurement error aborts the unlock, a
+	// defensive one only warns.
+	switch volumeKeyLatchMode(tokens, mapping.measurePCR, tpmAvailable()) {
+	case latchRequired:
 		if err := measureVolumeKeyToPCR15(v, mapping.name, v.UUID); err != nil {
 			return fmt.Errorf("measuring volume key to PCR%d for %s: %v", pcrSystemIdentity, mapping.name, err)
 		}
 		debug("PCR%d re-unseal latch engaged for %s", pcrSystemIdentity, mapping.name)
-	} else {
-		debug("PCR%d latch not engaged for %s (tpm2-measure-pcr=%s; no token binds PCR%d)", pcrSystemIdentity, mapping.name, mapping.measurePCR, pcrSystemIdentity)
+	case latchDefensive:
+		// Best-effort: a measurement error warns instead of aborting the unlock.
+		if err := measureVolumeKeyToPCR15(v, mapping.name, v.UUID); err != nil {
+			warning("PCR%d defensive latch not applied for %s: %v", pcrSystemIdentity, mapping.name, err)
+		} else {
+			debug("PCR%d defensive re-unseal latch engaged for %s", pcrSystemIdentity, mapping.name)
+		}
+	case latchNone:
+		debug("PCR%d latch not engaged for %s (tpm2-measure-pcr=%s)", pcrSystemIdentity, mapping.name, mapping.measurePCR)
 	}
 
 	return v.SetupMapper(mapping.name)
