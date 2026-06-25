@@ -381,6 +381,129 @@ func TestSignedUnsealWithPIN(t *testing.T) {
 	require.Error(t, err, "a wrong PIN must not unseal")
 }
 
+// sigJSONEntries builds a systemd PCR signature JSON with multiple (approved
+// policy digest, signature) entries for one bank/pcr — modeling a signature file
+// that covers more than one boot phase.
+func sigJSONEntries(pub *rsa.PublicKey, pcr int, entries [][2][]byte) []byte {
+	fp := rsaPublicKeyFingerprint(pub)
+	inner := ""
+	for i, e := range entries {
+		if i > 0 {
+			inner += ","
+		}
+		inner += fmt.Sprintf(`{"pcrs":[%d],"pkfp":"%s","pol":"%s","sig":"%s"}`,
+			pcr, fp, hex.EncodeToString(e[0]), base64.StdEncoding.EncodeToString(e[1]))
+	}
+	return []byte(fmt.Sprintf(`{"sha256":[%s]}`, inner))
+}
+
+// TestLeaveInitrdForwardLockDefeatedByDefaultPhaseSignature demonstrates the
+// limit of the PCR11 leave-initrd forward-lock against a SIGNED policy: it only
+// locks the key when the signature is restricted to the enter-initrd phase.
+//
+// systemd-measure's default --phases signs the progression enter-initrd,
+// enter-initrd:leave-initrd, …:sysinit, …:ready. So the signature file (readable,
+// in the UKI) contains an entry for the enter-initrd:leave-initrd state — exactly
+// the PCR11 value L that applyBootPhaseForwardLock advances to. selectSignature
+// matches the live PCR11, so at L it finds that entry and the key unseals: the
+// forward-lock does NOT deny it. Only an enter-initrd-restricted signature leaves
+// L unsigned, so advancing to L makes the key unreachable.
+//
+// This is why a literal PCR15 latch (bound to the all-zero value, which no
+// signature can satisfy once dirtied) is the robust LUKS forward-lock, while the
+// phase lock depends on how the UKI was signed.
+func TestLeaveInitrdForwardLockDefeatedByDefaultPhaseSignature(t *testing.T) {
+	r := newSignedRig(t)
+	pub, priv := r.seal(r.authorizePolicy(), nil)
+	pubkeyPCRs := []int{pcrKernelBoot}
+
+	// Genuine initrd reaches the enter-initrd phase (PCR11 == E); sign that state.
+	extendPhasePCR11(t, r.tpm, phaseEnterInitrd)
+	polE := r.policyPCRDigest(pcrKernelBoot)
+	sigE := r.signPolicy(polE)
+
+	// The forward-lock advances to leave-initrd (PCR11 == L). Sign that state too,
+	// as systemd-measure's default phases do.
+	extendPhasePCR11(t, r.tpm, phaseLeaveInitrd)
+	polL := r.policyPCRDigest(pcrKernelBoot)
+	sigL := r.signPolicy(polL)
+	require.NotEqual(t, polE, polL, "enter-initrd and leave-initrd must be distinct PCR11 states")
+
+	// PCR11 is now at L — exactly where applyBootPhaseForwardLock leaves it before
+	// handing off to the attacker's init.
+
+	// Default-phase signature (E and L both signed): the post-pivot init at L finds
+	// the leave-initrd entry, so the key UNSEALS — the forward-lock is defeated.
+	defaultSig := sigJSONEntries(r.pub(), pcrKernelBoot, [][2][]byte{{polE, sigE}, {polL, sigL}})
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", defaultSig, nil)
+	require.NoError(t, err,
+		"default full-phase signature signs the leave-initrd state, so advancing PCR11 to L does NOT deny the key")
+	require.Equal(t, []byte(signedTestSecret), out, "key leaks at L when leave-initrd is among the signed phases")
+
+	// enter-initrd-restricted signature (only E signed): at L no signature matches
+	// the live PCR11, so the key is DENIED — the forward-lock actually locks.
+	restrictedSig := sigJSONEntries(r.pub(), pcrKernelBoot, [][2][]byte{{polE, sigE}})
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", restrictedSig, nil)
+	require.Error(t, err,
+		"with an enter-initrd-restricted signature, no entry matches PCR11 == L, so the forward-lock denies the key")
+}
+
+// TestPCR15LatchDeniesAtLeaveInitrd pins that the literal PCR15 latch denies
+// the key in the case the PCR11 phase walk does not — a default-phase signature
+// where the leave-initrd state (PCR11 == L) is itself signed.
+//
+// The key binds signed PCR11 (PolicyAuthorize) AND literal PCR15 == 0 — the
+// recommended 7+11+15 shape minus PCR7 (which swtpm can't measure). At PCR11 == L
+// the leave-initrd signature satisfies the signed half, so the key unseals (see
+// TestLeaveInitrdForwardLockDefeatedByDefaultPhaseSignature). Once PCR15 is
+// dirtied, the literal 15 == 0 clause no longer holds — no signature can satisfy
+// a literal PCR — so the same unseal is denied.
+func TestPCR15LatchDeniesAtLeaveInitrd(t *testing.T) {
+	r := newSignedRig(t)
+
+	const literalPCR = pcrSystemIdentity // 15
+	sel15 := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+		Hash: tpm2.TPMAlgSHA256, PCRSelect: tpm2.PCClientCompatible.PCRs(uint(literalPCR)),
+	}}}
+	composite := sha256.Sum256(make([]byte, 32)) // PolicyPCR digest for an all-zero PCR15
+	authPolicy := r.authorizePolicy(func(pc *tpm2.PolicyCalculator) {
+		require.NoError(t, (&tpm2.PolicyPCR{Pcrs: sel15, PcrDigest: tpm2.TPM2BDigest{Buffer: composite[:]}}).Update(pc))
+	})
+	pub, priv := r.seal(authPolicy, nil)
+
+	pubkeyPCRs := []int{pcrKernelBoot}
+	literalPCRs := []int{literalPCR}
+
+	// Default-phase signature: BOTH enter-initrd (E) and leave-initrd (L) signed.
+	extendPhasePCR11(t, r.tpm, phaseEnterInitrd)
+	polE := r.policyPCRDigest(pcrKernelBoot)
+	sigE := r.signPolicy(polE)
+	extendPhasePCR11(t, r.tpm, phaseLeaveInitrd)
+	polL := r.policyPCRDigest(pcrKernelBoot)
+	sigL := r.signPolicy(polL)
+	defaultSig := sigJSONEntries(r.pub(), pcrKernelBoot, [][2][]byte{{polE, sigE}, {polL, sigL}})
+
+	// PCR11 at L (forward-locked) and PCR15 still 0: the leave-initrd signature
+	// satisfies the signed half, so the key UNSEALS — the hole the phase lock can't
+	// close.
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
+	require.NoError(t, err, "at PCR11 == L with leave-initrd signed, the signed half is satisfiable")
+	require.Equal(t, []byte(signedTestSecret), out, "the phase lock alone does not deny the key here")
+
+	// The PCR15 latch dirties PCR15 (any extension breaks the literal 15 == 0).
+	// Extended on the shared connection, as measureVolumeKeyToPCR15 would in the
+	// initrd. Now the key is DENIED at L despite the valid leave-initrd signature.
+	d := sha256.Sum256([]byte("cryptsetup:cryptroot:uuid"))
+	_, err = (&tpm2.PCRExtend{
+		PCRHandle: tpm2.AuthHandle{Handle: tpm2.TPMHandle(literalPCR), Auth: tpm2.PasswordAuth(nil)},
+		Digests:   tpm2.TPMLDigestValues{Digests: []tpm2.TPMTHA{{HashAlg: tpm2.TPMAlgSHA256, Digest: d[:]}}},
+	}).Execute(r.tpm)
+	require.NoError(t, err)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
+	require.Error(t, err,
+		"once PCR15 is dirtied, the literal 15 == 0 clause denies the key even though leave-initrd is signed")
+}
+
 // extendPhasePCR11 extends PCR 11 with a phase word on the shared test TPM
 // connection, byte-identical to measurePhaseToPCR11 (SHA256(word), proven in
 // TestMeasurePhaseToPCR11). Used to model the initrd timeline without opening the
@@ -526,34 +649,4 @@ func TestSignedUnsealAtEnterInitrdBarrier(t *testing.T) {
 	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", r.sigJSON(pcrKernelBoot, enter, r.signPolicy(enter)), nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out, "a signature for the enter-initrd PCR11 value must unseal")
-}
-
-// TestLeaveInitrdForwardLock pins the forward-lock booster applies at
-// switch_root. A root key signed only for the "enter-initrd" phase (as
-// systemd-measure --phase=enter-initrd produces for an initrd-only secret)
-// unseals while PCR 11 holds the enter-initrd value, but once "leave-initrd" is
-// extended the same signature no longer matches the advanced PCR 11 — so the key
-// cannot be unsealed after the host takes over. PolicyAuthorize would accept any
-// signed value, so the lock is enforced by the absence of a signature for later
-// phases, exactly as in systemd.
-func TestLeaveInitrdForwardLock(t *testing.T) {
-	r := newSignedRig(t)
-	pub, priv := r.seal(r.authorizePolicy(), nil)
-
-	pubkeyPCRs := []int{pcrKernelBoot}
-
-	// enter-initrd: sign the root key for this phase only, and unseal succeeds.
-	extendPhasePCR11(t, r.tpm, phaseEnterInitrd)
-	enter := r.policyPCRDigest(pcrKernelBoot)
-	enterSig := r.sigJSON(pcrKernelBoot, enter, r.signPolicy(enter))
-
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", enterSig, nil)
-	require.NoError(t, err)
-	require.Equal(t, []byte(signedTestSecret), out, "the enter-initrd-signed key unseals during the initrd")
-
-	// switch_root extends leave-initrd; the enter-initrd-only signature — the only
-	// one that exists for this key — can no longer satisfy the policy.
-	extendPhasePCR11(t, r.tpm, phaseLeaveInitrd)
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", enterSig, nil)
-	require.Error(t, err, "after leave-initrd the enter-initrd-only signature must not unseal (forward-lock)")
 }

@@ -30,25 +30,31 @@ func TestTokenBindsPCR15(t *testing.T) {
 	}
 }
 
-func TestShouldMeasureVolumeKey(t *testing.T) {
+func TestVolumeKeyLatchMode(t *testing.T) {
 	binds15 := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-pcrs":[7,15]}`)}
 	binds7 := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-pcrs":[7]}`)}
 
 	cases := []struct {
-		name    string
-		tokens  []luks.Token
-		setting measurePCRSetting
-		want    bool
+		name       string
+		tokens     []luks.Token
+		setting    measurePCRSetting
+		tpmPresent bool
+		want       latchMode
 	}{
-		{"force, no tokens", nil, measurePCRForce, true},
-		{"force, even if not bound", []luks.Token{binds7}, measurePCRForce, true},
-		{"disabled, even if bound to 15", []luks.Token{binds15}, measurePCRDisabled, false},
-		{"auto, token binds 15", []luks.Token{binds15}, measurePCRAuto, true},
-		{"auto, token binds 7 only", []luks.Token{binds7}, measurePCRAuto, false},
-		{"auto, no tokens", nil, measurePCRAuto, false},
-		{"auto, one of several binds 15", []luks.Token{binds7, binds15}, measurePCRAuto, true},
+		// Forced and disabled ignore the token and the TPM probe.
+		{"force, no tokens", nil, measurePCRForce, true, latchRequired},
+		{"force, even with no TPM", nil, measurePCRForce, false, latchRequired},
+		{"disabled, even if bound to 15", []luks.Token{binds15}, measurePCRDisabled, true, latchNone},
+		// Auto with a PCR15-binding token: required (fail-closed), as before.
+		{"auto, token binds 15", []luks.Token{binds15}, measurePCRAuto, true, latchRequired},
+		{"auto, one of several binds 15", []luks.Token{binds7, binds15}, measurePCRAuto, true, latchRequired},
+		// Auto, no PCR15 token: defensive when a TPM is present, none when not.
+		{"auto, no PCR15 token, TPM present -> defensive", []luks.Token{binds7}, measurePCRAuto, true, latchDefensive},
+		{"auto, no tokens, TPM present -> defensive", nil, measurePCRAuto, true, latchDefensive},
+		{"auto, no tokens, no TPM -> none", nil, measurePCRAuto, false, latchNone},
+		{"auto, token binds 7 only, no TPM -> none", []luks.Token{binds7}, measurePCRAuto, false, latchNone},
 	}
 	for _, c := range cases {
-		require.Equal(t, c.want, shouldMeasureVolumeKey(c.tokens, c.setting), c.name)
+		require.Equal(t, c.want, volumeKeyLatchMode(c.tokens, c.setting, c.tpmPresent), c.name)
 	}
 }
