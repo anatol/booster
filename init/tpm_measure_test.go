@@ -148,6 +148,94 @@ func TestEnsureEnterInitrdBarrierOnce(t *testing.T) {
 	require.Equal(t, want, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "barrier must extend exactly once per boot")
 }
 
+// TestApplyBootPhaseForwardLockUnconditional pins the boot-phase alignment with
+// systemd-pcrphase-initrd: the PCR11 walk (enter-initrd -> leave-initrd) must run
+// even when NO token was processed, so PCR11 is advanced to the leave-initrd
+// value before handoff regardless of unlock path. Without a prior enter-initrd,
+// the function applies BOTH phases from the current PCR11 state.
+func TestApplyBootPhaseForwardLockUnconditional(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+	resetEnterInitrdBarrier()
+	t.Cleanup(resetEnterInitrdBarrier)
+
+	// PCR11 starts at all-zeros in fresh swtpm (no token was processed).
+	require.Equal(t, make([]byte, 32), readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "sha256:11 must start zero")
+
+	applyBootPhaseForwardLock()
+
+	// Expected: PCR11 = leave( enter( zeros ) ), both phases applied.
+	enterExt := sha256.Sum256([]byte(phaseEnterInitrd))
+	e := sha256.New()
+	e.Write(make([]byte, 32))
+	e.Write(enterExt[:])
+	afterEnter := e.Sum(nil)
+
+	leaveExt := sha256.Sum256([]byte(phaseLeaveInitrd))
+	l := sha256.New()
+	l.Write(afterEnter)
+	l.Write(leaveExt[:])
+	want := l.Sum(nil)
+
+	require.Equal(t, want, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot),
+		"forward-lock must walk PCR11 enter-initrd -> leave-initrd even with no token processed")
+	require.True(t, enterInitrdApplied, "enter-initrd must be recorded as applied")
+}
+
+// TestApplyBootPhaseForwardLockIdempotentAfterEarlyEnter pins the no-lockout
+// invariant: a genuine signed-PCR11 boot applies enter-initrd EARLY (before its
+// unseal, in luks.go). When switch_root later calls applyBootPhaseForwardLock,
+// enter-initrd must NOT be applied a second time — a double extension would push
+// PCR11 to the wrong value and break every signed-PCR11 unseal. The result must
+// be exactly enter-initrd-once then leave-initrd.
+func TestApplyBootPhaseForwardLockIdempotentAfterEarlyEnter(t *testing.T) {
+	startSwtpmTCPForTest(t)
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+	resetEnterInitrdBarrier()
+	t.Cleanup(resetEnterInitrdBarrier)
+
+	// Simulate the genuine path: enter-initrd applied early (as luks.go does
+	// before a signed-PCR11 unseal).
+	require.NoError(t, ensureEnterInitrdBarrier())
+
+	enterExt := sha256.Sum256([]byte(phaseEnterInitrd))
+	e := sha256.New()
+	e.Write(make([]byte, 32))
+	e.Write(enterExt[:])
+	afterEnter := e.Sum(nil)
+	require.Equal(t, afterEnter, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot), "early enter-initrd value")
+
+	// switch_root forward-lock: must add only leave-initrd, not a second enter.
+	applyBootPhaseForwardLock()
+
+	leaveExt := sha256.Sum256([]byte(phaseLeaveInitrd))
+	l := sha256.New()
+	l.Write(afterEnter)
+	l.Write(leaveExt[:])
+	want := l.Sum(nil)
+
+	require.Equal(t, want, readPCRIndex(t, tpm2.AlgSHA256, pcrKernelBoot),
+		"forward-lock after an early enter-initrd must apply leave-initrd only (no double enter-initrd)")
+}
+
+// TestApplyBootPhaseForwardLockBestEffortNoTPM pins the no-brick invariant: with
+// no reachable TPM (emulator dial to :2321 with no swtpm), the forward-lock must
+// return without error or panic so a TPM-less / passphrase-only boot still hands
+// off to the real init. Contrast with the fail-closed PCR15 latch, which aborts.
+func TestApplyBootPhaseForwardLockBestEffortNoTPM(t *testing.T) {
+	enableSwEmulator = true // openTPM dials :2321; no swtpm is started
+	t.Cleanup(func() { enableSwEmulator = false })
+	resetEnterInitrdBarrier()
+	t.Cleanup(resetEnterInitrdBarrier)
+
+	require.NotPanics(t, func() { applyBootPhaseForwardLock() },
+		"forward-lock must be best-effort when no TPM is reachable (no brick)")
+	require.False(t, enterInitrdApplied,
+		"with no TPM, enter-initrd is not applied and no leave-initrd lock is attempted")
+}
+
 // rawKeyHMACer is a test volumeKeyHMACer backed by a raw key, mirroring what
 // luks.Volume.HMAC does in production (HMAC keyed by the master key).
 type rawKeyHMACer []byte
