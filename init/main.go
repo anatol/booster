@@ -859,17 +859,9 @@ func deleteRamfs() error {
 
 // https://github.com/mirror/busybox/blob/9aa751b08ab03d6396f86c3df77937a19687981b/util-linux/switch_root.c#L297
 func switchRoot() error {
-	// Forward-lock: if a PCR11-bound key was unsealed this boot, extend
-	// "leave-initrd" before handing off, so that key can no longer be unsealed
-	// once the host has taken over (matching systemd-pcrphase-initrd's ExecStop,
-	// which fires at switch-root). Done here while /dev/tpm is still reachable,
-	// before mounts move. Best-effort: the volume is already unlocked, so a
-	// failure must not block handoff to the real init.
-	if enterInitrdApplied {
-		if err := measurePhaseToPCR11(phaseLeaveInitrd); err != nil {
-			warning("PCR%d: could not extend leave-initrd forward-lock: %v", pcrKernelBoot, err)
-		}
-	}
+	// Forward-lock PCR11 here, while /dev/tpm is still reachable and before
+	// mounts move.
+	applyBootPhaseForwardLock()
 
 	clearSplashStatusSync()
 

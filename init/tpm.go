@@ -56,6 +56,16 @@ func openTPM() (io.ReadWriteCloser, error) {
 	return dev, nil
 }
 
+// tpmAvailable reports whether a TPM 2.0 is reachable, by opening and closing it.
+func tpmAvailable() bool {
+	dev, err := openTPM()
+	if err != nil {
+		return false
+	}
+	_ = dev.Close()
+	return true
+}
+
 // Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
 func tpmAwaitReady() bool {
 	timedOut := waitTimeout(&tpmReadyWg, time.Second*3)
@@ -345,6 +355,23 @@ func ensureEnterInitrdBarrier() error {
 		}
 	})
 	return enterInitrdErr
+}
+
+// applyBootPhaseForwardLock extends PCR11 with the enter-initrd then leave-initrd
+// phase words before switch_root, on every boot regardless of whether anything
+// unlocked — matching what systemd-pcrphase-initrd measures. enter-initrd goes
+// through ensureEnterInitrdBarrier (sync.Once), so it is extended at most once
+// per boot. Best-effort: a failed extend warns rather than aborting handoff.
+func applyBootPhaseForwardLock() {
+	if err := ensureEnterInitrdBarrier(); err != nil {
+		// ensureEnterInitrdBarrier failed (no TPM, or the extend errored); skip the
+		// leave-initrd extend.
+		debug("PCR%d: enter-initrd barrier unavailable, skipping forward-lock: %v", pcrKernelBoot, err)
+		return
+	}
+	if err := measurePhaseToPCR11(phaseLeaveInitrd); err != nil {
+		warning("PCR%d: could not extend leave-initrd forward-lock: %v", pcrKernelBoot, err)
+	}
 }
 
 // Returns session handle and policy digest.
