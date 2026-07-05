@@ -147,7 +147,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `rd.luks.uuid=$UUID` UUID of the LUKS partition where the root partition is enclosed. booster will try to unlock this LUKS device.
  * `rd.luks.name=$UUID=$NAME` similar to rd.luks.uuid parameter but also specifies the name used for the LUKS device opening.
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request.
- * `rd.luks.header=$PARTUUID=$PATH` detached LUKS header for the device identified by `$PARTUUID` (notice that no filesystem UUID is shown when the header is detached as it is stored in the header. `$PATH` can take three forms:
+ * `rd.luks.header=$UUID=$PATH` detached LUKS header for the device identified by `$UUID` — the LUKS superblock UUID, the same value `rd.luks.uuid` takes and what `cryptsetup luksUUID --header $PATH` prints. Because that UUID lives *in the header*, a device with a detached header exposes no LUKS or filesystem UUID of its own; identify it by this header UUID, not by the data partition's `PARTUUID`. `$PATH` can take three forms:
     * **Initramfs file** — an absolute path (e.g. `/etc/luks/root.hdr`) to a header file bundled into the initramfs at build time via `extra_files`.
     * **Raw block device** — a device path (e.g. `/dev/sdb`) where the LUKS header begins at byte offset 0. Booster waits for the device to appear and passes it directly to cryptsetup without mounting.
     * **File on a separate device** — `$path:$deviceref` where `$deviceref` is `UUID=...`, `LABEL=...`, `PARTUUID=...`, or `PARTLABEL=...`. Booster mounts the device read-only, reads the header file, then unmounts before unlocking.
@@ -247,7 +247,14 @@ same device, the cmdline takes precedence for the device reference and
 mapper name, and for any security option (keyfile, header, tries,
 token-timeout, …) it sets explicitly; the crypttab entry supplies only
 the options the cmdline left unset. Crypttab entries for devices not
-covered by `rd.luks.*` are appended as new mappings.
+covered by `rd.luks.*` are appended as new mappings. Two entries "cover
+the same device" only when they name it the same way: a crypttab entry
+merges with a `rd.luks.*` parameter only if its device field is the same
+LUKS UUID (`UUID=<luksUUID>`). A crypttab entry that instead uses a
+partition identifier (`PARTUUID=`, `PARTLABEL=`, `LABEL=`, or a path) is
+treated as a distinct device and appended as its own mapping, so its
+options do **not** merge onto the cmdline entry — `systemd-cryptsetup`
+reconciles the two sources by LUKS UUID the same way.
 
 Booster-specific behaviour for selected options:
 
