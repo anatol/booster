@@ -246,6 +246,18 @@ the initramfs at image build time. The generator must be able to read
 the file — run as root, or pass `--crypttab <path>` to a user-readable
 copy.
 
+The root filesystem's LUKS device belongs in crypttab too, marked
+`x-initrd.attach` — booster processes such entries in the initramfs,
+before the root mount, so the common "root does not belong in crypttab"
+caution does not apply here (that caution concerns the post-boot
+`/etc/crypttab`, which is read too late for root). Initramfs generators
+differ on how early-unlock entries are marked: booster follows systemd's
+`x-initrd.attach`; mkinitcpio uses a separate `/etc/crypttab.initramfs`;
+and Debian's cryptsetup-initramfs uses an `initramfs` option and
+auto-detects the root device from `/etc/fstab`. Booster recognizes only
+`x-initrd.attach`, so a crypttab imported from one of those systems needs
+its early entries marked `x-initrd.attach`.
+
 When both a `rd.luks.*` cmdline parameter and a crypttab entry cover the
 same device, the cmdline takes precedence for the device reference and
 mapper name, and for any security option (keyfile, header, tries,
