@@ -13,11 +13,11 @@ import (
 	"strings"
 )
 
-// kbdBaseDir is the root of the kbd data tree. Arch/Debian/openSUSE/Alpine use
-// /usr/share/kbd; Fedora/RHEL use /usr/lib/kbd. Probe at startup so the generator
-// works on any distro without configuration.
+// kbdBaseDir is the root of the kbd data tree. Arch/Debian/openSUSE use
+// /usr/share/kbd, Fedora/RHEL use /usr/lib/kbd, Alpine uses /usr/share.
+// Probe at startup so the generator works on any distro without configuration.
 var kbdBaseDir = func() string {
-	for _, d := range []string{"/usr/share/kbd", "/usr/lib/kbd"} {
+	for _, d := range []string{"/usr/share/kbd", "/usr/lib/kbd", "/usr/share"} {
 		if _, err := os.Stat(filepath.Join(d, "consolefonts")); err == nil {
 			return d
 		}
