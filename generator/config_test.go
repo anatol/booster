@@ -256,3 +256,45 @@ network:
 	require.NoError(t, err)
 	require.NotEmpty(t, c.sshHostKey)
 }
+
+func TestReadConfigPasswordEcho(t *testing.T) {
+	t.Parallel()
+
+	// A single mode (pinned prompt), a two-mode cycle, and a full explicit
+	// order with surrounding spaces must all pass through verbatim.
+	for _, val := range []string{"silent", "silent,asterisks", "plaintext, silent, asterisks"} {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "booster.yaml")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("password_echo: "+val+"\n"), 0o644))
+
+		c, err := readGeneratorConfig(cfgPath)
+		require.NoError(t, err, "value %q", val)
+		require.Equal(t, val, c.passwordEcho, "value %q", val)
+	}
+}
+
+func TestReadConfigPasswordEchoDefaults(t *testing.T) {
+	t.Parallel()
+
+	c, err := readGeneratorConfig("")
+	require.NoError(t, err)
+	require.Equal(t, "", c.passwordEcho)
+}
+
+func TestReadConfigRejectsInvalidPasswordEcho(t *testing.T) {
+	t.Parallel()
+
+	for _, val := range []string{
+		"hidden",            // unknown mode
+		"silent,hidden",     // unknown mode inside a list
+		"silent,silent",     // duplicate mode
+		"silent,,asterisks", // empty element
+	} {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "booster.yaml")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("password_echo: "+val+"\n"), 0o644))
+
+		_, err := readGeneratorConfig(cfgPath)
+		require.ErrorContains(t, err, "password_echo", "value %q must be rejected", val)
+	}
+}

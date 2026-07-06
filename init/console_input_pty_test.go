@@ -15,7 +15,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -289,4 +291,172 @@ func TestReadPasswordOnCancelAfterPartialInput(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("reader did not return within 2s of cancellation")
 	}
+}
+
+// ── Echo-mode behavior ───────────────────────────────────────────────────────
+//
+// The reader echoes feedback to the process stdout (the boot console), not to
+// the tty it reads from, so these tests capture os.Stdout to observe what a
+// user would see. The echo-cycle global is swapped per test and restored via
+// t.Cleanup; the package's tests run sequentially so this does not race.
+
+// captureStdout redirects os.Stdout to a pipe for the duration of fn and
+// returns everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stdout
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = w.Close()
+		_ = r.Close()
+	}()
+	fn()
+	os.Stdout = old
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
+// setEchoCycle overrides the echo-cycle global for one test. The first mode
+// is the startup mode; a single mode pins the prompt.
+func setEchoCycle(t *testing.T, cycle ...passwordEchoMode) {
+	t.Helper()
+	old := passwordEchoCycle
+	passwordEchoCycle = cycle
+	t.Cleanup(func() { passwordEchoCycle = old })
+}
+
+// runPromptSession runs readPasswordOn against a fresh pty, types input on the
+// master, and returns the produced password plus everything the reader printed
+// to stdout (prompt, echo, erase sequences).
+func runPromptSession(t *testing.T, prompt string, input []byte) (password []byte, output string) {
+	t.Helper()
+	master, slave := openPTY(t)
+	output = captureStdout(t, func() {
+		type result struct {
+			password []byte
+			err      error
+		}
+		done := make(chan result, 1)
+		go func() {
+			pw, err := readPasswordOn(t.Context(), slave, prompt, "")
+			done <- result{pw, err}
+		}()
+		time.Sleep(50 * time.Millisecond)
+		_, err := master.Write(input)
+		require.NoError(t, err)
+		select {
+		case res := <-done:
+			require.NoError(t, res.err)
+			password = res.password
+		case <-time.After(2 * time.Second):
+			t.Fatal("reader did not return after typing input")
+		}
+	})
+	return password, output
+}
+
+func TestReadPasswordOnAsterisksModeEchoesStars(t *testing.T) {
+	setEchoCycle(t, echoAsterisks)
+	password, out := runPromptSession(t, "> ", []byte("abc\n"))
+	require.Equal(t, []byte("abc"), password)
+	require.Contains(t, out, "***")
+	require.NotContains(t, out, "abc", "asterisks mode must not leak the typed characters")
+}
+
+func TestReadPasswordOnSilentModeEchoesNothing(t *testing.T) {
+	setEchoCycle(t, echoSilent)
+	password, out := runPromptSession(t, "> ", []byte("secret\n"))
+	require.Equal(t, []byte("secret"), password)
+	require.NotContains(t, out, "*")
+	require.NotContains(t, out, "secret", "silent mode must not leak the typed characters")
+}
+
+func TestReadPasswordOnPlaintextModeEchoesLiteral(t *testing.T) {
+	setEchoCycle(t, echoPlaintext)
+	// Type "secrex", erase the x, type "t".
+	password, out := runPromptSession(t, "> ", []byte("secrex\bt\n"))
+	require.Equal(t, []byte("secret"), password)
+	require.Contains(t, out, "secrex", "plaintext mode must echo the typed characters")
+	require.Contains(t, out, eraseChar, "backspace must erase the echoed character")
+}
+
+func TestReadPasswordOnTabCyclesModes(t *testing.T) {
+	setEchoCycle(t, echoAsterisks, echoSilent, echoPlaintext)
+	// Type "zq", Tab (→ silent: both cells erased), Tab (→ plaintext: repaint
+	// the buffer literally), Enter. Tab must never land in the password.
+	password, out := runPromptSession(t, "> ", []byte("zq\t\t\n"))
+	require.Equal(t, []byte("zq"), password)
+	require.Contains(t, out, "**", "asterisks painted before the first Tab")
+	require.Contains(t, out, "zq", "second Tab must repaint the buffer in plaintext")
+	require.Equal(t, 2, strings.Count(out, eraseChar),
+		"the asterisks→silent transition must erase exactly the two painted cells")
+}
+
+func TestReadPasswordOnHiddenOnlyCycleNeverRevealsPlaintext(t *testing.T) {
+	setEchoCycle(t, echoSilent, echoAsterisks)
+	// Type "zq" (silent), Tab (→ asterisks: repaint two stars), Tab (wraps
+	// back to silent: erase them), Enter. Plaintext is not in the cycle, so
+	// the typed characters must never be painted.
+	password, out := runPromptSession(t, "> ", []byte("zq\t\t\n"))
+	require.Equal(t, []byte("zq"), password)
+	require.Contains(t, out, "**", "first Tab must repaint the buffer as asterisks")
+	require.NotContains(t, out, "zq", "plaintext is not in the cycle and must never be painted")
+	require.Equal(t, 2, strings.Count(out, eraseChar),
+		"the wrap back to silent must erase exactly the two painted cells")
+}
+
+func TestReadPasswordOnSingleModeCycleIgnoresTab(t *testing.T) {
+	setEchoCycle(t, echoSilent)
+	password, out := runPromptSession(t, "> ", []byte("z\tq\n"))
+	require.Equal(t, []byte("zq"), password, "Tab must be swallowed, not typed into the password")
+	require.NotContains(t, out, "*", "pinned silent mode must never start echoing")
+	require.NotContains(t, out, "z")
+	require.NotContains(t, out, "q")
+}
+
+// setActivePrompt marks a fake prompt active with the given painted feedback
+// for the duration of one test.
+func setActivePrompt(t *testing.T, text, echoed string) {
+	t.Helper()
+	consoleMu.Lock()
+	consolePrompt.active = true
+	consolePrompt.text = text
+	consolePrompt.echoed = echoed
+	consolePrompt.done = nil
+	consoleMu.Unlock()
+	t.Cleanup(func() {
+		consoleMu.Lock()
+		consolePrompt.active = false
+		consolePrompt.text = ""
+		consolePrompt.echoed = ""
+		consoleMu.Unlock()
+	})
+}
+
+// TestConsolePrintWithPromptRedrawRepaintsEchoed verifies the log-over-prompt
+// redraw path repaints whatever feedback is currently on screen — asterisks or
+// plaintext — rather than assuming asterisks, and erases the live prompt line
+// in place first so it never scrolls into terminal scrollback (in plaintext
+// mode that line holds the literal passphrase).
+func TestConsolePrintWithPromptRedrawRepaintsEchoed(t *testing.T) {
+	setActivePrompt(t, "> ", "zq")
+
+	out := captureStdout(t, func() { consolePrintWithPromptRedraw("status line") })
+	require.Equal(t, eraseLine+"status line\n> zq", out,
+		"the live prompt line must be erased before the message scrolls it away")
+}
+
+// TestStatusMessageErasesLivePromptLine verifies the unlock-status redraw path
+// (statusMessage, plymouth.go) has the same erase-before-scroll behavior.
+func TestStatusMessageErasesLivePromptLine(t *testing.T) {
+	setActivePrompt(t, "> ", "zq")
+
+	out := captureStdout(t, func() { statusMessage("volume unlocked") })
+	require.Equal(t, eraseLine+"\n\nvolume unlocked\n\n> zq", out,
+		"the live prompt line must be erased before the message scrolls it away")
 }
