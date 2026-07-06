@@ -64,6 +64,8 @@ type generatorConfig struct {
 	clevisTimeout   int  // serialize-mode per-token bound for clevis (seconds); 0 = default
 	tpm2Timeout     int  // serialize-mode per-token bound for non-PIN systemd-tpm2 (seconds); 0 = default
 	fido2Timeout    int  // serialize-mode per-token bound for non-PIN systemd-fido2 (seconds); 0 = default
+
+	passwordEcho string // ordered comma-separated echo-mode cycle for the prompt; "" = default asterisks,silent,plaintext
 }
 
 type networkStaticConfig struct {
@@ -515,6 +517,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.ClevisTimeout = conf.clevisTimeout
 	initConfig.Tpm2Timeout = conf.tpm2Timeout
 	initConfig.Fido2Timeout = conf.fido2Timeout
+	initConfig.PasswordEcho = conf.passwordEcho
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

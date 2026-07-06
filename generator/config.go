@@ -75,6 +75,7 @@ type UserConfig struct {
 	EnableFido2          bool   `yaml:"enable_fido2"`
 	TokenTimeout         string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
 	PinDelay             string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
+	PasswordEcho         string `yaml:"password_echo,omitempty"` // ordered comma-separated list of prompt echo modes; first = startup mode, Tab cycles the list; default asterisks,silent,plaintext
 
 	// SerializeTokens opts out of booster's token concurrency: tokens are
 	// tried one at a time in ID order. The per-type timeouts are scoped here
@@ -97,6 +98,31 @@ func parseCommaList(raw string) []string {
 		values = append(values, value)
 	}
 	return values
+}
+
+// validatePasswordEcho checks a password_echo value: an ordered,
+// comma-separated list of unique prompt echo modes. The first entry is the
+// startup mode and Tab cycles through the list in order (a single entry pins
+// the prompt). Empty selects the default cycle asterisks,silent,plaintext.
+// init/console_input.go parses the same syntax at boot time.
+func validatePasswordEcho(val string) error {
+	if val == "" {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for mode := range strings.SplitSeq(val, ",") {
+		mode = strings.TrimSpace(mode)
+		switch mode {
+		case "asterisks", "silent", "plaintext":
+		default:
+			return fmt.Errorf("config: invalid password_echo mode %q, expected a comma-separated list of: asterisks, silent, plaintext", mode)
+		}
+		if seen[mode] {
+			return fmt.Errorf("config: password_echo lists mode %q twice", mode)
+		}
+		seen[mode] = true
+	}
+	return nil
 }
 
 // read user config from the specified file. If file parameter is empty string then "empty" configuration is considered
@@ -246,6 +272,10 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.crypttabFile = u.CrypttabPath
 	}
 	conf.enableFido2 = u.EnableFido2
+	if err := validatePasswordEcho(u.PasswordEcho); err != nil {
+		return nil, err
+	}
+	conf.passwordEcho = u.PasswordEcho
 	var clevisT, tpm2T, fido2T string
 	if st := u.SerializeTokens; st != nil {
 		conf.serializeTokens = st.Enabled
