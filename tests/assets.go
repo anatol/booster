@@ -32,6 +32,16 @@ var assetGenerators = map[string]assetGenerator{
 		"FS_UUID=781780d2-bf67-4a17-9ca8-fd22336c1b2e",
 		"HEADER_OUTPUT=assets/luks2.detached_header.hdr",
 	}},
+	// luks2.detached_header2.img: a SECOND detached-header LUKS2 volume (distinct
+	// UUID, no filesystem — a decoy). Generated root-free via luks_detached_header_nofs.sh.
+	// Used as the first-arriving disk in TestLUKS2DetachedHeaderMultiDeviceCmdline
+	// so the second disk (the real root) is the one rd.luks.data= must rescue from
+	// the device-blind fallback.
+	"luks2.detached_header2.img": {"luks_detached_header_nofs.sh", []string{
+		"LUKS_UUID=4d4d4d4d-4444-4444-8444-444444444444",
+		"HEADER_OUTPUT=assets/luks2.detached_header2.hdr",
+		"KEYFILE_OUTPUT=assets/luks2.detached_header2.key",
+	}},
 	// luks2.keyfile_device.img and its companion keydev are both created by a single generator run.
 	"luks2.keyfile_device.img": {"luks_keyfile_device.sh", []string{
 		"LUKS_UUID=7c2a39be-15d1-4b71-9f2e-5c4d1a3b8e6f",

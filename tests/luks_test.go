@@ -158,6 +158,9 @@ const (
 	detachedHeaderLuksUUID   = "cbd49694-81de-41bd-a850-0d934aff8328"
 	detachedHeaderFsUUID     = "781780d2-bf67-4a17-9ca8-fd22336c1b2e"
 	detachedHeaderHdrdevUUID = "e2d8f1a3-7b4c-4e9d-a1b2-3c4d5e6f7a8b"
+
+	// second detached-header volume for the multi-device rd.luks.data= test
+	detachedHeader2LuksUUID = "4d4d4d4d-4444-4444-8444-444444444444"
 )
 
 // TestLUKS2DetachedHeaderCmdline verifies the detached-header unlock path
@@ -174,6 +177,81 @@ func TestLUKS2DetachedHeaderCmdline(t *testing.T) {
 		kernelArgs: []string{
 			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
 			"rd.luks.header=" + detachedHeaderLuksUUID + "=" + headerPath,
+			"root=/dev/mapper/cryptroot",
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2DetachedHeaderCmdlineDataPin verifies rd.luks.data= pins the data
+// device (here by path) for a detached-header volume — the cmdline analogue of
+// the crypttab encrypted-device field. Reuses the single detached-header asset.
+func TestLUKS2DetachedHeaderCmdlineDataPin(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+
+	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/luks2.detached_header.img", // -> /dev/sda (virtio-scsi)
+		extraFiles: headerPath,
+		kernelArgs: []string{
+			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
+			"rd.luks.header=" + detachedHeaderLuksUUID + "=" + headerPath,
+			"rd.luks.data=" + detachedHeaderLuksUUID + "=/dev/sda",
+			"root=/dev/mapper/cryptroot",
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLUKS2DetachedHeaderMultiDeviceCmdline verifies two detached-header volumes
+// are each paired with the correct data device via rd.luks.data=. The real root
+// is on the SECOND disk (/dev/sdb); a decoy detached-header volume is the first
+// disk (/dev/sda) and first mapping. Without rd.luks.data=, the device-blind
+// fallback adopts the second-arriving device for the first (decoy) mapping and
+// opens it with the wrong header, so the root never unlocks. Reaching
+// "Hello, booster!" proves the pinning routes each device to its own header.
+func TestLUKS2DetachedHeaderMultiDeviceCmdline(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.detached_header2.img")) // decoy (no fs)
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))  // root (has /sbin/init)
+
+	hdrDecoy, err := filepath.Abs("assets/luks2.detached_header2.hdr")
+	require.NoError(t, err)
+	hdrRoot, err := filepath.Abs("assets/luks2.detached_header.hdr")
+	require.NoError(t, err)
+	decoyKey, err := filepath.Abs("assets/luks2.detached_header2.key")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		// Attach both disks as virtio-blk so their names are deterministic by
+		// cmdline order (/dev/vda, /dev/vdb). virtio-scsi would name them sda/sdb
+		// by async scan order, which can swap and break the path pins.
+		params: []string{
+			"-drive", "file=assets/luks2.detached_header2.img,if=virtio,format=raw", // /dev/vda — cryptdecoy
+			"-drive", "file=assets/luks2.detached_header.img,if=virtio,format=raw",  // /dev/vdb — cryptroot (root)
+		},
+		extraFiles: hdrDecoy + "," + hdrRoot + "," + decoyKey,
+		kernelArgs: []string{
+			// The decoy unlocks non-interactively via its bundled keyfile, so the
+			// only passphrase prompt is for the root volume.
+			"rd.luks.name=" + detachedHeader2LuksUUID + "=cryptdecoy",
+			"rd.luks.header=" + detachedHeader2LuksUUID + "=" + hdrDecoy,
+			"rd.luks.data=" + detachedHeader2LuksUUID + "=/dev/vda",
+			"rd.luks.key=" + detachedHeader2LuksUUID + "=" + decoyKey,
+			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
+			"rd.luks.header=" + detachedHeaderLuksUUID + "=" + hdrRoot,
+			"rd.luks.data=" + detachedHeaderLuksUUID + "=/dev/vdb",
 			"root=/dev/mapper/cryptroot",
 		},
 	})
