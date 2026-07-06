@@ -207,18 +207,20 @@ func askPasswordWithFallback(ctx context.Context, prompt, postPrompt string) ([]
 // is disabled. Passing an empty string clears the Plymouth message (no-op on console).
 //
 // On the console, if a password prompt is active and its volume hasn't been
-// unlocked yet, the current line is erased and the prompt is reprinted beneath
-// the message so the cursor stays at the bottom. Once the prompt's done channel
-// closes (volume unlocked by another token), the redraw is skipped — otherwise
-// the unlock status message would reprint a stale prompt that ctx-cancel hasn't
-// torn down yet.
+// unlocked yet, the current line is erased in place (so the typed feedback —
+// the literal passphrase in plaintext echo mode — never scrolls into terminal
+// history) and the prompt is reprinted beneath the message so the cursor stays
+// at the bottom. Once the prompt's done channel closes (volume unlocked by
+// another token), the redraw is skipped — otherwise the unlock status message
+// would reprint a stale prompt that ctx-cancel hasn't torn down yet.
 func statusMessage(msg string) {
 	if plymouthEnabled {
 		plymouthMessage(msg)
 	} else if msg != "" {
 		consoleMu.Lock()
 		if consolePrompt.active && !promptVolumeUnlocked() {
-			consolePrint("\n\n" + msg + "\n\n" + consolePrompt.text + strings.Repeat("*", consolePrompt.asterisks))
+			consoleEcho(eraseLine)
+			consolePrint("\n\n" + msg + "\n\n" + consolePrompt.text + promptEchoedForPrint())
 		} else {
 			consolePrint("\n\n" + msg + "\n\n")
 		}

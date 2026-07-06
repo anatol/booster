@@ -89,6 +89,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -106,7 +107,7 @@ const (
 	keyEnter                     // CR / LF — end of input
 	keyEOF                       // Ctrl+D (0x04) — end-of-input on empty buffer; no-op otherwise
 	keyBackspace                 // BS (0x08) or DEL (0x7f) — erase last char
-	keyTab                       // Tab (0x09) — toggle masking
+	keyTab                       // Tab (0x09) — cycle the password echo mode
 	keyKillLine                  // Ctrl+U (0x15) — erase entire line
 	keyKillWord                  // Ctrl+W (0x17) — erase back to last whitespace
 )
@@ -473,32 +474,101 @@ func (s *inputScanner) Feed(b byte) (event keyEvent, chars []byte) {
 	return keyNone, nil
 }
 
+// passwordEchoMode selects what the password prompt paints per typed
+// character: one asterisk, nothing at all, or the literal character.
+type passwordEchoMode int
+
+const (
+	echoAsterisks passwordEchoMode = iota // one "*" per codepoint; the default
+	echoSilent                            // no visual feedback (sudo-style)
+	echoPlaintext                         // literal characters, for typo hunting
+)
+
+// defaultPasswordEchoCycle is the Tab order when password_echo is unset:
+// asterisks → silent → plaintext. Plaintext last keeps the historical
+// first-press behavior (hide the feedback) and makes the reveal mode
+// reachable only deliberately, never on the way to hiding.
+var defaultPasswordEchoCycle = []passwordEchoMode{echoAsterisks, echoSilent, echoPlaintext}
+
+// parsePasswordEcho maps a password_echo config value — an ordered,
+// comma-separated list of unique modes — to the prompt's Tab cycle. The first
+// entry is the startup mode; Tab advances through the list in order, wrapping.
+// A single entry pins the prompt (Tab is a no-op). Empty selects the default
+// cycle. The generator validates the same syntax at image build time; the
+// boolean here guards against a hand-edited image config.
+func parsePasswordEcho(val string) ([]passwordEchoMode, bool) {
+	if val == "" {
+		return defaultPasswordEchoCycle, true
+	}
+	parts := strings.Split(val, ",")
+	cycle := make([]passwordEchoMode, 0, len(parts))
+	for _, p := range parts {
+		var m passwordEchoMode
+		switch strings.TrimSpace(p) {
+		case "asterisks":
+			m = echoAsterisks
+		case "silent":
+			m = echoSilent
+		case "plaintext":
+			m = echoPlaintext
+		default:
+			return defaultPasswordEchoCycle, false
+		}
+		if slices.Contains(cycle, m) {
+			return defaultPasswordEchoCycle, false
+		}
+		cycle = append(cycle, m)
+	}
+	return cycle, true
+}
+
+// Prompt echo policy from the init config (password_echo). Set once in
+// readConfig before any prompt is shown; read-only afterwards. The first
+// entry is the prompt's startup mode; Tab advances through the cycle,
+// wrapping. A single-entry cycle pins the prompt.
+var passwordEchoCycle = defaultPasswordEchoCycle
+
+// echoFor renders the visible form of password under mode: one asterisk per
+// codepoint, nothing, or the literal bytes. Erase paths assume one terminal
+// cell per codepoint; a double-width glyph echoed in plaintext mode leaves
+// half a cell behind on backspace (cosmetic only — the buffer stays correct).
+func echoFor(password []byte, mode passwordEchoMode) string {
+	switch mode {
+	case echoAsterisks:
+		return strings.Repeat("*", countCodepoints(password))
+	case echoPlaintext:
+		return string(password)
+	}
+	return ""
+}
+
 // consoleMu serializes all stdout writes so that concurrent status message
-// reprints and raw-mode asterisk echoes never interleave. Held briefly during
+// reprints and raw-mode keystroke echoes never interleave. Held briefly during
 // every consolePrint call.
 var consoleMu sync.Mutex
 
 // consolePrompt tracks the active password prompt so statusMessage (declared
 // in plymouth.go) can erase the current line, print the status, and reprint
-// the prompt beneath it without losing the user's typed-asterisks state.
+// the prompt beneath it without losing the user's typed-echo state.
 //
 // Invariants (must hold while consoleMu is held):
 //   - active == true iff a readPasswordOn is running and has finished its
 //     initial prompt print
 //   - text is the prompt string passed to readPasswordOn; statusMessage uses
 //     it to redraw after writing a status line
-//   - asterisks is the number of asterisks currently visible on the console;
-//     readPasswordOn maintains this with consoleMu held to keep statusMessage
-//     in sync. Tracked as a count (not the password length) so toggling
-//     masking via Tab can erase exactly the right number of "\b \b" sequences
+//   - echoed is exactly the feedback currently painted after the prompt text
+//     ("" in silent mode, asterisks, or the literal password in plaintext
+//     mode); readPasswordOn maintains it with consoleMu held so redraw paths
+//     can repaint prompt + feedback verbatim, and erase paths can remove
+//     exactly countCodepoints(echoed) cells
 //   - done mirrors the active prompt's ctx.Done(); statusMessage selects on
 //     it to skip a redraw once the volume is unlocked by another method
 //     (avoids redrawing a prompt that's about to be dismissed)
 var consolePrompt struct {
-	active    bool
-	text      string
-	asterisks int
-	done      <-chan struct{}
+	active bool
+	text   string
+	echoed string
+	done   <-chan struct{}
 }
 
 // consolePrint writes msg without acquiring consoleMu. Callers must hold consoleMu.
@@ -514,14 +584,33 @@ func consolePrint(msg string) {
 // re-painting any active password prompt below so the user's cursor stays
 // at the bottom. Used by log levels (info, warning, severe) which would
 // otherwise overwrite the prompt line mid-input.
+//
+// The live prompt line is erased in place before msg scrolls it away:
+// otherwise the terminal archives it intact in scrollback, which in plaintext
+// echo mode preserves the literal passphrase in history (and in the capture
+// buffer of serial/IPMI consoles).
 func consolePrintWithPromptRedraw(msg string) {
 	consoleMu.Lock()
 	defer consoleMu.Unlock()
 	if consolePrompt.active && !promptVolumeUnlocked() {
-		consolePrint(msg + "\n" + consolePrompt.text + strings.Repeat("*", consolePrompt.asterisks))
+		consoleEcho(eraseLine)
+		consolePrint(msg + "\n" + consolePrompt.text + promptEchoedForPrint())
 	} else {
 		consolePrint(msg + "\n")
 	}
+}
+
+// promptEchoedForPrint returns the prompt feedback to repaint after a status
+// or log message. In qemu integration builds (-tags test) consolePrint writes
+// to /dev/kmsg, where repainting the feedback would log the literal passphrase
+// whenever the prompt is in plaintext mode — repaint nothing there (the
+// per-keystroke echo is already suppressed by consoleEcho for the same
+// reason). Callers must hold consoleMu.
+func promptEchoedForPrint() string {
+	if quirk.TestEnabled {
+		return ""
+	}
+	return consolePrompt.echoed
 }
 
 // consoleEcho writes terminal-only decoration (asterisks, backspace, line-erase
@@ -539,15 +628,16 @@ func consoleEcho(msg string) {
 
 // Terminal byte sequences written via consoleEcho.
 const (
-	eraseChar           = "\b \b"      // erase the character at the cursor
-	eraseLineAndAdvance = "\r\x1b[K\n" // wipe current line and move to next
+	eraseChar           = "\b \b"          // erase the character at the cursor
+	eraseLine           = "\r\x1b[K"       // wipe the current line in place
+	eraseLineAndAdvance = eraseLine + "\n" // wipe current line and move to next
 )
 
 var inputMutex sync.Mutex
 
 // readPasswordLocked reads a password from stdin in raw terminal mode, echoing
-// asterisks for each character typed. Cancels cleanly when ctx is done.
-// The caller must hold inputMutex.
+// keystroke feedback per the configured password echo mode (asterisks by
+// default). Cancels cleanly when ctx is done. The caller must hold inputMutex.
 func readPasswordLocked(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
 	return readPasswordOn(ctx, os.Stdin, prompt, postPrompt)
 }
@@ -620,7 +710,7 @@ func readPasswordOn(ctx context.Context, tty *os.File, prompt, postPrompt string
 	consolePrint(prompt)
 	consolePrompt.active = true
 	consolePrompt.text = prompt
-	consolePrompt.asterisks = 0
+	consolePrompt.echoed = ""
 	consolePrompt.done = ctx.Done()
 	consoleMu.Unlock()
 
@@ -646,7 +736,9 @@ func readPasswordOn(ctx context.Context, tty *os.File, prompt, postPrompt string
 	}
 
 	var password []byte
-	var masked bool
+	cycle := passwordEchoCycle
+	modeIdx := 0
+	mode := cycle[modeIdx]
 	var b [1]byte
 	var scanner inputScanner
 	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
@@ -685,50 +777,47 @@ loop:
 				break loop
 			}
 		case keyChar:
-			// ch holds one complete codepoint (1–4 bytes); one asterisk.
+			// ch holds one complete codepoint (1–4 bytes).
 			password = append(password, ch...)
-			if !masked {
+			if add := echoFor(ch, mode); add != "" {
 				consoleMu.Lock()
-				consolePrompt.asterisks++
-				consoleEcho("*")
+				consolePrompt.echoed += add
+				consoleEcho(add)
 				consoleMu.Unlock()
 			}
 		case keyBackspace:
 			if len(password) > 0 {
 				// Remove the last UTF-8 codepoint from the buffer.
 				password = trimLastCodepoint(password)
-				if !masked {
+				if mode != echoSilent {
 					consoleMu.Lock()
-					consolePrompt.asterisks--
+					consolePrompt.echoed = string(trimLastCodepoint([]byte(consolePrompt.echoed)))
 					consoleEcho(eraseChar)
 					consoleMu.Unlock()
 				}
 			}
-		case keyTab: // toggle asterisk masking
-			consoleMu.Lock()
-			if masked {
-				cp := countCodepoints(password)
-				for range cp {
-					consoleEcho("*")
-				}
-				consolePrompt.asterisks = cp
-			} else {
-				for range consolePrompt.asterisks {
-					consoleEcho(eraseChar)
-				}
-				consolePrompt.asterisks = 0
+		case keyTab: // advance the echo mode through the configured cycle
+			if len(cycle) < 2 {
+				// Single-mode cycle: the prompt is pinned; Tab is ignored (and
+				// never lands in the password — the scanner ate the byte).
+				continue
 			}
-			masked = !masked
+			consoleMu.Lock()
+			for range countCodepoints([]byte(consolePrompt.echoed)) {
+				consoleEcho(eraseChar)
+			}
+			modeIdx = (modeIdx + 1) % len(cycle)
+			mode = cycle[modeIdx]
+			consolePrompt.echoed = echoFor(password, mode)
+			consoleEcho(consolePrompt.echoed)
 			consoleMu.Unlock()
 		case keyKillLine: // Ctrl+U — erase entire password
 			if len(password) > 0 {
 				consoleMu.Lock()
-				if !masked {
-					for range consolePrompt.asterisks {
-						consoleEcho(eraseChar)
-					}
+				for range countCodepoints([]byte(consolePrompt.echoed)) {
+					consoleEcho(eraseChar)
 				}
-				consolePrompt.asterisks = 0
+				consolePrompt.echoed = ""
 				consoleMu.Unlock()
 				password = password[:0]
 			}
@@ -736,14 +825,14 @@ loop:
 			if len(password) > 0 {
 				newPwd, removed := killWord(password)
 				if removed > 0 {
-					consoleMu.Lock()
-					if !masked {
+					if mode != echoSilent {
+						consoleMu.Lock()
 						for range removed {
+							consolePrompt.echoed = string(trimLastCodepoint([]byte(consolePrompt.echoed)))
 							consoleEcho(eraseChar)
 						}
+						consoleMu.Unlock()
 					}
-					consolePrompt.asterisks -= removed
-					consoleMu.Unlock()
 					password = newPwd
 				}
 			}

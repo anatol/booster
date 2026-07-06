@@ -1263,8 +1263,18 @@ func readConfig() error {
 	if err != nil {
 		return err
 	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return err
+	}
 
-	return yaml.Unmarshal(data, &config)
+	// The generator validated password_echo at build time, so a bad value here
+	// means a hand-edited image config. Cosmetic setting — warn, never fail.
+	cycle, ok := parsePasswordEcho(config.PasswordEcho)
+	if !ok {
+		warning("invalid password_echo value %q, using the default cycle", config.PasswordEcho)
+	}
+	passwordEchoCycle = cycle
+	return nil
 }
 
 func mount(source, target, fstype string, flags uintptr, options string) error {
