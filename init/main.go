@@ -261,6 +261,24 @@ func probeHeaderOnDevice(m *luksMapping) (path string, cleanup func()) {
 	}
 }
 
+// tryPinnedDataDevice matches a headerless device against a mapping's
+// rd.luks.data= pin. A pinned mapping (handled=true) skips the device-blind
+// header fallback: blk is adopted when it is the pinned device, its uuid set
+// from the mapping's LUKS UUID so matchLuksMapping re-pairs it.
+func tryPinnedDataDevice(blk *blkInfo, m *luksMapping) (handled, adopted bool, adoptErr error) {
+	if m.dataDeviceRef == nil {
+		return false, false, nil
+	}
+	if !blk.matchesRef(m.dataDeviceRef) {
+		return true, false, nil
+	}
+	blk.format = "luks"
+	if u, ok := m.ref.data.(UUID); ok {
+		blk.uuid = u
+	}
+	return true, true, handleLuksBlockDevice(blk)
+}
+
 // processBlkInfo dispatches a newly-discovered (or retried) block device to the
 // appropriate handler.  Called from addBlockDevice for new devices and directly
 // from retryPendingDevices for previously-unmatched devices.
@@ -310,6 +328,12 @@ func processBlkInfo(blk *blkInfo) error {
 				blk.format = "luks"
 				return handleLuksBlockDevice(blk)
 			}
+			if handled, adopted, err := tryPinnedDataDevice(blk, m); handled {
+				if adopted {
+					return err
+				}
+				continue
+			}
 			// Non-blocking probe: if the header device is already in processedBlkInfos,
 			// mount it and read the header to recover the LUKS UUID for matching.
 			hdrPath, cleanup := probeHeaderOnDevice(m)
@@ -337,6 +361,12 @@ func processBlkInfo(blk *blkInfo) error {
 				// wait for the header device if it has not appeared yet.
 				blk.format = "luks"
 				return handleLuksBlockDevice(blk)
+			}
+			if handled, adopted, err := tryPinnedDataDevice(blk, m); handled {
+				if adopted {
+					return err
+				}
+				continue
 			}
 			hdrBlk := probeLuksHeader(m.header)
 			if hdrBlk == nil {
@@ -455,6 +485,10 @@ func handleGptBlockDevice(blk *blkInfo) error {
 
 	for _, m := range luksMappings {
 		blk.resolveGptRef(m.ref)
+		if m.dataDeviceRef != nil {
+			// matchesRef has no gpt-ref case, so resolve the data ref to a path first
+			blk.resolveGptRef(m.dataDeviceRef)
+		}
 	}
 
 	for _, part := range gpt.partitions {
