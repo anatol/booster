@@ -355,6 +355,21 @@ func parseParams(params string) error {
 			m := findOrCreateLuksMapping(uuid)
 			m.header = path
 			m.headerDeviceRef = ref
+		case "rd.luks.data":
+			eqIdx := strings.Index(value, "=")
+			if eqIdx < 0 {
+				return fmt.Errorf("invalid rd.luks.data kernel parameter %q, expected format rd.luks.data=<UUID>=<deviceref>", value)
+			}
+			uuid, err := parseUUID(value[:eqIdx])
+			if err != nil {
+				return fmt.Errorf("invalid UUID %s in rd.luks.data boot param: %v", value[:eqIdx], err)
+			}
+			ref, err := parseDeviceRef(value[eqIdx+1:])
+			if err != nil {
+				return fmt.Errorf("rd.luks.data: %v", err)
+			}
+			m := findOrCreateLuksMapping(uuid)
+			m.dataDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
 		default:
