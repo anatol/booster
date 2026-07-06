@@ -1,6 +1,11 @@
 Booster - fast and secure initramfs generator
 
 Release 0.11 (TBD)
+  * Adds the `password_echo` config option: an ordered list of passphrase/PIN prompt echo modes
+    (`asterisks`, `silent`, `plaintext`). The prompt starts in the first listed mode and Tab
+    cycles through the list — a single entry pins the prompt, and omitting `plaintext` keeps the
+    typed characters unrevealable. This also implements the plaintext reveal the manpage
+    previously described but which was never wired up (#305)
   * FIDO2 unlock now uses native go-libfido2 via a plugin instead of the external `fido2-assert` binary.
     Add `enable_fido2: true` to `/etc/booster.yaml` to opt in. Users with `extra_files: fido2-assert`
     in their config will continue to work with a deprecation warning — update to `enable_fido2: true`

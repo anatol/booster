@@ -37,6 +37,7 @@ Booster advantages:
     enable_mdraid: true
     token_timeout: 30s
     pin_delay: 5s
+    password_echo: silent,asterisks,plaintext
     serialize_tokens:
       enabled: true
       clevis_timeout: 45s
@@ -105,6 +106,8 @@ Booster advantages:
     In serialize mode prefer leaving `token_timeout` unset so tier 3 applies: a fixed value shorter than the token chain can start the keyboard prompt before a token has had its turn.
 
  * `pin_delay` is the concurrent-mode counterpart to `serialize_tokens`: it holds the first interactive PIN prompt (TPM2-PIN, FIDO2-PIN) this long so a parallel non-interactive token can unlock first and the prompt is never drawn — cancelled before render if a token wins, shown as normal if the delay expires (no unlock path is lost; the delay only postpones the prompt). Go duration; unset (the default) means no delay. No effect in serialize mode, or when no parallel non-PIN token is enrolled (a PIN-only device prompts immediately). Set it longer than the racing token's real unlock time — TPM2/FIDO2 hardware bring-up, or for clevis the network/DHCP round-trip — but well below `token_timeout`; otherwise the prompt is still drawn. A few seconds suits a fast PCR-only TPM2 unseal; clevis-over-network or a universal image with slow module loading needs more.
+
+ * `password_echo` configures the password/PIN prompt feedback as an ordered, comma-separated list of echo modes: `asterisks` (one `*` per typed character), `silent` (no feedback at all, like `sudo`), and `plaintext` (the literal characters). The first entry is the mode the prompt starts in; **Tab** cycles through the listed modes in order, wrapping. Defaults to `asterisks,silent,plaintext`. A single entry pins the prompt to that mode (Tab is then ignored), and leaving `plaintext` out of the list (e.g. `silent,asterisks`) means the typed characters can never be shown at the prompt. Applies to every keyboard prompt — LUKS passphrase, TPM2 PIN, FIDO2 PIN. See **Password entry** in NOTES.
 
 Once you are done modifying your config file and want to regenerate booster images under `/boot` please use `/usr/lib/booster/regenerate_images`.
 It is a convenience script that performs the same type of image regeneration as if you installed `booster` with your package manager.
@@ -358,10 +361,12 @@ UUID parameter can optionally be enclosed with quote symbol `"` though it is not
 `rd.luks.uuid=ac8299a8-91ce-4bf6-a524-55a62844b787`, `rd.luks.uuid="ac8299a8-91ce-4bf6-a524-55a62844b787"` (not recommended).
 
 ### Password entry
+The prompt has three echo modes: **asterisks** (one `*` per typed character), **silent** (no feedback at all, like `sudo`), and **plaintext** (the literal characters, for hunting down a typo). The `password_echo` config option lists the modes as an ordered cycle: the prompt starts in the first listed mode and **Tab** advances through the list, wrapping. Switching modes repaints the feedback for everything typed so far. The default is `asterisks,silent,plaintext`, so plaintext is only ever reached deliberately — two presses past the default mode, never on the way to hiding. List a single mode to pin the prompt (Tab is then ignored), or leave `plaintext` out of the list — e.g. `password_echo: silent,asterisks` — to toggle between the hidden modes only, with no way to flash the typed characters on screen.
+
 Editing keys beyond the standard:
  * **Ctrl+W** — erase the previous word.
  * **Ctrl+U** — erase the entire entry.
- * **Tab** — toggle visibility of the typed characters (asterisks ↔ literal).
+ * **Tab** — cycle the echo mode through the configured `password_echo` list.
 
 ### LUKS unlock concurrency and prompt order
 Booster runs LUKS unlock paths concurrently per volume — multiple enrolled tokens dispatch in parallel where possible, and the keyboard passphrase prompt runs alongside them as a fallback. This subsection summarises the deterministic ordering and the cancel-on-win behaviour that ties them together.
