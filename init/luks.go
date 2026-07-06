@@ -34,6 +34,7 @@ type luksMapping struct {
 	options         []string
 	header          string        // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
+	dataDeviceRef   *deviceRef    // non-nil when rd.luks.data= pins the data device (detached-header multi-device)
 	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
 	// tokenTimeoutExplicit is set when tokenTimeout came from an explicit

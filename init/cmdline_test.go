@@ -14,6 +14,30 @@ func TestParseParamsInvalidLuksOptions(t *testing.T) {
 	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt rd.luks.options=bogus-option"))
 }
 
+func TestParseParamsLuksData(t *testing.T) {
+	const base = "rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"
+
+	// PARTUUID data ref
+	luksMappings = nil
+	require.NoError(t, parseParams(base+" rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e=/root.hdr rd.luks.data=ab6d7d78-b816-4495-928d-766d6607035e=PARTUUID=0cf4a24d-88c0-4a53-88f4-a104e252fdab"))
+	require.Len(t, luksMappings, 1)
+	require.NotNil(t, luksMappings[0].dataDeviceRef)
+	require.Equal(t, refGptUUID, luksMappings[0].dataDeviceRef.format)
+
+	// path data ref
+	luksMappings = nil
+	require.NoError(t, parseParams(base+" rd.luks.data=ab6d7d78-b816-4495-928d-766d6607035e=/dev/vdb"))
+	require.Equal(t, &deviceRef{refPath, "/dev/vdb"}, luksMappings[0].dataDeviceRef)
+
+	// malformed: no second '='
+	luksMappings = nil
+	require.Error(t, parseParams(base+" rd.luks.data=ab6d7d78-b816-4495-928d-766d6607035e"))
+
+	// malformed: bad UUID
+	luksMappings = nil
+	require.Error(t, parseParams(base+" rd.luks.data=not-a-uuid=/dev/vdb"))
+}
+
 func TestParseParams(t *testing.T) {
 	luksMappings = nil
 
