@@ -454,3 +454,36 @@ func TestKillWord(t *testing.T) {
 		})
 	}
 }
+
+// ── Password echo mode ──────────────────────────────────────────────────────
+
+func TestParsePasswordEcho(t *testing.T) {
+	for _, tc := range []struct {
+		val   string
+		cycle []passwordEchoMode
+		ok    bool
+	}{
+		{"", defaultPasswordEchoCycle, true},
+		{"asterisks,silent,plaintext", []passwordEchoMode{echoAsterisks, echoSilent, echoPlaintext}, true},
+		{"silent,asterisks,plaintext", []passwordEchoMode{echoSilent, echoAsterisks, echoPlaintext}, true},
+		{"silent,asterisks", []passwordEchoMode{echoSilent, echoAsterisks}, true},
+		{"silent", []passwordEchoMode{echoSilent}, true},
+		{" plaintext , silent ", []passwordEchoMode{echoPlaintext, echoSilent}, true},
+		// Invalid values fall back to the default cycle with ok=false.
+		{"Silent", defaultPasswordEchoCycle, false},
+		{"garbage", defaultPasswordEchoCycle, false},
+		{"silent,silent", defaultPasswordEchoCycle, false},
+		{"silent,", defaultPasswordEchoCycle, false},
+	} {
+		cycle, ok := parsePasswordEcho(tc.val)
+		require.Equal(t, tc.cycle, cycle, "value %q", tc.val)
+		require.Equal(t, tc.ok, ok, "value %q", tc.val)
+	}
+}
+
+func TestEchoFor(t *testing.T) {
+	pw := []byte("héllo") // 6 bytes, 5 codepoints
+	require.Equal(t, "*****", echoFor(pw, echoAsterisks), "one asterisk per codepoint, not per byte")
+	require.Equal(t, "", echoFor(pw, echoSilent))
+	require.Equal(t, "héllo", echoFor(pw, echoPlaintext))
+}
