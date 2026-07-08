@@ -40,7 +40,7 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get install -y libfido2-dev
 
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
