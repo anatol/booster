@@ -22,8 +22,8 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/crypto v0.52.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
