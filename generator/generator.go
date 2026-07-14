@@ -27,6 +27,7 @@ type generatorConfig struct {
 	compression             string
 	timeout                 time.Duration
 	extraFiles              []string
+	emergencyShellPassword  string
 	output                  string
 	forceOverwrite          bool // overwrite output file
 	initBinary              string
@@ -518,6 +519,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.Tpm2Timeout = conf.tpm2Timeout
 	initConfig.Fido2Timeout = conf.fido2Timeout
 	initConfig.PasswordEcho = conf.passwordEcho
+	initConfig.EmergencyShellPassword = conf.emergencyShellPassword
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

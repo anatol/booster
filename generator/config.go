@@ -55,27 +55,28 @@ type UserConfig struct {
 		SshAuthorizedKeys string `yaml:"ssh_authorized_keys,omitempty"` // path to authorized_keys file
 		SshListen         string `yaml:"ssh_listen,omitempty"`          // listen address, default :22
 	}
-	Universal            bool   `yaml:",omitempty"`
-	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
-	ModulesForceLoad     string `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
-	AppendAllModAliases  bool   `yaml:"append_all_modaliases,omitempty"`
-	Compression          string `yaml:",omitempty"`              // output file compression
-	MountTimeout         string `yaml:"mount_timeout,omitempty"` // timeout for waiting for the rootfs mounted
-	ExtraFiles           string `yaml:"extra_files,omitempty"`   // comma-separated list of files to add to image
-	StripBinaries        bool   `yaml:"strip,omitempty"`         // if strip symbols from the binaries, shared libraries and kernel modules
-	EnableVirtualConsole bool   `yaml:"vconsole,omitempty"`      // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
-	EnableLVM            bool   `yaml:"enable_lvm"`
-	EnableMdraid         bool   `yaml:"enable_mdraid"`
-	MdraidConfigPath     string `yaml:"mdraid_config_path"`
-	EnableZfs            bool   `yaml:"enable_zfs"`
-	ZfsImportParams      string `yaml:"zfs_import_params"`
-	ZfsCachePath         string `yaml:"zfs_cache_path"`
-	EnablePlymouth       bool   `yaml:"enable_plymouth"`
-	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
-	EnableFido2          bool   `yaml:"enable_fido2"`
-	TokenTimeout         string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
-	PinDelay             string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
-	PasswordEcho         string `yaml:"password_echo,omitempty"` // ordered comma-separated list of prompt echo modes; first = startup mode, Tab cycles the list; default asterisks,silent,plaintext
+	Universal              bool   `yaml:",omitempty"`
+	Modules                string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
+	ModulesForceLoad       string `yaml:"modules_force_load,omitempty"` // comma separated list of extra modules to load at the boot time
+	AppendAllModAliases    bool   `yaml:"append_all_modaliases,omitempty"`
+	Compression            string `yaml:",omitempty"`                         // output file compression
+	MountTimeout           string `yaml:"mount_timeout,omitempty"`            // timeout for waiting for the rootfs mounted
+	ExtraFiles             string `yaml:"extra_files,omitempty"`              // comma-separated list of files to add to image
+	EmergencyShellPassword string `yaml:"emergency_shell_password,omitempty"` // argon2id PHC; gates the emergency shell
+	StripBinaries          bool   `yaml:"strip,omitempty"`                    // if strip symbols from the binaries, shared libraries and kernel modules
+	EnableVirtualConsole   bool   `yaml:"vconsole,omitempty"`                 // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
+	EnableLVM              bool   `yaml:"enable_lvm"`
+	EnableMdraid           bool   `yaml:"enable_mdraid"`
+	MdraidConfigPath       string `yaml:"mdraid_config_path"`
+	EnableZfs              bool   `yaml:"enable_zfs"`
+	ZfsImportParams        string `yaml:"zfs_import_params"`
+	ZfsCachePath           string `yaml:"zfs_cache_path"`
+	EnablePlymouth         bool   `yaml:"enable_plymouth"`
+	CrypttabPath           string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
+	EnableFido2            bool   `yaml:"enable_fido2"`
+	TokenTimeout           string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
+	PinDelay               string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
+	PasswordEcho           string `yaml:"password_echo,omitempty"` // ordered comma-separated list of prompt echo modes; first = startup mode, Tab cycles the list; default asterisks,silent,plaintext
 
 	// SerializeTokens opts out of booster's token concurrency: tokens are
 	// tried one at a time in ID order. The per-type timeouts are scoped here
@@ -256,6 +257,7 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.appendAllModAliases = u.AppendAllModAliases
 	conf.stripBinaries = u.StripBinaries || opts.BuildCommand.Strip
 	conf.enableLVM = u.EnableLVM
+	conf.emergencyShellPassword = u.EmergencyShellPassword
 	conf.enableMdraid = u.EnableMdraid
 	conf.mdraidConfigPath = u.MdraidConfigPath
 	conf.enableZfs = u.EnableZfs
