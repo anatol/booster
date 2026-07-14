@@ -43,13 +43,14 @@ type InitConfig struct {
 	EnableZfs              bool                `yaml:",omitempty"`
 	ZfsImportParams        string              `yaml:",omitempty"` // TODO: remove it
 	EnablePlymouth         bool                `yaml:",omitempty"`
-	SerializeTokens        bool                `yaml:",omitempty"`              // dispatch LUKS tokens serially instead of concurrently; default false
-	TokenTimeout           int                 `yaml:",omitempty"`              // device-level keyboard-fallback timer in seconds; 0 = unset (crypttab/cmdline or derived default applies)
-	PinDelay               int                 `yaml:",omitempty"`              // concurrent-mode PIN-prompt pre-delay in seconds so a parallel non-interactive token can win first; 0 = off
-	ClevisTimeout          int                 `yaml:",omitempty"`              // serialize-mode per-token bound for clevis tokens in seconds; 0 = default 45
-	Tpm2Timeout            int                 `yaml:",omitempty"`              // serialize-mode per-token bound for non-PIN systemd-tpm2 tokens in seconds; 0 = default 15
-	Fido2Timeout           int                 `yaml:",omitempty"`              // serialize-mode per-token bound for non-PIN systemd-fido2 tokens in seconds; 0 = default 30
-	PasswordEcho           string              `yaml:"password_echo,omitempty"` // ordered comma-separated echo-mode cycle; first entry = startup mode; validated by the generator
+	SerializeTokens        bool                `yaml:",omitempty"`                         // dispatch LUKS tokens serially instead of concurrently; default false
+	TokenTimeout           int                 `yaml:",omitempty"`                         // device-level keyboard-fallback timer in seconds; 0 = unset (crypttab/cmdline or derived default applies)
+	PinDelay               int                 `yaml:",omitempty"`                         // concurrent-mode PIN-prompt pre-delay in seconds so a parallel non-interactive token can win first; 0 = off
+	ClevisTimeout          int                 `yaml:",omitempty"`                         // serialize-mode per-token bound for clevis tokens in seconds; 0 = default 45
+	Tpm2Timeout            int                 `yaml:",omitempty"`                         // serialize-mode per-token bound for non-PIN systemd-tpm2 tokens in seconds; 0 = default 15
+	Fido2Timeout           int                 `yaml:",omitempty"`                         // serialize-mode per-token bound for non-PIN systemd-fido2 tokens in seconds; 0 = default 30
+	PasswordEcho           string              `yaml:"password_echo,omitempty"`            // ordered comma-separated echo-mode cycle; first entry = startup mode; validated by the generator
+	EmergencyShellPassword string              `yaml:"emergency_shell_password,omitempty"` // argon2id PHC; gates the emergency shell
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

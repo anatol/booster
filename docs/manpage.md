@@ -76,6 +76,10 @@ Booster advantages:
     * adding `busybox` to the image enables an emergency shell in case of a panic during the boot process.
     * adding `fsck` enables boot time filesystem check. It also requires filesystem specific binary called `fsck.$rootfstype` to be added to the image. Filesystems are corrected automatically and if it fails then boot stops and it is the responsibility of the user to fix the root filesystem.
 
+ * `emergency_shell_password` when set, booster prompts for passphrase before starting the emergency shell and reboots after three wrong attempts. The value is an argon2id PHC string. Generated with the `argon2` CLI:
+
+       printf 'your-password' | argon2 "$(head -c16 /dev/urandom)" -id -t 3 -m 16 -p 4 -e
+
  * `vconsole` is a flag that enables early-user console configuration. If it is set to `true` then booster reads configuration from `/etc/vconsole.conf` and `/etc/locale.conf` and adds required keymap and fonts to the generated image.
     The following config properties are taken into account: `KEYMAP`, `KEYMAP_TOGGLE`, `FONT`, `FONT_MAP`, `FONT_UNIMAP`. See also [man vconsole.conf](https://man.archlinux.org/man/vconsole.conf.5.en).
 
