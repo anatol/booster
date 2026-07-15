@@ -1013,6 +1013,22 @@ func unmarshalTPM2Field(raw json.RawMessage) (value string, sharded bool, err er
 	return s, false, nil
 }
 
+// readTPM2PINAuthValue prompts for a TPM2 PIN, derives the systemd-compatible
+// auth value, and wipes the PIN bytes before returning. An empty PIN yields
+// errTPM2Skipped so the caller falls through to the passphrase prompt.
+func readTPM2PINAuthValue(ctx context.Context, prompt string, salt []byte) ([]byte, error) {
+	pin, err := askKeyboardPassword(ctx, prompt, "")
+	if err != nil {
+		return nil, err
+	}
+	if len(pin) == 0 {
+		return nil, errTPM2Skipped
+	}
+	authValue := tpm2PINAuthValue(pin, salt)
+	wipe(pin)
+	return authValue, nil
+}
+
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string, tpm2Signature string) ([]byte, error) {
 	var node struct {
 		Blob       json.RawMessage `json:"tpm2-blob"` // base64 string, or array of strings when sharded
@@ -1111,14 +1127,10 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		var authValue []byte
 		if node.Pin {
 			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
-			pin, err := askPasswordWithFallback(ctx, prompt, "")
+			authValue, err = readTPM2PINAuthValue(ctx, prompt, salt)
 			if err != nil {
 				return nil, err
 			}
-			if len(pin) == 0 {
-				return nil, errTPM2Skipped // passphrase prompt is self-explanatory
-			}
-			authValue = tpm2PINAuthValue(pin, salt)
 		}
 
 		var password []byte

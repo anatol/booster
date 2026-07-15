@@ -121,3 +121,30 @@ func TestRequestKeyboardPasswordKeepsCachedPassphrase(t *testing.T) {
 	wipeSecretCache()
 	require.True(t, allZero(secret), "cached passphrase not wiped at handoff")
 }
+
+func TestReadTPM2PINAuthValueWipesPIN(t *testing.T) {
+	var handed []byte
+	askKeyboardPassword = func(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
+		handed = []byte("1234")
+		return handed, nil
+	}
+	t.Cleanup(func() { askKeyboardPassword = askPasswordWithFallback })
+
+	salt := []byte("saltsalt")
+	want := tpm2PINAuthValue([]byte("1234"), salt)
+
+	got, err := readTPM2PINAuthValue(context.Background(), "PIN:", salt)
+	require.NoError(t, err)
+	require.Equal(t, want, got) // auth value derived correctly
+	require.True(t, allZero(handed), "PIN bytes not wiped after derivation")
+}
+
+func TestReadTPM2PINAuthValueEmptySkips(t *testing.T) {
+	askKeyboardPassword = func(ctx context.Context, prompt, postPrompt string) ([]byte, error) {
+		return []byte{}, nil
+	}
+	t.Cleanup(func() { askKeyboardPassword = askPasswordWithFallback })
+
+	_, err := readTPM2PINAuthValue(context.Background(), "PIN:", []byte("salt"))
+	require.ErrorIs(t, err, errTPM2Skipped)
+}
