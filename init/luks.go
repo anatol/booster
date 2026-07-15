@@ -1139,8 +1139,14 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		} else {
 			password, err = tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
 		}
+		// The TPM call has consumed authValue; scrub it on every path (a
+		// wrong-PIN retry redeclares a fresh one next iteration). nil is a no-op.
+		wipe(authValue)
 		if err == nil {
-			return []byte(base64.StdEncoding.EncodeToString(password)), nil
+			// Keep only the base64 form the caller uses; scrub the raw key.
+			encoded := []byte(base64.StdEncoding.EncodeToString(password))
+			wipe(password)
+			return encoded, nil
 		}
 		if node.Pin && attempt < maxAttempts-1 {
 			promptPrefix = "TPM2 PIN incorrect — "
