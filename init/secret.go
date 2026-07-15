@@ -12,3 +12,15 @@ func wipe(b []byte) {
 	}
 	runtime.KeepAlive(b)
 }
+
+// wipeSecretCache zeroes every cached passphrase and drops the slice. Called at
+// the two boot exits (the switchRoot handoff via cleanup(), and emergencyShell)
+// so the root passphrase does not linger in RAM. Idempotent.
+func wipeSecretCache() {
+	passphraseCache.Lock()
+	defer passphraseCache.Unlock()
+	for _, p := range passphraseCache.passwords {
+		wipe(p)
+	}
+	passphraseCache.passwords = nil
+}
