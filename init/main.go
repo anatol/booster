@@ -1369,6 +1369,9 @@ func emergencyShell() {
 	if err := enableLocalEcho(); err != nil {
 		warning("Failed to enable local echo: %v", err)
 	}
+	// Re-wipe as late as possible: on the failure path cleanup() never ran, so
+	// an unlock goroutine may have repopulated the cache after the entry wipe.
+	wipeSecretCache()
 	if err := unix.Exec("/usr/bin/busybox", []string{"sh", "-I"}, nil); err != nil {
 		severe("Unable to start an emergency shell: %v", err)
 	}

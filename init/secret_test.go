@@ -57,6 +57,7 @@ func TestWipeSecretCacheIdempotent(t *testing.T) {
 
 // resetKeyboardHarness puts the package into a state where requestKeyboardPassword
 // runs without real plymouth/terminal I/O.
+// Mutates package globals; tests using it must not call t.Parallel().
 func resetKeyboardHarness(t *testing.T) {
 	t.Helper()
 	plymouthEnabled = false
