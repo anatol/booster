@@ -970,6 +970,7 @@ func cleanup() {
 	udevConn.Close()
 	sshShutdown()
 	shutdownNetwork()
+	wipeSecretCache() // scrub cached passphrases before exec-to-systemd
 }
 
 func scanSysBlock() error {
@@ -1352,6 +1353,9 @@ func enableLocalEcho() error {
 }
 
 func emergencyShell() {
+	// The failure path bypasses cleanup(); scrub any cached passphrase before
+	// dropping to an interactive root shell (or the subsequent reboot).
+	wipeSecretCache()
 	if _, err := os.Stat("/usr/bin/busybox"); os.IsNotExist(err) {
 		return
 	}
