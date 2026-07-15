@@ -15,7 +15,7 @@ create_uki() {
   microcodes=$(find /boot -name '*-ucode.img' -type f -printf "/boot/%f " | tr -d ' ')
 
   booster build --force --kernel-version "${kernel##/usr/lib/modules/}" "$initrd"
-  ukify --initrd="$microcodes" --initrd="$initrd" --linux="${kernel}/vmlinuz" --os-release="@${osrel}" --splash="$splash" --output="${esp}/booster-${pkgbase}.efi" build
+  ukify --microcode="$microcodes" --initrd="$initrd" --linux="${kernel}/vmlinuz" --os-release="@${osrel}" --splash="$splash" --output="${esp}/booster-${pkgbase}.efi" build
   install -Dm644 "${kernel}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
 }
 
