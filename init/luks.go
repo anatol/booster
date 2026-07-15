@@ -84,6 +84,11 @@ func tryPassphraseAgainstSlots(ctx context.Context, volumes chan *luks.Volume, d
 // passphraseCache holds passwords that successfully unlocked a LUKS volume during
 // this boot, so subsequent volumes (e.g. btrfs RAID1 members) can be tried
 // automatically without prompting the user again.
+//
+// Ownership/wipe rule: a successful passphrase is appended here BY REFERENCE and
+// is thereafter owned by the cache — read sites must not wipe it. The cache is
+// scrubbed once, at the boot exits, by wipeSecretCache(). Only unowned secrets
+// (failed attempts, consumed PINs) are wiped at their read site.
 var passphraseCache struct {
 	sync.Mutex
 	passwords [][]byte
@@ -1406,6 +1411,10 @@ func tryCachedPassphrases(ctx context.Context, volumes chan *luks.Volume, d luks
 	return false
 }
 
+// askKeyboardPassword is the console/plymouth passphrase reader, indirected
+// through a var so tests can stub keyboard input. Mirrors askFido2Pin.
+var askKeyboardPassword = askPasswordWithFallback
+
 func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mappingName string, maxTries int) {
 	// Wait for plymouth initialization to complete before attempting to use
 	// it. Without this, udev events can trigger LUKS password prompts while
@@ -1450,7 +1459,7 @@ func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d l
 
 		prompt := promptPrefix + fmt.Sprintf("Enter passphrase for %s:", mappingName)
 
-		password, err := askPasswordWithFallback(ctx, prompt, "   Unlocking...")
+		password, err := askKeyboardPassword(ctx, prompt, "   Unlocking...")
 		if err != nil {
 			warning("reading password: %v", err)
 			return
@@ -1465,6 +1474,7 @@ func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d l
 			return
 		}
 
+		wipe(password) // failed attempt: no one owns it, scrub it
 		promptPrefix = "Incorrect passphrase — "
 		if !plymouthEnabled {
 			console("   Incorrect passphrase, please try again\n")
