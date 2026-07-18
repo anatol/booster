@@ -126,6 +126,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-timeout= value %q", name, opt[16:])
 					}
 					m.keyfileTimeout = d
+					m.keyfileTimeoutExplicit = true
 				case strings.HasPrefix(opt, "header="):
 					hdrPath, hdrRef, err := parsePathWithDeviceRef(opt[7:], "header")
 					if err != nil {
@@ -220,6 +221,7 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 		dst.keyfileOffset = src.keyfileOffset
 		dst.keyfileSize = src.keyfileSize
 		dst.keyfileTimeout = src.keyfileTimeout
+		dst.keyfileTimeoutExplicit = src.keyfileTimeoutExplicit
 	}
 	if dst.keySlot == -1 && src.keySlot != -1 {
 		dst.keySlot = src.keySlot

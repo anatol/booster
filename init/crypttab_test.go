@@ -506,3 +506,30 @@ func TestReadKeyfileNotFound(t *testing.T) {
 	_, err := readKeyfile(filepath.Join(t.TempDir(), "nonexistent.key"), 0, 0)
 	require.Error(t, err)
 }
+
+func TestKeyfileTimeoutExplicitFlag(t *testing.T) {
+	t.Run("set when keyfile-timeout present", func(t *testing.T) {
+		input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /key.bin keyfile-timeout=10\n"
+		mappings, err := parseCrypttabReader(strings.NewReader(input))
+		require.NoError(t, err)
+		require.Len(t, mappings, 1)
+		require.Equal(t, 10*time.Second, mappings[0].keyfileTimeout)
+		require.True(t, mappings[0].keyfileTimeoutExplicit)
+	})
+	t.Run("unset when keyfile-timeout absent", func(t *testing.T) {
+		input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e /key.bin\n"
+		mappings, err := parseCrypttabReader(strings.NewReader(input))
+		require.NoError(t, err)
+		require.Len(t, mappings, 1)
+		require.False(t, mappings[0].keyfileTimeoutExplicit)
+	})
+}
+
+func TestMergeCopiesKeyfileTimeoutExplicit(t *testing.T) {
+	dst := &luksMapping{keySlot: -1}
+	src := &luksMapping{keyfile: "/crypttab/key", keyfileTimeout: 10 * time.Second, keyfileTimeoutExplicit: true, keySlot: -1}
+	mergeCrypttabOptions(dst, src)
+	require.Equal(t, "/crypttab/key", dst.keyfile)
+	require.Equal(t, 10*time.Second, dst.keyfileTimeout)
+	require.True(t, dst.keyfileTimeoutExplicit)
+}
