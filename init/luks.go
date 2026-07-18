@@ -1398,10 +1398,7 @@ func resolveKeyfileTimeout(m *luksMapping, mountTimeout int) time.Duration {
 // acquireKeyfilePassword resolves the keyfile path (mounting a separate device if needed),
 // reads the file applying any configured offset and size, then releases the mount.
 func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
-	timeout := mapping.keyfileTimeout
-	if timeout == 0 {
-		timeout = time.Duration(config.MountTimeout) * time.Second
-	}
+	timeout := resolveKeyfileTimeout(mapping, config.MountTimeout)
 	path, cleanup, err := acquireFile(mapping.keyfileDeviceRef, "/run/booster/keydev-"+safePathComponent(mapping.name), mapping.keyfile, timeout)
 	defer cleanup()
 	if err != nil {

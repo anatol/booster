@@ -69,6 +69,47 @@ func TestResolveKeyfileTimeout(t *testing.T) {
 	})
 }
 
+// Reproduces issue #403: a keyfile on a separate device that never appears
+// must not block the unlock forever. Before the fix acquireKeyfilePassword
+// resolved an unset timeout to 0 (infinite) and blocked; after, it returns a
+// device-timeout error so recoverKeyfilePassword can fall back to the
+// passphrase prompt. mountDeviceReadOnly calls waitForDeviceRef before any
+// mkdir/mount, so the absent-device path needs neither root nor a real mount.
+func TestKeyfileAbsentDeviceDoesNotHang(t *testing.T) {
+	origDefault := defaultKeyfileDeviceTimeout
+	defaultKeyfileDeviceTimeout = 200 * time.Millisecond
+	defer func() { defaultKeyfileDeviceTimeout = origDefault }()
+
+	origMount := config.MountTimeout
+	config.MountTimeout = 0 // the bug's precondition: no global timeout
+	defer func() { config.MountTimeout = origMount }()
+
+	// A UUID never added to processedBlkInfos — the device never appears.
+	absent, err := parseUUID("deadbeef-0000-0000-0000-000000000403")
+	require.NoError(t, err)
+
+	mapping := &luksMapping{
+		name:             "root",
+		keyfile:          "/.diskid",
+		keyfileDeviceRef: &deviceRef{refFsUUID, absent},
+		// keyfileTimeoutExplicit false, keyfileTimeout 0 → unset case → default applies
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := acquireKeyfilePassword(mapping)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "timeout")
+	case <-time.After(3 * time.Second):
+		require.Fail(t, "acquireKeyfilePassword blocked on an absent keyfile device instead of timing out (issue #403)")
+	}
+}
+
 func TestTPM2PINAuthValue(t *testing.T) {
 	t.Parallel()
 
