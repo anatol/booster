@@ -43,8 +43,9 @@ type luksMapping struct {
 	// derived sum may be substituted instead.
 	tokenTimeoutExplicit bool
 
-	keyfileDeviceRef *deviceRef    // non-nil when keyfile is on a separate device
-	keyfileTimeout   time.Duration // device wait timeout for keyfile device (0 = use MountTimeout)
+	keyfileDeviceRef       *deviceRef    // non-nil when keyfile is on a separate device
+	keyfileTimeout         time.Duration // device wait timeout for keyfile device
+	keyfileTimeoutExplicit bool          // distinguishes keyfile-timeout=0 (wait forever) from unset
 
 	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
 	tries         int   // 0 = unlimited keyboard retries; >0 = max attempts
@@ -1376,6 +1377,22 @@ func acquireFile(ref *deviceRef, mountDir, filePath string, timeout time.Duratio
 		return "", func() {}, err
 	}
 	return resolved, unmount, nil
+}
+
+// defaultKeyfileDeviceTimeout bounds the wait for an absent keyfile device so the
+// passphrase fallback is still reached. A var so tests can shorten it.
+var defaultKeyfileDeviceTimeout = 30 * time.Second
+
+// resolveKeyfileTimeout picks the keyfile-device wait: explicit keyfile-timeout=,
+// else mount_timeout, else the default.
+func resolveKeyfileTimeout(m *luksMapping, mountTimeout int) time.Duration {
+	if m.keyfileTimeoutExplicit {
+		return m.keyfileTimeout
+	}
+	if mountTimeout > 0 {
+		return time.Duration(mountTimeout) * time.Second
+	}
+	return defaultKeyfileDeviceTimeout
 }
 
 // acquireKeyfilePassword resolves the keyfile path (mounting a separate device if needed),

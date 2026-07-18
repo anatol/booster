@@ -46,6 +46,29 @@ func TestExtractSRKHandle(t *testing.T) {
 	require.Equal(t, tpmutil.Handle(0x81000001), extractSRKHandle(iesysBytes(0)))
 }
 
+func TestResolveKeyfileTimeout(t *testing.T) {
+	origDefault := defaultKeyfileDeviceTimeout
+	defaultKeyfileDeviceTimeout = 30 * time.Second // pin regardless of override elsewhere
+	defer func() { defaultKeyfileDeviceTimeout = origDefault }()
+
+	t.Run("explicit non-zero wins over mount_timeout", func(t *testing.T) {
+		m := &luksMapping{keyfileTimeout: 45 * time.Second, keyfileTimeoutExplicit: true}
+		require.Equal(t, 45*time.Second, resolveKeyfileTimeout(m, 60))
+	})
+	t.Run("explicit zero means infinite", func(t *testing.T) {
+		m := &luksMapping{keyfileTimeout: 0, keyfileTimeoutExplicit: true}
+		require.Equal(t, time.Duration(0), resolveKeyfileTimeout(m, 60))
+	})
+	t.Run("unset falls to mount_timeout when set", func(t *testing.T) {
+		m := &luksMapping{} // keyfileTimeoutExplicit false, keyfileTimeout 0
+		require.Equal(t, 60*time.Second, resolveKeyfileTimeout(m, 60))
+	})
+	t.Run("unset with no mount_timeout uses 30s default", func(t *testing.T) {
+		m := &luksMapping{}
+		require.Equal(t, 30*time.Second, resolveKeyfileTimeout(m, 0))
+	})
+}
+
 func TestTPM2PINAuthValue(t *testing.T) {
 	t.Parallel()
 
