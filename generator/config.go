@@ -65,7 +65,7 @@ type UserConfig struct {
 	EmergencyShellPassword string `yaml:"emergency_shell_password,omitempty"` // argon2id PHC; gates the emergency shell
 	StripBinaries          bool   `yaml:"strip,omitempty"`                    // if strip symbols from the binaries, shared libraries and kernel modules
 	EnableVirtualConsole   bool   `yaml:"vconsole,omitempty"`                 // configure virtual console at boot time using config from https://www.freedesktop.org/software/systemd/man/vconsole.conf.html
-	EnableLVM              bool   `yaml:"enable_lvm"`
+	EnableLVM              *bool  `yaml:"enable_lvm"`
 	EnableMdraid           bool   `yaml:"enable_mdraid"`
 	MdraidConfigPath       string `yaml:"mdraid_config_path"`
 	EnableZfs              bool   `yaml:"enable_zfs"`
@@ -256,7 +256,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.readModprobeOptions = readModprobeOptions
 	conf.appendAllModAliases = u.AppendAllModAliases
 	conf.stripBinaries = u.StripBinaries || opts.BuildCommand.Strip
-	conf.enableLVM = u.EnableLVM
+	conf.enableLVM = u.EnableLVM != nil && *u.EnableLVM
+	conf.autoEnableLVM = u.EnableLVM == nil
 	conf.emergencyShellPassword = u.EmergencyShellPassword
 	conf.enableMdraid = u.EnableMdraid
 	conf.mdraidConfigPath = u.MdraidConfigPath
