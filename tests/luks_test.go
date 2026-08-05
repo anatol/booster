@@ -3,7 +3,9 @@ package tests
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -95,6 +97,9 @@ const (
 	luksRaid1LuksUUID1 = "d7fb15c9-4e6a-4901-cd3f-3a579bdf1357"
 	luksRaid1LuksUUID2 = "e8ac26da-5f7b-4012-de40-4b68ace02468"
 	luksRaid1FsUUID    = "f9bd37eb-607c-4123-ef51-5c79bdf13579"
+
+	luksRaid1DistinctLuksUUID1 = "9b5d8ac8-342b-423d-b253-3d3a5403fee8"
+	luksRaid1DistinctLuksUUID2 = "461f9179-04f9-4def-9731-ac1598824026"
 )
 
 // TestPassphraseCache verifies that when two LUKS devices share the same
@@ -152,6 +157,55 @@ func TestLuksBtrfsRaid1(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestLuksBtrfsRaid1MapperRoot is the issue #283 scenario: a btrfs RAID1 whose
+// two LUKS2 members have different passphrases, unlocked from the kernel command
+// line and mounted via root=/dev/mapper/<name>.  Only that member matches root=,
+// so unless every member is registered as it is discovered the volume never
+// assembles and the boot hangs until the test times out.  Mounting by filesystem
+// UUID hides the bug, because then every member matches root=.
+func TestLuksBtrfsRaid1MapperRoot(t *testing.T) {
+	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1_distinct.img"))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.btrfs_raid1_distinct.img",
+		kernelArgs: []string{
+			"rd.luks.name=" + luksRaid1DistinctLuksUUID1 + "=root1",
+			"rd.luks.name=" + luksRaid1DistinctLuksUUID2 + "=root2",
+			"root=/dev/mapper/root1",
+		},
+		// Two argon2id unlocks and a btrfs assembly, which is heavier than the
+		// 40s default is sized for.
+		vmTimeout: 90 * time.Second,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	passwords := map[string]string{
+		"Enter passphrase for root1:": "1111",
+		"Enter passphrase for root2:": "2222",
+	}
+	// Device discovery order is not deterministic, so either member can be
+	// prompted first; route the matching passphrase by the mapping name.
+	// ConsoleExpectRE returns submatch group 1, so the whole alternation is
+	// wrapped in one group; matches[0] is the matched alternative verbatim.
+	re, err := regexp.Compile(`(Enter passphrase for root1:|Enter passphrase for root2:|Hello, booster!)`)
+	require.NoError(t, err)
+
+	prompted := make(map[string]bool)
+	for {
+		matches, err := vm.ConsoleExpectRE(re)
+		require.NoError(t, err)
+		m := matches[0]
+		if m == "Hello, booster!" {
+			break
+		}
+		require.False(t, prompted[m], "%q seen more than once", m)
+		prompted[m] = true
+		require.NoError(t, vm.ConsoleWrite(passwords[m]+"\n"))
+	}
+	require.Len(t, prompted, 2, "both btrfs members must be prompted exactly once")
 }
 
 const (
@@ -239,7 +293,7 @@ func TestLUKS2DetachedHeaderMultiDeviceCmdline(t *testing.T) {
 		// by async scan order, which can swap and break the path pins.
 		params: []string{
 			"-drive", "file=assets/luks2.detached_header2.img,if=virtio,format=raw", // /dev/vda — cryptdecoy
-			"-drive", "file=assets/luks2.detached_header.img,if=virtio,format=raw",  // /dev/vdb — cryptroot (root)
+			"-drive", "file=assets/luks2.detached_header.img,if=virtio,format=raw", // /dev/vdb — cryptroot (root)
 		},
 		extraFiles: hdrDecoy + "," + hdrRoot + "," + decoyKey,
 		kernelArgs: []string{
