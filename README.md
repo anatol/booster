@@ -130,6 +130,22 @@ apk add booster
 
 Then read `/usr/share/doc/booster/README.alpine` for setup-specific bootloader instructions.
 
+### Fedora
+
+Booster is not in Fedora's repositories. Build the RPM from a checkout:
+
+```shell
+dnf install rpm-build golang gcc git-core libfido2-devel rubygem-ronn-ng systemd-rpm-macros
+./packaging/fedora/createpkg.sh
+dnf install ~/rpmbuild/RPMS/x86_64/booster-*.rpm
+```
+
+Then select Booster as the generator in `/etc/kernel/install.conf`, so images are rebuilt on kernel updates:
+
+```
+initrd_generator=booster
+```
+
 ### Manual build
 
 You can also build an image directly:
