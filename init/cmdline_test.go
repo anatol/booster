@@ -243,6 +243,23 @@ func TestParseParamsLuksHeader(t *testing.T) {
 	require.Equal(t, "/etc/luks-headers/root.hdr", luksMappings[0].header)
 }
 
+func TestParseParamsLuksHeaderOptionWins(t *testing.T) {
+	const root = "ab6d7d78-b816-4495-928d-766d6607035e"
+	const base = "rd.luks.name=" + root + "=root"
+	const viaHeader = " rd.luks.header=" + root + "=/from-rd-luks-header.hdr"
+	const viaOptions = " rd.luks.options=" + root + "=header=/from-options.hdr"
+
+	// systemd's spelling wins over booster's dedicated parameter, and does so
+	// whatever order the two appear in: the option form is overlaid last.
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+viaHeader+viaOptions))
+	require.Equal(t, "/from-options.hdr", luksMappings[0].header)
+
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+viaOptions+viaHeader))
+	require.Equal(t, "/from-options.hdr", luksMappings[0].header)
+}
+
 func TestParseParamsLuksHeaderInvalid(t *testing.T) {
 	luksMappings = nil
 	// no = separator between UUID and path
