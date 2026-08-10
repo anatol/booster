@@ -167,7 +167,7 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  
  * `rd.luks.key=$UUID=$PATH` absolute path to a keyfile in the initrd/initramfs which can be used to unlock the device identified by UUID, if this file does not exist or fails to unlock it will fall back to a password request. Without a UUID the keyfile is a default for every device the command line does not give one of its own.
  
- * `rd.luks.header=$UUID=$PATH` detached LUKS header for LUKS volume with UUID.`$PATH` can be an absolute path in the initramfs (to file included via `extra_files:`/block device) or a `$path:$deviceref` which will temporarely mount the device as read-only.
+ * `rd.luks.header=$UUID=$PATH` **deprecated**, use `rd.luks.options=$UUID=header=$PATH` instead. Detached LUKS header for LUKS volume with UUID.`$PATH` can be an absolute path in the initramfs (to file included via `extra_files:`/block device) or a `$path:$deviceref` which will temporarely mount the device as read-only.
  
  * `rd.luks.data=$UUID=$deviceref` data device for the LUKS volume with UUID as the device itself does not hold it.
  
