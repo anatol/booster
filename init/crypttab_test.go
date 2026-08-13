@@ -268,6 +268,27 @@ func TestParseCrypttabMultipleEntries(t *testing.T) {
 	require.Equal(t, "cryptdata", mappings[1].name)
 }
 
+func TestParseCrypttabValuedFlagIsUnknown(t *testing.T) {
+	// A bare flag handed a value is not that flag. Splitting the option once on
+	// '=' makes discard=yes reach the unknown arm rather than matching discard.
+	mappings, err := parseCrypttabReader(strings.NewReader(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none discard=yes\n"))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Empty(t, mappings[0].options)
+}
+
+func TestParseCrypttabValueKeepsItsEquals(t *testing.T) {
+	// Only the first '=' separates key from value, so a device ref inside the
+	// value survives.
+	mappings, err := parseCrypttabReader(strings.NewReader(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none header=/luks.hdr:LABEL=hdrdev\n"))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Equal(t, "/luks.hdr", mappings[0].header)
+	require.Equal(t, &deviceRef{refFsLabel, "hdrdev"}, mappings[0].headerDeviceRef)
+}
+
 func TestParseCrypttabUnknownOptionsIgnored(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none future-option=value\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))
