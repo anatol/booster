@@ -366,3 +366,87 @@ func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
+
+// A per-device rd.luks.options= replaces the entry's options, so key-slot=3 --
+// an empty slot named by crypttab -- must not reach the device.
+func TestLUKS2PerDeviceOptionsReplaceCrypttab(t *testing.T) {
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach,key-slot=3\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.img",
+		kernelArgs: []string{
+			"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot",
+			"rd.luks.options=639b8fdd-36ba-443e-be3e-e5b335935502=tries=5",
+			"root=/dev/mapper/cryptroot",
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	// The entry's key-slot=3 is dropped, and booster says so naming only that
+	// option -- the generator strips x-initrd.attach, and an inert marker would
+	// not be worth repeating on the command line anyway.
+	require.NoError(t, vm.ConsoleExpect(`booster: crypttab: entry "cryptroot": options "key-slot=3" dropped`))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// Unlocks a volume whose detached header lives on a separate block device via
+// systemd's spelling, rd.luks.options=<UUID>=header=<path>:<deviceref>.
+func TestLUKS2PerDeviceLuksOptionsHeader(t *testing.T) {
+	// checkAsset for the main image first — it also creates the .hdr file.
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+	require.NoError(t, checkAsset("assets/luks2.detached_header.hdrdev.img"))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:   "assets/luks2.detached_header.img",
+		params: []string{"-drive", "file=assets/luks2.detached_header.hdrdev.img,if=virtio,format=raw"},
+		kernelArgs: []string{
+			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
+			"rd.luks.options=" + detachedHeaderLuksUUID + "=header=/root.hdr:UUID=" + detachedHeaderHdrdevUUID,
+			"root=UUID=" + detachedHeaderFsUUID,
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestLUKS2CmdlineOptionsSurviveACrypttabParseError(t *testing.T) {
+	// The detached header reaches the device only through rd.luks.options=. If a
+	// crypttab that fails to parse also discarded the command line's options,
+	// there would be no header and the boot would never reach userspace -- so a
+	// successful boot is the assertion.
+	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
+	require.NoError(t, checkAsset("assets/luks2.detached_header.hdrdev.img"))
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot BOGUS=notadeviceref none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:   "assets/luks2.detached_header.img",
+		params: []string{"-drive", "file=assets/luks2.detached_header.hdrdev.img,if=virtio,format=raw"},
+		kernelArgs: []string{
+			"rd.luks.name=" + detachedHeaderLuksUUID + "=cryptroot",
+			"rd.luks.options=" + detachedHeaderLuksUUID + "=header=/root.hdr:UUID=" + detachedHeaderHdrdevUUID,
+			"root=UUID=" + detachedHeaderFsUUID,
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
