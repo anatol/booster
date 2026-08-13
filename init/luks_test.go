@@ -520,15 +520,15 @@ type fenceFakeLuksDevice struct {
 func (f *fenceFakeLuksDevice) UnsealVolume(keyslot int, passphrase []byte) (*luks.Volume, error) {
 	return f.unseal(keyslot, passphrase)
 }
-func (f *fenceFakeLuksDevice) Close() error                                              { return nil }
-func (f *fenceFakeLuksDevice) Version() int                                              { return 2 }
-func (f *fenceFakeLuksDevice) Path() string                                              { return "/dev/fake" }
-func (f *fenceFakeLuksDevice) UUID() string                                              { return "" }
-func (f *fenceFakeLuksDevice) Slots() []int                                              { return []int{0} }
-func (f *fenceFakeLuksDevice) Tokens() ([]luks.Token, error)                             { return nil, nil }
-func (f *fenceFakeLuksDevice) FlagsGet() []string                                        { return nil }
-func (f *fenceFakeLuksDevice) FlagsAdd(flags ...string) error                            { return nil }
-func (f *fenceFakeLuksDevice) FlagsClear()                                               {}
+func (f *fenceFakeLuksDevice) Close() error                   { return nil }
+func (f *fenceFakeLuksDevice) Version() int                   { return 2 }
+func (f *fenceFakeLuksDevice) Path() string                   { return "/dev/fake" }
+func (f *fenceFakeLuksDevice) UUID() string                   { return "" }
+func (f *fenceFakeLuksDevice) Slots() []int                   { return []int{0} }
+func (f *fenceFakeLuksDevice) Tokens() ([]luks.Token, error)  { return nil, nil }
+func (f *fenceFakeLuksDevice) FlagsGet() []string             { return nil }
+func (f *fenceFakeLuksDevice) FlagsAdd(flags ...string) error { return nil }
+func (f *fenceFakeLuksDevice) FlagsClear()                    {}
 func (f *fenceFakeLuksDevice) Unlock(keyslot int, passphrase []byte, dmName string) error {
 	return nil
 }
