@@ -409,6 +409,55 @@ func TestFindLuksMapping(t *testing.T) {
 	require.Nil(t, findLuksMapping(&deviceRef{format: refFsUUID, data: uuid3}))
 }
 
+func TestGlobalKeyfileTimeoutTakesEffect(t *testing.T) {
+	// A UUID-less rd.luks.options=keyfile-timeout= must reach the resolver, not
+	// just the field: unset and an explicit zero are different answers.
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=keyfile-timeout=7", "")
+	require.Equal(t, 7*time.Second, resolveKeyfileTimeout(luksMappings[0], 60))
+
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=keyfile-timeout=0", "")
+	require.Equal(t, time.Duration(0), resolveKeyfileTimeout(luksMappings[0], 60))
+}
+func TestCmdlineOptionsSurviveACrypttabParseError(t *testing.T) {
+	// The options are composed once, after crypttab is read. If that composition
+	// were skipped when the file fails to parse, every rd.luks.* option would be
+	// silently dropped and a detached-header setup would stop booting.
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9,header=/luks.hdr"))
+
+	_, err := parseCrypttabReader(strings.NewReader("cryptroot BOGUS=notauuid none luks\n"))
+	require.Error(t, err, "the entry must fail to parse")
+
+	resolveLuksOptions(nil) // what boost() does on that error path
+	m := luksMappings[0]
+	require.Equal(t, 9, m.tries)
+	require.Equal(t, "/luks.hdr", m.header)
+}
+func TestNegativeOptionValuesAreRejected(t *testing.T) {
+	// A negative value would land on or near luksOptionUnset and read as
+	// "nothing set it", silently discarding what the user asked for.
+	for _, opt := range []string{"tries=-1", "key-slot=-1", "keyfile-offset=-1",
+		"keyfile-size=-1", "keyfile-timeout=-1", "token-timeout=-5s"} {
+		o := newLuksOptions()
+		_, err := parseLuksOptions(&o, opt, "test")
+		require.Error(t, err, "%s must be rejected", opt)
+	}
+}
+func TestBoundsDoNotFollowALosingKeyfile(t *testing.T) {
+	// keyfile-offset= describes the key file named beside it. When rd.luks.key=
+	// supplies a different one, applying the entry's bounds to it would read the
+	// wrong bytes and the unlock would fail.
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.key="+u+"=/b.key",
+		"cryptroot UUID="+u+" /a.key luks,keyfile-offset=4096,keyfile-size=64\n")
+	m := luksMappings[0]
+	require.Equal(t, "/b.key", m.keyfile)
+	require.Zero(t, m.keyfileOffset)
+	require.Zero(t, m.keyfileSize)
+}
+
 // rd.luks.name= on the kernel cmdline creates a mapping before crypttab is parsed.
 // The crypttab merge must adopt options (token-timeout, keyfile, etc.) from the
 // crypttab entry without creating a duplicate mapping or overwriting the name.

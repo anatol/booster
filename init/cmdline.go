@@ -408,5 +408,13 @@ func parseTokenTimeout(s string) (time.Duration, error) {
 		}
 		return time.Duration(secs) * time.Second, nil
 	}
-	return time.ParseDuration(s)
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		// a negative duration would collide with luksOptionUnset
+		return 0, fmt.Errorf("negative timeout %q", s)
+	}
+	return d, nil
 }

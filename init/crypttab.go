@@ -43,28 +43,28 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 			switch key {
 			case "tries":
 				v, err := strconv.Atoi(value)
-				if err != nil {
+				if err != nil || v < 0 {
 					return "", fmt.Errorf("%s: invalid tries= value %q", ctx, value)
 				}
 				m.tries = v
 				m.appliedOptions = append(m.appliedOptions, opt)
 			case "key-slot":
 				v, err := strconv.Atoi(value)
-				if err != nil {
+				if err != nil || v < 0 {
 					return "", fmt.Errorf("%s: invalid key-slot= value %q", ctx, value)
 				}
 				m.keySlot = v
 				m.appliedOptions = append(m.appliedOptions, opt)
 			case "keyfile-offset":
 				v, err := strconv.ParseInt(value, 10, 64)
-				if err != nil {
+				if err != nil || v < 0 {
 					return "", fmt.Errorf("%s: invalid keyfile-offset= value %q", ctx, value)
 				}
 				m.keyfileOffset = v
 				m.appliedOptions = append(m.appliedOptions, opt)
 			case "keyfile-size":
 				v, err := strconv.ParseInt(value, 10, 64)
-				if err != nil {
+				if err != nil || v < 0 {
 					return "", fmt.Errorf("%s: invalid keyfile-size= value %q", ctx, value)
 				}
 				m.keyfileSize = v
@@ -237,6 +237,19 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 // keyfile-timeout=. Accepts a bare integer (treated as seconds) or any string
 // accepted by time.ParseDuration (e.g. "30s", "2m").
 func parseCrypttabDuration(s string) (time.Duration, error) {
+	d, err := parseCrypttabDurationValue(s)
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		// a negative duration would collide with luksOptionUnset and read as
+		// "nothing set it"
+		return 0, fmt.Errorf("negative duration %q", s)
+	}
+	return d, nil
+}
+
+func parseCrypttabDurationValue(s string) (time.Duration, error) {
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return time.Duration(n) * time.Second, nil
 	}
