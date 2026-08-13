@@ -25,6 +25,106 @@ func parseCrypttab() ([]*luksMapping, error) {
 	return parseCrypttabReader(f)
 }
 
+// parseLuksOptions applies crypttab-syntax options to m. ctx prefixes messages
+// to name the source; skip reports an option that opts the entry out entirely.
+func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error) {
+	for opt := range strings.SplitSeq(optStr, ",") {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			continue
+		}
+		key, value, hasValue := strings.Cut(opt, "=")
+
+		// Splitting on the first '=' keeps a value that contains one intact,
+		// as header=/luks.hdr:LABEL=hdrdev does.
+		if hasValue {
+			switch key {
+			case "tries":
+				v, err := strconv.Atoi(value)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid tries= value %q", ctx, value)
+				}
+				m.tries = v
+			case "key-slot":
+				v, err := strconv.Atoi(value)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid key-slot= value %q", ctx, value)
+				}
+				m.keySlot = v
+			case "keyfile-offset":
+				v, err := strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid keyfile-offset= value %q", ctx, value)
+				}
+				m.keyfileOffset = v
+			case "keyfile-size":
+				v, err := strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid keyfile-size= value %q", ctx, value)
+				}
+				m.keyfileSize = v
+			case "keyfile-timeout":
+				d, err := parseCrypttabDuration(value)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid keyfile-timeout= value %q", ctx, value)
+				}
+				m.keyfileTimeout = d
+			case "token-timeout":
+				d, err := parseTokenTimeout(value)
+				if err != nil {
+					return false, fmt.Errorf("%s: invalid token-timeout= value %q", ctx, value)
+				}
+				m.tokenTimeout = d
+			case "header":
+				hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
+				if err != nil {
+					return false, fmt.Errorf("%s: %v", ctx, err)
+				}
+				m.header = hdrPath
+				m.headerDeviceRef = hdrRef
+			case "tpm2-measure-pcr":
+				// yes forces the volume-key measurement, no suppresses it;
+				// unset = auto (extend iff a token binds PCR15).
+				s, valid := parseMeasurePCR(value)
+				if !valid {
+					return false, fmt.Errorf("%s: invalid tpm2-measure-pcr= value %q", ctx, value)
+				}
+				m.measurePCR = s
+			case "tpm2-signature":
+				// signed PCR policy: path to a systemd PCR signature JSON,
+				// "false" to disable, unset to auto-discover.
+				m.tpm2Signature = value
+			case "fido2-device", "tpm2-device":
+				// accepted for compatibility; token detection uses LUKS2 header
+			default:
+				debug("%s: unknown option %q, ignoring", ctx, opt)
+			}
+			continue
+		}
+
+		switch key {
+		case "x-initrd.attach":
+			// silently ignored — filtering was done by generator
+		case "noauto":
+			skip = true
+		case "nofail":
+			m.noFail = true
+		case "swap", "tmp", "plain", "bitlk", "tcrypt":
+			// unsupported modes — skip at boot
+			skip = true
+		case "luks":
+			// explicit LUKS marker — booster detects LUKS via blkinfo, nothing to do
+		default:
+			if flag, ok := rdLuksOptions[key]; ok {
+				m.options = addFlag(m.options, flag)
+				continue
+			}
+			debug("%s: unknown option %q, ignoring", ctx, opt)
+		}
+	}
+	return skip, nil
+}
+
 // parseCrypttabReader is the testable core of parseCrypttab.
 func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 	var mappings []*luksMapping
@@ -66,100 +166,9 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			m.keyfileDeviceRef = kfRef
 		}
 
-		skip := false
-		for opt := range strings.SplitSeq(optStr, ",") {
-			opt = strings.TrimSpace(opt)
-			if opt == "" {
-				continue
-			}
-			key, value, hasValue := strings.Cut(opt, "=")
-
-			// Splitting on the first '=' keeps a value that contains one intact,
-			// as header=/luks.hdr:LABEL=hdrdev does.
-			if hasValue {
-				switch key {
-				case "tries":
-					v, err := strconv.Atoi(value)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid tries= value %q", name, value)
-					}
-					m.tries = v
-				case "key-slot":
-					v, err := strconv.Atoi(value)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid key-slot= value %q", name, value)
-					}
-					m.keySlot = v
-				case "keyfile-offset":
-					v, err := strconv.ParseInt(value, 10, 64)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-offset= value %q", name, value)
-					}
-					m.keyfileOffset = v
-				case "keyfile-size":
-					v, err := strconv.ParseInt(value, 10, 64)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-size= value %q", name, value)
-					}
-					m.keyfileSize = v
-				case "keyfile-timeout":
-					d, err := parseCrypttabDuration(value)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-timeout= value %q", name, value)
-					}
-					m.keyfileTimeout = d
-				case "token-timeout":
-					d, err := parseTokenTimeout(value)
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid token-timeout= value %q", name, value)
-					}
-					m.tokenTimeout = d
-				case "header":
-					hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
-					if err != nil {
-						return nil, fmt.Errorf("crypttab: entry %q: %v", name, err)
-					}
-					m.header = hdrPath
-					m.headerDeviceRef = hdrRef
-				case "tpm2-measure-pcr":
-					// yes forces the volume-key measurement, no suppresses it;
-					// unset = auto (extend iff a token binds PCR15).
-					s, valid := parseMeasurePCR(value)
-					if !valid {
-						return nil, fmt.Errorf("crypttab: entry %q: invalid tpm2-measure-pcr= value %q", name, value)
-					}
-					m.measurePCR = s
-				case "tpm2-signature":
-					// signed PCR policy: path to a systemd PCR signature JSON,
-					// "false" to disable, unset to auto-discover.
-					m.tpm2Signature = value
-				case "fido2-device", "tpm2-device":
-					// accepted for compatibility; token detection uses LUKS2 header
-				default:
-					debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
-				}
-				continue
-			}
-
-			switch key {
-			case "x-initrd.attach":
-				// silently ignored — filtering was done by generator
-			case "noauto":
-				skip = true
-			case "nofail":
-				m.noFail = true
-			case "swap", "tmp", "plain", "bitlk", "tcrypt":
-				// unsupported modes — skip at boot
-				skip = true
-			case "luks":
-				// explicit LUKS marker — booster detects LUKS via blkinfo, nothing to do
-			default:
-				if flag, ok := rdLuksOptions[key]; ok {
-					m.options = addFlag(m.options, flag)
-					continue
-				}
-				debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)
-			}
+		skip, err := parseLuksOptions(&m.luksOptions, optStr, fmt.Sprintf("crypttab: entry %q", name))
+		if err != nil {
+			return nil, err
 		}
 
 		if skip {
