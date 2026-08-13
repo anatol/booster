@@ -171,7 +171,9 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  
  * `rd.luks.data=$UUID=$deviceref` data device for the LUKS volume with UUID as the device itself does not hold it.
  
- * `rd.luks.options=opt1,opt2` supports `discard`, `same-cpu-crypt`, `submit-from-crypt-cpus`, `no-read-workqueue`, `no-write-workqueue`, `tpm2-measure-pcr=no`, `tpm2-signature=<path>` with a higher priority than [crypttab](#crypttab) and persistent flags in header. (Note that this is universal but a device-specific option is planned which will also not fail boot when an unknown option is inserted). 
+ * `rd.luks.options=opt1,opt2` global options that apply to all LUKS devices. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.
+ 
+ * `rd.luks.options=$UUID=opt1,opt2` device specific LUKS options overwrite options specified by `rd.luks.options=` and replace all [crypttab](#crypttab) options for the same device.
  
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  
@@ -260,9 +262,18 @@ the file by either being ran as root, or by being passed
 > this warning is irrelevant with x-initrd.attach
 
 
-Crypttab entries and `rd.luks.*` parameters with the same LUKS UUID are 
-merged like in systemd-cryptsetup. with cmdline parameters taking
-precedence and unspecified options being added from crypttab.
+Crypttab entries and `rd.luks.*` parameters with the same LUKS UUID are
+merged, with cmdline parameters taking precedence and unspecified options
+being added from crypttab.
+
+A per-device `rd.luks.options=$UUID=` is the exception: it *replaces* that
+entry's options instead of adding to them, so the command line can remove
+an option and not only add one. This is what makes it usable to boot past a
+wrong crypttab entry, and it matches systemd-cryptsetup. The entry's first
+three fields are unaffected — the device and its keyfile survive — but
+`keyfile-offset=`, `keyfile-size=` and `keyfile-timeout=` are options, so
+repeat them on the command line if the keyfile needs them. Booster reports
+what was dropped.
 
 Booster-specific behaviour for selected options:
 
@@ -276,6 +287,8 @@ Booster-specific behaviour for selected options:
  
  * **`tpm2-signature=`**: path to a systemd PCR signature JSON for a signed (authorized) PCR policy. `false` disables signed-policy unlock. When unset on UKI boot booster reads the signature that systemd-stub unpacks from the UKI into the initramfs at `/.extra/tpm2-pcr-signature.json`. otherwise required for signed-policy unlock.
 
+ * **unrecognised options**: reported and skipped, not fatal. Booster implements a subset of crypttab(5), so options it does not act on (`headless=`, `keyfile-erase`, `fixate-volume-key=`, …) are named in the boot log. `_netdev` is accepted — there is no unit ordering to apply it to — but warns when the entry needs the network and none is configured. An entry for a volume type booster cannot unlock (`swap`, `tmp`, `plain`, `bitlk`, `tcrypt`) is skipped whole and reported as such, without complaining about its options.
+ 
  > Note that booster also supports LUKS v2 persistent flags stored with the partition metadata. Any specified options are added on top of the persistent flags.
 
 ## REMOTE UNLOCK
