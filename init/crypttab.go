@@ -433,11 +433,12 @@ func keyfileBoundConflicts(opts *luksOptions, from, replacedBy string) []luksCon
 	return out
 }
 
-// composedOptions folds a device's sources into the options it is unlocked
-// with, lowest priority first, so the order of these overlays is the precedence
-// rule:
+// composedOptions returns the options a device is unlocked with, as systemd
+// chooses them. Priority rises to the right. A crypttab entry or a per-device
+// list replaces the lists to its left rather than adding to them; only
+// rd.luks.header= stays under a per-device list:
 //
-//	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
+//	rd.luks.options=  ->  crypttab  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
 //
 // It reports nothing: a device with two records is composed a second time.
 func composedOptions(m *luksMapping) (opts luksOptions, conflicts []luksConflict, setAside []string) {
@@ -471,9 +472,14 @@ func composedOptions(m *luksMapping) (opts luksOptions, conflicts []luksConflict
 		}
 	}
 
-	global := globalLuksOptions
-	global.header, global.headerDeviceRef = "", nil
-	apply(&global, "rd.luks.options= carrying no UUID")
+	// systemd applies a list carrying no UUID only to "any UUIDs not specified
+	// elsewhere, and without an entry in /etc/crypttab".
+	if m.crypttabOptions == nil && m.cmdlineOptions == nil {
+		global := globalDeviceOptions()
+		apply(&global, "rd.luks.options= carrying no UUID")
+	} else if msg := globalOptionsWithheldMessage(m); msg != "" {
+		setAside = append(setAside, msg)
+	}
 
 	if h := m.deprecatedHeader; h != nil {
 		apply(h, "rd.luks.header=")
@@ -576,11 +582,35 @@ func deviceRefEqual(a, b *deviceRef) bool {
 	}
 }
 
-// applyGlobalOptions overlays the rd.luks.options= list that carried no UUID.
-// A global header= was warned about while parsing; it is dropped here so it
-// cannot reach a device.
+// globalDeviceOptions returns the UUID-less rd.luks.options= list as a device
+// receives it, without the header= that parsing already warned about.
+func globalDeviceOptions() luksOptions {
+	o := globalLuksOptions
+	o.header, o.headerDeviceRef = "", nil
+	o.appliedOptions = slices.DeleteFunc(slices.Clone(o.appliedOptions), func(opt string) bool {
+		key, _, _ := strings.Cut(opt, "=")
+		return key == "header"
+	})
+	return o
+}
+
 func applyGlobalOptions(dst *luksOptions) {
-	global := globalLuksOptions
-	global.header, global.headerDeviceRef = "", nil
+	global := globalDeviceOptions()
 	overlay(dst, &global)
+}
+
+// globalOptionsWithheldMessage says which source kept the UUID-less list off
+// this device, or returns "" when there is nothing to report.
+func globalOptionsWithheldMessage(m *luksMapping) string {
+	applied := joinOptions(globalDeviceOptions().appliedOptions)
+	if applied == "" {
+		return ""
+	}
+	if m.cmdlineOptions != nil {
+		return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices nothing else describes, and a per-device list names this one. Add to that list any of these still needed.", m.name, applied)
+	}
+	if uuid := m.cmdlineUUID(); uuid != "" {
+		return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices with no crypttab entry. Use rd.luks.options=%s=%s to override the entry.", m.name, applied, uuid, applied)
+	}
+	return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices with no crypttab entry; change the entry's own options to alter this device.", m.name, applied)
 }

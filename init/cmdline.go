@@ -443,3 +443,14 @@ func parseTokenTimeout(s string) (time.Duration, error) {
 	}
 	return d, nil
 }
+
+// cmdlineUUID returns the UUID a per-device rd.luks.options= would name for this
+// mapping, or "" when its device reference is not a UUID.
+func (m *luksMapping) cmdlineUUID() string {
+	if m.ref != nil && m.ref.format == refFsUUID {
+		if u, ok := m.ref.data.(UUID); ok {
+			return u.toString()
+		}
+	}
+	return ""
+}

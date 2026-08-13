@@ -171,9 +171,9 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  
  * `rd.luks.data=$UUID=$deviceref` data device for the LUKS volume with UUID as the device itself does not hold it.
  
- * `rd.luks.options=opt1,opt2` global options that apply to all LUKS devices. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.
+ * `rd.luks.options=opt1,opt2` global options for LUKS devices that have no [crypttab](#crypttab) entry or `rd.luks.options=$UUID=` list. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.
  
- * `rd.luks.options=$UUID=opt1,opt2` device specific LUKS options overwrite options specified by `rd.luks.options=` and replace all [crypttab](#crypttab) options for the same device.
+ * `rd.luks.options=$UUID=opt1,opt2` device specific LUKS options. They replace the UUID-less `rd.luks.options=` list and the [crypttab](#crypttab) entry's options for the same device.
  
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  

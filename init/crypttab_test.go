@@ -115,10 +115,11 @@ func TestFlagsAreNotDuplicated(t *testing.T) {
 	require.Len(t, mappings, 1)
 	require.Equal(t, []string{luks.FlagAllowDiscards}, mappings[0].options)
 
-	// and once when two sources each name it
+	// and once when two sources each name it. crypttab cannot be one of those
+	// two here: a device it describes never receives the UUID-less list, so the
+	// pair that can both reach one device is that list and a per-device one.
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard",
-		"cryptroot UUID="+u+" none luks,discard\n")
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard rd.luks.options="+u+"=discard", "")
 	require.Equal(t, []string{luks.FlagAllowDiscards}, luksMappings[0].options)
 }
 
@@ -421,6 +422,141 @@ func TestGlobalKeyfileTimeoutTakesEffect(t *testing.T) {
 	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=keyfile-timeout=0", "")
 	require.Equal(t, time.Duration(0), resolveKeyfileTimeout(luksMappings[0], 60))
 }
+
+func TestPerDeviceListReplacesCrypttabOptions(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// systemd-cryptsetup replaces an entry's option field when a per-device
+	// rd.luks.options= names the device, so the command line can remove an
+	// option and not only add one. tries= comes from the cmdline; discard and
+	// key-slot= were only in crypttab and do not survive.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
+		"cryptroot UUID="+u+" none luks,tries=2,discard,key-slot=3\n")
+	require.Len(t, luksMappings, 1)
+	m := luksMappings[0]
+	require.Equal(t, 9, m.tries)
+	require.Empty(t, m.options)
+	require.Equal(t, luksOptionUnset, m.keySlot)
+}
+
+func TestReplacedEntryKeepsItsKeyfile(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// The keyfile is crypttab's third field, not an option, so it survives the
+	// replacement. keyfile-offset= and keyfile-size= are options and do not.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
+		"cryptroot UUID="+u+" /etc/luks.key luks,keyfile-offset=4096,keyfile-size=64\n")
+	m := luksMappings[0]
+	require.Equal(t, "/etc/luks.key", m.keyfile)
+	require.Zero(t, m.keyfileOffset)
+	require.Zero(t, m.keyfileSize)
+}
+
+func TestUUIDLessListIsWithheldFromACrypttabDevice(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// A list with no UUID is a default for devices nothing else describes. This
+	// device has a crypttab entry, so the entry stands alone.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard,token-timeout=90",
+		"cryptroot UUID="+u+" none luks,tries=2\n")
+	m := luksMappings[0]
+	require.Empty(t, m.options, "the withheld list's discard did not reach it")
+	require.Equal(t, 2, m.tries, "the entry's own options stand")
+	require.Equal(t, luksOptionUnset, int(m.tokenTimeout))
+}
+
+// A per-device list is the other half of systemd's "any UUIDs not specified
+// elsewhere": naming a device there withholds the default from it whole, so an
+// option the per-device list leaves out is gone, not inherited.
+func TestUUIDLessListIsWithheldFromADeviceWithAPerDeviceList(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard,tries=3 rd.luks.options="+u+"=tries=9", "")
+	m := luksMappings[0]
+	require.Empty(t, m.options, "the default's discard did not reach it")
+	require.Equal(t, 9, m.tries, "only the per-device list applies")
+}
+
+// The message telling a user their UUID-less list was withheld has to be right
+// about the remedy. For a LABEL= or path entry the device's UUID is not known
+// when crypttab is read, so the message points at the entry's own options.
+func TestGlobalOptionsWithheldMessage(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	t.Run("names the per-device form for a UUID entry", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard",
+			"cryptroot UUID="+u+" none luks\n")
+		msg := globalOptionsWithheldMessage(luksMappings[0])
+		require.Contains(t, msg, `"discard" not applied`)
+		require.Contains(t, msg, "rd.luks.options="+u+"=discard")
+	})
+
+	t.Run("withholds that advice from a label entry", func(t *testing.T) {
+		resolveSources(t, "rd.luks.options=discard", "cryptroot LABEL=crypt none luks\n")
+		msg := globalOptionsWithheldMessage(luksMappings[0])
+		require.Contains(t, msg, `"discard" not applied`)
+		require.NotContains(t, msg, "rd.luks.options=", "a per-device list cannot pair with a LABEL= entry")
+		require.Contains(t, msg, "change the entry's own options")
+	})
+
+	t.Run("says nothing about a header the global list never carried", func(t *testing.T) {
+		// header= is rejected while parsing a UUID-less list, so it is not
+		// something the device went without.
+		resolveSources(t, "rd.luks.options=header=/luks.hdr", "cryptroot UUID="+u+" none luks\n")
+		require.Empty(t, globalOptionsWithheldMessage(luksMappings[0]))
+	})
+
+	t.Run("names a repeated option once", func(t *testing.T) {
+		// the list records what was parsed, repeats included; the advice tells
+		// the user what to paste, so it must not
+		resolveSources(t, "rd.luks.options=discard rd.luks.options=discard,tries=2",
+			"cryptroot UUID="+u+" none luks\n")
+		require.Contains(t, globalOptionsWithheldMessage(luksMappings[0]), `"discard,tries=2" not applied`)
+	})
+
+	t.Run("says nothing when the list is empty", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot", "cryptroot UUID="+u+" none luks\n")
+		require.Empty(t, globalOptionsWithheldMessage(luksMappings[0]))
+	})
+}
+
+// A per-device list replaces the default whole, so the advice has to be to add
+// to that list, not to write another.
+func TestWithheldReportPointsAtThePerDeviceList(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard rd.luks.options="+u+"=tries=4",
+		"cryptroot UUID="+u+" none luks\n")
+	m := luksMappings[0]
+	msg := globalOptionsWithheldMessage(m)
+	require.Contains(t, msg, `"discard" not applied`)
+	require.Contains(t, msg, "a per-device list names this one")
+	require.Equal(t, 4, m.tries, "the per-device list stands")
+	require.Empty(t, m.options, "the UUID-less list is withheld")
+}
+
+func TestUUIDLessListReachesADeviceCrypttabDoesNotDescribe(t *testing.T) {
+	const root = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	const other = "ab6d7d78-b816-4495-928d-766d6607035e"
+
+	// Same list, but crypttab covers only the other device, so it still applies.
+	resolveSources(t, "rd.luks.name="+root+"=cryptroot rd.luks.options=discard,token-timeout=90",
+		"data UUID="+other+" none luks\n")
+	m := luksMappings[0]
+	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
+	require.Equal(t, 90*time.Second, m.tokenTimeout)
+}
+
 func TestCmdlineOptionsSurviveACrypttabParseError(t *testing.T) {
 	// The options are composed once, after crypttab is read. If that composition
 	// were skipped when the file fails to parse, every rd.luks.* option would be
@@ -539,20 +675,20 @@ func TestCmdlineTriesZeroOutranksCrypttab(t *testing.T) {
 	// tries=0 means unlimited retries. While unset was also 0 it was
 	// indistinguishable, so crypttab's tries= overwrote it.
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=tries=0",
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=0",
 		"cryptroot UUID="+u+" none luks,tries=3\n")
 	require.Equal(t, 0, luksMappings[0].tries, "an explicit tries=0 outranks the crypttab entry")
 }
 
-func TestCmdlineOutranksCrypttabPerField(t *testing.T) {
+func TestPerDeviceListReplacesTheEntrysOptions(t *testing.T) {
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=key-slot=2,tries=5",
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=key-slot=2,tries=5",
 		"cryptroot UUID="+u+" /crypttab/key luks,key-slot=1,tries=9,header=/crypttab/hdr\n")
 	m := luksMappings[0]
-	require.Equal(t, 2, m.keySlot, "cmdline key-slot wins")
-	require.Equal(t, 5, m.tries, "cmdline tries wins")
-	require.Equal(t, "/crypttab/key", m.keyfile, "crypttab supplies what the cmdline did not")
-	require.Equal(t, "/crypttab/hdr", m.header)
+	require.Equal(t, 2, m.keySlot)
+	require.Equal(t, 5, m.tries)
+	require.Empty(t, m.header, "the entry's option field is replaced whole")
+	require.Equal(t, "/crypttab/key", m.keyfile, "its first three fields survive")
 }
 
 // An explicit token-timeout= on the kernel cmdline must outrank a crypttab
@@ -566,13 +702,13 @@ func TestCmdlineTokenTimeoutOutranksCrypttab(t *testing.T) {
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
 
 	t.Run("crypttab omits it, the cmdline value survives", func(t *testing.T) {
-		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=token-timeout=10",
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=token-timeout=10",
 			"cryptroot UUID="+u+" none luks\n")
 		require.Equal(t, 10*time.Second, luksMappings[0].tokenTimeout)
 	})
 
 	t.Run("both set it, the cmdline still wins", func(t *testing.T) {
-		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=token-timeout=10",
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=token-timeout=10",
 			"cryptroot UUID="+u+" none luks,token-timeout=60\n")
 		require.Equal(t, 10*time.Second, luksMappings[0].tokenTimeout)
 	})
@@ -760,46 +896,6 @@ func TestJoinOptionsDropsRepeats(t *testing.T) {
 	require.Equal(t, "", joinOptions(nil))
 }
 
-func TestPerDeviceListReplacesCrypttabOptions(t *testing.T) {
-	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-
-	// systemd-cryptsetup replaces an entry's option field when a per-device
-	// rd.luks.options= names the device, so the command line can remove an
-	// option and not only add one. tries= comes from the cmdline; discard and
-	// key-slot= were only in crypttab and do not survive.
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
-		"cryptroot UUID="+u+" none luks,tries=2,discard,key-slot=3\n")
-	require.Len(t, luksMappings, 1)
-	m := luksMappings[0]
-	require.Equal(t, 9, m.tries)
-	require.Empty(t, m.options)
-	require.Equal(t, luksOptionUnset, m.keySlot)
-}
-
-func TestReplacedEntryKeepsItsKeyfile(t *testing.T) {
-	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-
-	// The keyfile is crypttab's third field, not an option, so it survives the
-	// replacement. keyfile-offset= and keyfile-size= are options and do not.
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
-		"cryptroot UUID="+u+" /etc/luks.key luks,keyfile-offset=4096,keyfile-size=64\n")
-	m := luksMappings[0]
-	require.Equal(t, "/etc/luks.key", m.keyfile)
-	require.Zero(t, m.keyfileOffset)
-	require.Zero(t, m.keyfileSize)
-}
-
-func TestCrypttabMergesWhenNoPerDeviceList(t *testing.T) {
-	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
-
-	// Without a per-device list nothing about the merge changes: the command
-	// line still takes precedence and crypttab still fills what it left unset.
-	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard",
-		"cryptroot UUID="+u+" none luks,tries=2\n")
-	m := luksMappings[0]
-	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
-	require.Equal(t, 2, m.tries)
-}
 func TestCrypttabKeyfileAndItsTimeoutSurvive(t *testing.T) {
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
 	resolveSources(t, "rd.luks.name="+u+"=cryptroot",
@@ -1022,14 +1118,14 @@ func TestArrivalReportsEachConflictOnce(t *testing.T) {
 	uuid, err := parseUUID(u)
 	require.NoError(t, err)
 
-	resolveSources(t, "rd.luks.uuid="+u+" rd.luks.options=tries=3",
-		"a UUID="+u+" none luks,tries=5\nb LABEL=crypt none luks,key-slot=2\n")
+	resolveSources(t, "rd.luks.uuid="+u+" rd.luks.header="+u+"=/h1",
+		"a UUID="+u+" none luks,header=/h2\nb LABEL=crypt none luks,key-slot=2\n")
 
 	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
 	require.NotNil(t, m)
 
 	text := strings.Join(conflictMessages(m.conflicts()), "\n")
-	require.Equal(t, 1, strings.Count(text, `tries is "3"`), text)
+	require.Equal(t, 1, strings.Count(text, `header is "/h1"`), text)
 }
 
 // Two entries for one device: each value is credited to the entry that wrote
@@ -1250,4 +1346,30 @@ func TestLostUnlockSettingsSurfaceWhenUnlockBreaks(t *testing.T) {
 	require.NotContains(t, text, "volume name", "a lost name does not stop an unlock")
 	require.NotContains(t, text, "tries is", "nor does a retry count")
 	require.Empty(t, surfaceLostUnlockSettings("/dev/sda2", m), "logged once per device")
+}
+
+// nofail has no unset state, so a source that sets it can never be overruled by
+// one that outranks it. That is only safe while at most one source reaches a
+// device: crypttab, the UUID-less list and a per-device list are now mutually
+// exclusive, and rd.luks.header= carries nothing but a header.
+func TestOnlyOneOptionSourceReachesADevice(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	t.Run("a per-device list keeps the default's nofail off", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=nofail rd.luks.options="+u+"=tries=2", "")
+		require.False(t, luksMappings[0].noFail)
+	})
+
+	t.Run("a crypttab entry keeps the default's nofail off", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=nofail", "cryptroot UUID="+u+" none luks\n")
+		require.False(t, luksMappings[0].noFail)
+	})
+
+	t.Run("a per-device list keeps the entry's nofail off", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=2",
+			"cryptroot UUID="+u+" none luks,nofail\n")
+		require.False(t, luksMappings[0].noFail)
+	})
 }
