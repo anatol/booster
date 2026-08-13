@@ -100,7 +100,9 @@ func (o *luksOptions) triesOrUnlimited() int {
 // alone. Callers apply their sources lowest priority first, so precedence is
 // the order of the calls.
 func overlay(dst, src *luksOptions) {
-	dst.options = append(dst.options, src.options...)
+	for _, f := range src.options {
+		dst.options = addFlag(dst.options, f)
+	}
 
 	if src.keyfileOffset != 0 {
 		dst.keyfileOffset = src.keyfileOffset
@@ -315,6 +317,16 @@ var rdLuksOptions = map[string]string{
 	"submit-from-crypt-cpus": luks.FlagSubmitFromCryptCPUs,
 	"no-read-workqueue":      luks.FlagNoReadWorkqueue,
 	"no-write-workqueue":     luks.FlagNoWriteWorkqueue,
+}
+
+// addFlag appends flag unless it is already present. dm-crypt flags are
+// booleans, so a repeat says nothing but still reaches the kernel as another
+// optional parameter -- and two sources naming the same flag is ordinary.
+func addFlag(flags []string, flag string) []string {
+	if slices.Contains(flags, flag) {
+		return flags
+	}
+	return append(flags, flag)
 }
 
 // ctxSleep blocks for d, or returns ctx.Err() as soon as ctx is done, whichever

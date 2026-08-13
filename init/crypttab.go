@@ -155,7 +155,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 				// explicit LUKS marker — booster detects LUKS via blkinfo, nothing to do
 			default:
 				if flag, ok := rdLuksOptions[key]; ok {
-					m.options = append(m.options, flag)
+					m.options = addFlag(m.options, flag)
 					continue
 				}
 				debug("crypttab: entry %q: unknown option %q, ignoring", name, opt)

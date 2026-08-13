@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anatol/luks.go"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,6 +83,24 @@ func TestParseCrypttabDmCryptFlags(t *testing.T) {
 	require.Len(t, mappings, 1)
 	require.Contains(t, mappings[0].options, "allow-discards")
 	require.Contains(t, mappings[0].options, "no-read-workqueue")
+}
+
+func TestFlagsAreNotDuplicated(t *testing.T) {
+	// dm-crypt flags are booleans and go straight into the kernel's optional
+	// parameter list, so the same flag named twice must arrive once.
+	mappings, err := parseCrypttabReader(strings.NewReader(
+		"cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none luks,discard,discard\n"))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Equal(t, []string{luks.FlagAllowDiscards}, mappings[0].options)
+
+	// and once when two sources each name it
+	dst := &luksMapping{luksOptions: newLuksOptions()}
+	dst.options = []string{luks.FlagAllowDiscards}
+	src := &luksMapping{luksOptions: newLuksOptions()}
+	src.options = []string{luks.FlagAllowDiscards}
+	composeSources(dst, src)
+	require.Equal(t, []string{luks.FlagAllowDiscards}, dst.options)
 }
 
 func TestParseCrypttabLuksOption(t *testing.T) {
