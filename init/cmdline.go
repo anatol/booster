@@ -255,8 +255,8 @@ func parseParams(params string) error {
 					if err != nil {
 						return err
 					}
-					if skip {
-						warning("rd.luks.options: %s: noauto has no effect on the kernel command line, ignoring", head)
+					if skip != "" {
+						reportSkippedEntry("rd.luks.options: "+head, skip)
 					}
 					continue
 				}
@@ -267,8 +267,8 @@ func parseParams(params string) error {
 			if err != nil {
 				return err
 			}
-			if skip {
-				warning("rd.luks.options: noauto has no effect on the kernel command line, ignoring")
+			if skip != "" {
+				reportSkippedEntry("rd.luks.options", skip)
 			}
 		case "rd.luks.name":
 			parts := strings.Split(value, "=")

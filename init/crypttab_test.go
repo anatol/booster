@@ -86,6 +86,15 @@ func TestParseCrypttabNetdev(t *testing.T) {
 	require.Equal(t, 2, mappings[0].tries)
 }
 
+func TestParseCrypttabSkippedEntryOptions(t *testing.T) {
+	// tcrypt volumes are not unlocked at all, so the tcrypt-specific options on
+	// the line are moot -- reporting them would point at the wrong problem.
+	input := "cryptdata UUID=ab6d7d78-b816-4495-928d-766d6607035e none tcrypt,tcrypt-hidden\n"
+	mappings, err := parseCrypttabReader(strings.NewReader(input))
+	require.NoError(t, err)
+	require.Empty(t, mappings)
+}
+
 func TestParseCrypttabDmCryptFlags(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none discard,no-read-workqueue\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))

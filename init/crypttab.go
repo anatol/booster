@@ -26,8 +26,9 @@ func parseCrypttab() ([]*luksMapping, error) {
 }
 
 // parseLuksOptions applies crypttab-syntax options to m. ctx prefixes messages
-// to name the source; skip reports an option that opts the entry out entirely.
-func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error) {
+// to name the source; skip names the option that opts the entry out entirely.
+func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err error) {
+	var unknown []string
 	var netdev bool
 	for opt := range strings.SplitSeq(optStr, ",") {
 		opt = strings.TrimSpace(opt)
@@ -43,43 +44,43 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 			case "tries":
 				v, err := strconv.Atoi(value)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid tries= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid tries= value %q", ctx, value)
 				}
 				m.tries = v
 			case "key-slot":
 				v, err := strconv.Atoi(value)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid key-slot= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid key-slot= value %q", ctx, value)
 				}
 				m.keySlot = v
 			case "keyfile-offset":
 				v, err := strconv.ParseInt(value, 10, 64)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid keyfile-offset= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid keyfile-offset= value %q", ctx, value)
 				}
 				m.keyfileOffset = v
 			case "keyfile-size":
 				v, err := strconv.ParseInt(value, 10, 64)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid keyfile-size= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid keyfile-size= value %q", ctx, value)
 				}
 				m.keyfileSize = v
 			case "keyfile-timeout":
 				d, err := parseCrypttabDuration(value)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid keyfile-timeout= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid keyfile-timeout= value %q", ctx, value)
 				}
 				m.keyfileTimeout = d
 			case "token-timeout":
 				d, err := parseTokenTimeout(value)
 				if err != nil {
-					return false, fmt.Errorf("%s: invalid token-timeout= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid token-timeout= value %q", ctx, value)
 				}
 				m.tokenTimeout = d
 			case "header":
 				hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
 				if err != nil {
-					return false, fmt.Errorf("%s: %v", ctx, err)
+					return "", fmt.Errorf("%s: %v", ctx, err)
 				}
 				m.header = hdrPath
 				m.headerDeviceRef = hdrRef
@@ -88,7 +89,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 				// unset = auto (extend iff a token binds PCR15).
 				s, valid := parseMeasurePCR(value)
 				if !valid {
-					return false, fmt.Errorf("%s: invalid tpm2-measure-pcr= value %q", ctx, value)
+					return "", fmt.Errorf("%s: invalid tpm2-measure-pcr= value %q", ctx, value)
 				}
 				m.measurePCR = s
 			case "tpm2-signature":
@@ -98,7 +99,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 			case "fido2-device", "tpm2-device":
 				// accepted for compatibility; token detection uses LUKS2 header
 			default:
-				warning("%s: unknown option %q, ignoring", ctx, opt)
+				unknown = append(unknown, opt)
 			}
 			continue
 		}
@@ -107,12 +108,12 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 		case "x-initrd.attach":
 			// silently ignored — filtering was done by generator
 		case "noauto":
-			skip = true
+			skip = opt
 		case "nofail":
 			m.noFail = true
 		case "swap", "tmp", "plain", "bitlk", "tcrypt":
-			// unsupported modes — skip at boot
-			skip = true
+			// booster unlocks LUKS volumes only
+			skip = opt
 		case "luks":
 			// explicit LUKS marker — booster detects LUKS via blkinfo, nothing to do
 		case "_netdev":
@@ -124,13 +125,27 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 				m.options = addFlag(m.options, flag)
 				continue
 			}
-			warning("%s: unknown option %q, ignoring", ctx, opt)
+			unknown = append(unknown, opt)
 		}
 	}
-	if !skip && netdev && config.Network == nil {
-		warning("%s: _netdev needs the network, but none is configured; unlock will be attempted without it", ctx)
+	if skip == "" {
+		for _, opt := range unknown {
+			warning("%s: unknown option %q, ignoring", ctx, opt)
+		}
+		if netdev && config.Network == nil {
+			warning("%s: _netdev needs the network, but none is configured; unlock will be attempted without it", ctx)
+		}
 	}
 	return skip, nil
+}
+
+// reportSkippedEntry explains why ctx's device will not be unlocked.
+func reportSkippedEntry(ctx, skip string) {
+	if skip == "noauto" {
+		info("%s: noauto is set, not unlocking it", ctx)
+	} else {
+		warning("%s: cannot unlock a %q volume", ctx, skip)
+	}
 }
 
 // parseCrypttabReader is the testable core of parseCrypttab.
@@ -179,7 +194,8 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			return nil, err
 		}
 
-		if skip {
+		if skip != "" {
+			reportSkippedEntry(fmt.Sprintf("crypttab: entry %q", name), skip)
 			continue
 		}
 
