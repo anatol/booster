@@ -256,7 +256,8 @@ func TestParseParamsTokenTimeoutDefault(t *testing.T) {
 	// default 30s is set at mapping creation, not via cmdline
 	luksMappings = nil
 	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
-	require.Equal(t, 30*time.Second, luksMappings[0].tokenTimeout)
+	require.Equal(t, luksOptionUnset, int(luksMappings[0].tokenTimeout))
+	require.Equal(t, defaultTokenTimeout, effectiveTokenTimeout(luksMappings[0], nil))
 }
 
 func TestParseParamsInvalidTokenTimeout(t *testing.T) {

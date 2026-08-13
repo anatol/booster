@@ -80,7 +80,6 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		m.tokenTimeout = 7 * time.Second
-		m.tokenTimeoutExplicit = true
 		withConfig(InitConfig{SerializeTokens: true, TokenTimeout: 99}, func() {
 			require.Equal(t, 7*time.Second, effectiveTokenTimeout(m, []luks.Token{clevis}))
 		})
@@ -90,7 +89,7 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		m := &luksMapping{
 			luksOptions: newLuksOptions(),
 		}
-		m.tokenTimeout = 30 * time.Second // implicit default, not explicit
+		m.tokenTimeout = luksOptionUnset
 		withConfig(InitConfig{SerializeTokens: true, TokenTimeout: 25}, func() {
 			require.Equal(t, 25*time.Second, effectiveTokenTimeout(m, []luks.Token{clevis}))
 		})
@@ -100,7 +99,7 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		m := &luksMapping{
 			luksOptions: newLuksOptions(),
 		}
-		m.tokenTimeout = 30 * time.Second // implicit, ignored in serialize
+		m.tokenTimeout = luksOptionUnset
 		withConfig(InitConfig{SerializeTokens: true}, func() {
 			// clevis 45 + tpm2 15 + PIN tpm2 0 = 60s
 			got := effectiveTokenTimeout(m, []luks.Token{clevis, tpm2, tpm2Pin})
@@ -117,7 +116,7 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		m := &luksMapping{
 			luksOptions: newLuksOptions(),
 		}
-		m.tokenTimeout = 30 * time.Second
+		m.tokenTimeout = luksOptionUnset
 		withConfig(InitConfig{SerializeTokens: true}, func() {
 			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, []luks.Token{tpm2Pin}))
 		})
@@ -127,7 +126,7 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		m := &luksMapping{
 			luksOptions: newLuksOptions(),
 		}
-		m.tokenTimeout = 30 * time.Second
+		m.tokenTimeout = luksOptionUnset
 		withConfig(InitConfig{SerializeTokens: false}, func() {
 			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, nil))
 		})

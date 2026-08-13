@@ -56,7 +56,6 @@ func TestResolveKeyfileTimeout(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		m.keyfileTimeout = 45 * time.Second
-		m.keyfileTimeoutExplicit = true
 		require.Equal(t, 45*time.Second, resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("explicit zero means infinite", func(t *testing.T) {
@@ -64,13 +63,12 @@ func TestResolveKeyfileTimeout(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		m.keyfileTimeout = 0
-		m.keyfileTimeoutExplicit = true
 		require.Equal(t, time.Duration(0), resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("unset falls to mount_timeout when set", func(t *testing.T) {
 		m := &luksMapping{
 			luksOptions: newLuksOptions(),
-		} // keyfileTimeoutExplicit false, keyfileTimeout 0
+		} // keyfileTimeout is unset
 		require.Equal(t, 60*time.Second, resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("unset with no mount_timeout uses 30s default", func(t *testing.T) {
@@ -104,7 +102,7 @@ func TestKeyfileAbsentDeviceDoesNotHang(t *testing.T) {
 
 		name: "root",
 
-		// keyfileTimeoutExplicit false, keyfileTimeout 0 → unset case → default applies,
+		// keyfileTimeout unset, so the default applies
 
 		luksOptions: newLuksOptions(),
 	}
@@ -266,8 +264,8 @@ func TestMatchLuksMappingSynthesisFallbackUnchanged(t *testing.T) {
 	got := matchLuksMapping(blk)
 	require.NotNil(t, got)
 	require.Equal(t, "root", got.name)
-	require.Equal(t, -1, got.keySlot)
-	require.Equal(t, 30*time.Second, got.tokenTimeout)
+	require.Equal(t, luksOptionUnset, got.keySlot)
+	require.Equal(t, luksOptionUnset, int(got.tokenTimeout))
 	require.Same(t, rootRef, got.ref, "synthesised mapping must keep the original cmdRoot ref")
 
 	require.Equal(t, refPath, cmdRoot.format)

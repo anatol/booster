@@ -25,31 +25,30 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// luksOptionUnset marks an option no source has set, outside every option's
+// valid range so an explicit zero stays distinguishable from silence.
+const luksOptionUnset = -1
+
+const defaultTokenTimeout = 30 * time.Second
+
 // luksOptions is everything the fourth crypttab(5) field can configure.
 type luksOptions struct {
 	options         []string
 	header          string     // detached LUKS header path (empty = embedded header)
 	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
 
-	tokenTimeout time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
-
-	// tokenTimeoutExplicit is set when tokenTimeout came from an explicit
-	// crypttab/cmdline token-timeout= (not the implicit 30s default). It lets
-	// luksOpen know whether a booster.yaml token_timeout or the serialize-mode
-	// derived sum may be substituted instead.
-	tokenTimeoutExplicit bool
-
-	keyfileTimeout         time.Duration // device wait timeout for keyfile device
-	keyfileTimeoutExplicit bool          // distinguishes keyfile-timeout=0 (wait forever) from unset
+	// unset = luksOptionUnset: each has a zero value that is itself a setting.
+	tokenTimeout   time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
+	keyfileTimeout time.Duration // device wait timeout for keyfile device; 0 = wait forever
+	keySlot        int           // 0.. restricts unlock to that slot
+	tries          int           // 0 = unlimited keyboard retries; >0 = max attempts
 
 	// these describe the keyfile named by crypttab's third field, which is not
 	// an option and lives on the mapping
-	keyfileOffset int64 // bytes to skip at start of keyfile
-	keyfileSize   int64 // max bytes to read from keyfile (0 = all)
+	keyfileOffset int64 // bytes to skip at start of keyfile; 0 = start
+	keyfileSize   int64 // max bytes to read from keyfile; 0 = all
 
-	keySlot int  // -1 = all slots; >=0 restricts unlock to that slot
-	tries   int  // 0 = unlimited keyboard retries; >0 = max attempts
-	noFail  bool // non-fatal unlock failure — boot continues on error
+	noFail bool // non-fatal unlock failure — boot continues; additive, no unset state
 
 	// measurePCR is the tpm2-measure-pcr= setting for the PCR15 latch.
 	// Zero value = measurePCRAuto (extend iff a token binds PCR15).
@@ -63,8 +62,10 @@ type luksOptions struct {
 // newLuksOptions returns an option set with nothing configured.
 func newLuksOptions() luksOptions {
 	return luksOptions{
-		keySlot:      -1,
-		tokenTimeout: 30 * time.Second, // systemd default: wait 30s for tokens before also prompting keyboard
+		keySlot:        luksOptionUnset,
+		tries:          luksOptionUnset,
+		keyfileTimeout: luksOptionUnset,
+		tokenTimeout:   luksOptionUnset,
 	}
 }
 
@@ -80,6 +81,14 @@ type luksMapping struct {
 	keyfileDeviceRef *deviceRef // non-nil when the keyfile is on a separate device
 
 	luksOptions // field 4, options: rd.luks.options=
+}
+
+// triesOrUnlimited maps unset onto 0, which the keyboard prompt treats as unlimited.
+func (o *luksOptions) triesOrUnlimited() int {
+	if o.tries == luksOptionUnset {
+		return 0
+	}
+	return o.tries
 }
 
 // newLuksMapping returns a mapping for ref with no options configured.
@@ -1265,7 +1274,7 @@ func perTokenTimeout(t luks.Token) time.Duration {
 // effectiveTokenTimeout resolves how long luksOpen waits for tokens before the
 // keyboard/keyfile fallback also starts. Precedence, highest first:
 //
-//  1. explicit crypttab/cmdline token-timeout= (mapping.tokenTimeoutExplicit)
+//  1. explicit crypttab/cmdline token-timeout= (mapping.tokenTimeout set)
 //  2. booster.yaml token_timeout (config.TokenTimeout)
 //  3. serialize mode: sum of the enrolled tokens' per-token bounds, so the
 //     keyboard never preempts a serial token that hasn't had its turn (PIN
@@ -1273,11 +1282,11 @@ func perTokenTimeout(t luks.Token) time.Duration {
 //     zero sum (only PIN/unknown tokens) falls through to case 4 — otherwise
 //     a FIDO2-PIN goroutine parked on absent hardware would never release the
 //     keyboard fallback and the boot would hang.
-//  4. otherwise the mapping's implicit default (30 s; unchanged behaviour)
+//  4. otherwise defaultTokenTimeout (30 s; unchanged behaviour)
 //
 // A return of 0 means "wait for the token goroutines (tokenWg) with no timer".
 func effectiveTokenTimeout(mapping *luksMapping, serialTokens []luks.Token) time.Duration {
-	if mapping.tokenTimeoutExplicit {
+	if mapping.tokenTimeout != luksOptionUnset {
 		return mapping.tokenTimeout
 	}
 	if config.TokenTimeout > 0 {
@@ -1292,7 +1301,7 @@ func effectiveTokenTimeout(mapping *luksMapping, serialTokens []luks.Token) time
 			return sum
 		}
 	}
-	return mapping.tokenTimeout
+	return defaultTokenTimeout
 }
 
 // pinDelay returns how long luksOpen holds the first interactive PIN prompt so
@@ -1415,7 +1424,7 @@ var defaultKeyfileDeviceTimeout = 30 * time.Second
 // resolveKeyfileTimeout picks the keyfile-device wait: explicit keyfile-timeout=,
 // else mount_timeout, else the default.
 func resolveKeyfileTimeout(m *luksMapping, mountTimeout int) time.Duration {
-	if m.keyfileTimeoutExplicit {
+	if m.keyfileTimeout != luksOptionUnset {
 		return m.keyfileTimeout
 	}
 	if mountTimeout > 0 {
@@ -1451,7 +1460,7 @@ func recoverKeyfilePassword(ctx context.Context, volumes chan *luks.Volume, d lu
 	warning("password in keyfile %s was unable to unseal %s", mapping.keyfile, mapping.name)
 
 	// fall back to keyboard
-	requestKeyboardPassword(ctx, volumes, d, checkSlots, mapping.name, mapping.tries)
+	requestKeyboardPassword(ctx, volumes, d, checkSlots, mapping.name, mapping.triesOrUnlimited())
 }
 
 // tryCachedPassphrases snapshots passphraseCache and tries each entry against
@@ -1798,7 +1807,7 @@ func luksOpen(dev string, mapping *luksMapping) error {
 				if mapping.keyfile != "" {
 					recoverKeyfilePassword(ctx, volumes, d, checkSlotsWithPassword, mapping)
 				} else {
-					requestKeyboardPassword(ctx, volumes, d, checkSlotsWithPassword, mapping.name, mapping.tries)
+					requestKeyboardPassword(ctx, volumes, d, checkSlotsWithPassword, mapping.name, mapping.triesOrUnlimited())
 				}
 			})
 		}

@@ -388,7 +388,6 @@ func parseParams(params string) error {
 		}
 		if tokenTimeoutExplicit {
 			luksMappings[i].tokenTimeout = tokenTimeout
-			luksMappings[i].tokenTimeoutExplicit = true
 		}
 		if measurePCR != measurePCRAuto {
 			luksMappings[i].measurePCR = measurePCR

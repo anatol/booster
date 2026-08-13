@@ -108,14 +108,12 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid keyfile-timeout= value %q", name, value)
 					}
 					m.keyfileTimeout = d
-					m.keyfileTimeoutExplicit = true
 				case "token-timeout":
 					d, err := parseTokenTimeout(value)
 					if err != nil {
 						return nil, fmt.Errorf("crypttab: entry %q: invalid token-timeout= value %q", name, value)
 					}
 					m.tokenTimeout = d
-					m.tokenTimeoutExplicit = true
 				case "header":
 					hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
 					if err != nil {
@@ -203,12 +201,10 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 	// Adopt crypttab's token-timeout only when the cmdline mapping did not
 	// carry an explicit token-timeout= of its own. Mirrors the keyfile/
 	// header/tries merges below: an explicit cmdline value always wins;
-	// crypttab fills in only what the cmdline left unset. (src.tokenTimeout
-	// is always >0 here — the crypttab parser fills a 30 s implicit default
-	// — so the gate must be the explicit flags, not the values.)
-	if !dst.tokenTimeoutExplicit && src.tokenTimeoutExplicit {
+	// crypttab fills in only what the cmdline left unset. luksOptionUnset is
+	// what "left unset" means, so the value alone decides.
+	if dst.tokenTimeout == luksOptionUnset && src.tokenTimeout != luksOptionUnset {
 		dst.tokenTimeout = src.tokenTimeout
-		dst.tokenTimeoutExplicit = true
 	}
 	if dst.keyfile == "" && src.keyfile != "" {
 		dst.keyfile = src.keyfile
@@ -216,12 +212,11 @@ func mergeCrypttabOptions(dst, src *luksMapping) {
 		dst.keyfileOffset = src.keyfileOffset
 		dst.keyfileSize = src.keyfileSize
 		dst.keyfileTimeout = src.keyfileTimeout
-		dst.keyfileTimeoutExplicit = src.keyfileTimeoutExplicit
 	}
-	if dst.keySlot == -1 && src.keySlot != -1 {
+	if dst.keySlot == luksOptionUnset && src.keySlot != luksOptionUnset {
 		dst.keySlot = src.keySlot
 	}
-	if dst.tries == 0 && src.tries != 0 {
+	if dst.tries == luksOptionUnset && src.tries != luksOptionUnset {
 		dst.tries = src.tries
 	}
 	if dst.header == "" && src.header != "" {
