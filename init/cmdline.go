@@ -257,7 +257,9 @@ func parseParams(params string) error {
 						return err
 					}
 					if skip != "" {
-						reportSkippedEntry("rd.luks.options: "+head, skip)
+						// The rest of the list still applies: only the option that
+						// would have discarded a crypttab entry is meaningless here.
+						warning("rd.luks.options: %s: %q selects a volume type or opts out of unlocking, which the kernel command line cannot do; ignoring it", head, skip)
 					}
 					continue
 				}
@@ -269,7 +271,7 @@ func parseParams(params string) error {
 				return err
 			}
 			if skip != "" {
-				reportSkippedEntry("rd.luks.options", skip)
+				warning("rd.luks.options: %q selects a volume type or opts out of unlocking, which the kernel command line cannot do; ignoring it", skip)
 			}
 		case "rd.luks.name":
 			parts := strings.Split(value, "=")
