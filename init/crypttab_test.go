@@ -76,6 +76,16 @@ func TestParseCrypttabNonLuksModes(t *testing.T) {
 	}
 }
 
+func TestParseCrypttabNetdev(t *testing.T) {
+	// _netdev only orders systemd units; the entry is otherwise ordinary and
+	// must not be reported as an unknown option.
+	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none luks,_netdev,tries=2\n"
+	mappings, err := parseCrypttabReader(strings.NewReader(input))
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	require.Equal(t, 2, mappings[0].tries)
+}
+
 func TestParseCrypttabDmCryptFlags(t *testing.T) {
 	input := "cryptroot UUID=ab6d7d78-b816-4495-928d-766d6607035e none discard,no-read-workqueue\n"
 	mappings, err := parseCrypttabReader(strings.NewReader(input))

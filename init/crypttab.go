@@ -28,6 +28,7 @@ func parseCrypttab() ([]*luksMapping, error) {
 // parseLuksOptions applies crypttab-syntax options to m. ctx prefixes messages
 // to name the source; skip reports an option that opts the entry out entirely.
 func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error) {
+	var netdev bool
 	for opt := range strings.SplitSeq(optStr, ",") {
 		opt = strings.TrimSpace(opt)
 		if opt == "" {
@@ -114,6 +115,10 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 			skip = true
 		case "luks":
 			// explicit LUKS marker — booster detects LUKS via blkinfo, nothing to do
+		case "_netdev":
+			// booster has no unit graph to order; the network assertion is
+			// checked after the loop, so a discarded entry stays quiet
+			netdev = true
 		default:
 			if flag, ok := rdLuksOptions[key]; ok {
 				m.options = addFlag(m.options, flag)
@@ -121,6 +126,9 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 			}
 			warning("%s: unknown option %q, ignoring", ctx, opt)
 		}
+	}
+	if !skip && netdev && config.Network == nil {
+		warning("%s: _netdev needs the network, but none is configured; unlock will be attempted without it", ctx)
 	}
 	return skip, nil
 }
