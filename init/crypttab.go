@@ -97,7 +97,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 			case "fido2-device", "tpm2-device":
 				// accepted for compatibility; token detection uses LUKS2 header
 			default:
-				debug("%s: unknown option %q, ignoring", ctx, opt)
+				warning("%s: unknown option %q, ignoring", ctx, opt)
 			}
 			continue
 		}
@@ -119,7 +119,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip bool, err error)
 				m.options = addFlag(m.options, flag)
 				continue
 			}
-			debug("%s: unknown option %q, ignoring", ctx, opt)
+			warning("%s: unknown option %q, ignoring", ctx, opt)
 		}
 	}
 	return skip, nil

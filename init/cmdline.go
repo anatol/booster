@@ -276,7 +276,8 @@ func parseParams(params string) error {
 				}
 				flag, ok := rdLuksOptions[o]
 				if !ok {
-					return fmt.Errorf("unknown value in rd.luks.options: %v", o)
+					warning("rd.luks.options: unknown option %q, ignoring", o)
+					continue
 				}
 				luksOptions = append(luksOptions, flag)
 			}

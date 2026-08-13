@@ -18,10 +18,18 @@ func parseParamsResolved(params string) error {
 	return nil
 }
 
-func TestParseParamsInvalidLuksOptions(t *testing.T) {
+func TestParseParamsUnknownLuksOptionIsNotFatal(t *testing.T) {
+	// An unrecognised option used to abort parsing and drop the machine to the
+	// emergency shell. It is reported and skipped instead.
 	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=bogus-option"))
+	require.Len(t, luksMappings, 1)
+}
 
-	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt rd.luks.options=bogus-option"))
+func TestParseParamsInvalidLuksOptionValueStaysFatal(t *testing.T) {
+	// A malformed value for a recognised option is unambiguous, so it still fails.
+	luksMappings = nil
+	require.Error(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=notaduration"))
 }
 
 func TestParseParamsLuksData(t *testing.T) {
