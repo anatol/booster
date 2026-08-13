@@ -350,8 +350,16 @@ func TestParseCrypttabTpm2Device(t *testing.T) {
 func TestFindLuksMapping(t *testing.T) {
 	uuid1, _ := parseUUID("ab6d7d78-b816-4495-928d-766d6607035e")
 	uuid2, _ := parseUUID("7843d77f-cdd6-4289-a4de-a708c4aacede")
-	m1 := &luksMapping{ref: &deviceRef{format: refFsUUID, data: uuid1}, name: "one"}
-	m2 := &luksMapping{ref: &deviceRef{format: refFsUUID, data: uuid2}, name: "two"}
+	m1 := &luksMapping{
+		ref:         &deviceRef{format: refFsUUID, data: uuid1},
+		name:        "one",
+		luksOptions: newLuksOptions(),
+	}
+	m2 := &luksMapping{
+		ref:         &deviceRef{format: refFsUUID, data: uuid2},
+		name:        "two",
+		luksOptions: newLuksOptions(),
+	}
 	orig := luksMappings
 	defer func() { luksMappings = orig }()
 
@@ -364,12 +372,17 @@ func TestFindLuksMapping(t *testing.T) {
 }
 
 func TestMergeCrypttabOptions(t *testing.T) {
-	dst := &luksMapping{name: "cmdline-name", keySlot: -1, tokenTimeout: 30 * time.Second}
-	src := &luksMapping{
-		tries:                3,
-		tokenTimeout:         45 * time.Second,
-		tokenTimeoutExplicit: true, // as parseCrypttabReader sets it for an explicit token-timeout=
+	dst := &luksMapping{
+		name:        "cmdline-name",
+		luksOptions: newLuksOptions(),
 	}
+	dst.keySlot = -1
+	dst.tokenTimeout = 30 * time.Second
+	src := &luksMapping{luksOptions: newLuksOptions()}
+	src.tries = 3
+	// an explicit token-timeout=, as parseCrypttabReader records it
+	src.tokenTimeout = 45 * time.Second
+	src.tokenTimeoutExplicit = true
 	mergeCrypttabOptions(dst, src)
 	require.Equal(t, 3, dst.tries)
 	require.Equal(t, 45*time.Second, dst.tokenTimeout) // cmdline mapping was not explicit → crypttab's explicit value adopted
@@ -377,8 +390,20 @@ func TestMergeCrypttabOptions(t *testing.T) {
 }
 
 func TestMergeCrypttabOptionsDstWins(t *testing.T) {
-	dst := &luksMapping{keyfile: "/cmdline/key", keySlot: 2, tries: 5, header: "/cmdline/hdr"}
-	src := &luksMapping{keyfile: "/crypttab/key", keySlot: 1, tries: 9, header: "/crypttab/hdr"}
+	dst := &luksMapping{
+		luksOptions: newLuksOptions(),
+	}
+	dst.keyfile = "/cmdline/key"
+	dst.keySlot = 2
+	dst.tries = 5
+	dst.header = "/cmdline/hdr"
+	src := &luksMapping{
+		luksOptions: newLuksOptions(),
+	}
+	src.keyfile = "/crypttab/key"
+	src.keySlot = 1
+	src.tries = 9
+	src.header = "/crypttab/hdr"
 	mergeCrypttabOptions(dst, src)
 	require.Equal(t, "/cmdline/key", dst.keyfile) // cmdline keyfile wins
 	require.Equal(t, 2, dst.keySlot)              // cmdline key-slot wins
@@ -395,23 +420,45 @@ func TestMergeCrypttabOptionsDstWins(t *testing.T) {
 // that let crypttab's implicit 30s clobber an explicit cmdline value.
 func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
 	t.Run("crypttab omits token-timeout (implicit 30s) → cmdline 10s survives", func(t *testing.T) {
-		dst := &luksMapping{tokenTimeout: 10 * time.Second, tokenTimeoutExplicit: true}
-		src := &luksMapping{tokenTimeout: 30 * time.Second} // crypttab parser's implicit default; not explicit
+		dst := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		dst.tokenTimeout = 10 * time.Second
+		dst.tokenTimeoutExplicit = true
+		src := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		src.tokenTimeout = 30 * time.Second // crypttab parser's implicit default; not explicit
 		mergeCrypttabOptions(dst, src)
 		require.Equal(t, 10*time.Second, dst.tokenTimeout)
 		require.True(t, dst.tokenTimeoutExplicit)
 	})
 
 	t.Run("crypttab sets a different explicit value → cmdline still wins", func(t *testing.T) {
-		dst := &luksMapping{tokenTimeout: 10 * time.Second, tokenTimeoutExplicit: true}
-		src := &luksMapping{tokenTimeout: 60 * time.Second, tokenTimeoutExplicit: true}
+		dst := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		dst.tokenTimeout = 10 * time.Second
+		dst.tokenTimeoutExplicit = true
+		src := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		src.tokenTimeout = 60 * time.Second
+		src.tokenTimeoutExplicit = true
 		mergeCrypttabOptions(dst, src)
 		require.Equal(t, 10*time.Second, dst.tokenTimeout, "explicit cmdline token-timeout outranks explicit crypttab")
 	})
 
 	t.Run("cmdline not explicit → explicit crypttab is adopted", func(t *testing.T) {
-		dst := &luksMapping{tokenTimeout: 30 * time.Second} // findOrCreateLuksMapping default, not explicit
-		src := &luksMapping{tokenTimeout: 60 * time.Second, tokenTimeoutExplicit: true}
+		dst := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		dst.tokenTimeout = 30 * time.Second // findOrCreateLuksMapping default, not explicit
+		src := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		src.tokenTimeout = 60 * time.Second
+		src.tokenTimeoutExplicit = true
 		mergeCrypttabOptions(dst, src)
 		require.Equal(t, 60*time.Second, dst.tokenTimeout)
 		require.True(t, dst.tokenTimeoutExplicit)
@@ -547,8 +594,17 @@ func TestKeyfileTimeoutExplicitFlag(t *testing.T) {
 }
 
 func TestMergeCopiesKeyfileTimeoutExplicit(t *testing.T) {
-	dst := &luksMapping{keySlot: -1}
-	src := &luksMapping{keyfile: "/crypttab/key", keyfileTimeout: 10 * time.Second, keyfileTimeoutExplicit: true, keySlot: -1}
+	dst := &luksMapping{
+		luksOptions: newLuksOptions(),
+	}
+	dst.keySlot = -1
+	src := &luksMapping{
+		luksOptions: newLuksOptions(),
+	}
+	src.keyfile = "/crypttab/key"
+	src.keyfileTimeout = 10 * time.Second
+	src.keyfileTimeoutExplicit = true
+	src.keySlot = -1
 	mergeCrypttabOptions(dst, src)
 	require.Equal(t, "/crypttab/key", dst.keyfile)
 	require.Equal(t, 10*time.Second, dst.keyfileTimeout)

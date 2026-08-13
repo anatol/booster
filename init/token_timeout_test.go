@@ -76,21 +76,31 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 	tpm2Pin := tok("systemd-tpm2", `{"tpm2-pin":true}`)
 
 	t.Run("explicit crypttab/cmdline wins over everything", func(t *testing.T) {
-		m := &luksMapping{tokenTimeout: 7 * time.Second, tokenTimeoutExplicit: true}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.tokenTimeout = 7 * time.Second
+		m.tokenTimeoutExplicit = true
 		withConfig(InitConfig{SerializeTokens: true, TokenTimeout: 99}, func() {
 			require.Equal(t, 7*time.Second, effectiveTokenTimeout(m, []luks.Token{clevis}))
 		})
 	})
 
 	t.Run("booster.yaml token_timeout when not explicit", func(t *testing.T) {
-		m := &luksMapping{tokenTimeout: 30 * time.Second} // implicit default, not explicit
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.tokenTimeout = 30 * time.Second // implicit default, not explicit
 		withConfig(InitConfig{SerializeTokens: true, TokenTimeout: 25}, func() {
 			require.Equal(t, 25*time.Second, effectiveTokenTimeout(m, []luks.Token{clevis}))
 		})
 	})
 
 	t.Run("serialize derived sum of per-token bounds", func(t *testing.T) {
-		m := &luksMapping{tokenTimeout: 30 * time.Second} // implicit, ignored in serialize
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.tokenTimeout = 30 * time.Second // implicit, ignored in serialize
 		withConfig(InitConfig{SerializeTokens: true}, func() {
 			// clevis 45 + tpm2 15 + PIN tpm2 0 = 60s
 			got := effectiveTokenTimeout(m, []luks.Token{clevis, tpm2, tpm2Pin})
@@ -104,14 +114,20 @@ func TestEffectiveTokenTimeout(t *testing.T) {
 		// parked on absent hardware would then never release the keyboard
 		// fallback and the boot would hang. Must fall through to the mapping's
 		// implicit default instead.
-		m := &luksMapping{tokenTimeout: 30 * time.Second}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.tokenTimeout = 30 * time.Second
 		withConfig(InitConfig{SerializeTokens: true}, func() {
 			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, []luks.Token{tpm2Pin}))
 		})
 	})
 
 	t.Run("non-serialize, nothing explicit → mapping implicit default", func(t *testing.T) {
-		m := &luksMapping{tokenTimeout: 30 * time.Second}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.tokenTimeout = 30 * time.Second
 		withConfig(InitConfig{SerializeTokens: false}, func() {
 			require.Equal(t, 30*time.Second, effectiveTokenTimeout(m, nil))
 		})

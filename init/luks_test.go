@@ -52,19 +52,31 @@ func TestResolveKeyfileTimeout(t *testing.T) {
 	defer func() { defaultKeyfileDeviceTimeout = origDefault }()
 
 	t.Run("explicit non-zero wins over mount_timeout", func(t *testing.T) {
-		m := &luksMapping{keyfileTimeout: 45 * time.Second, keyfileTimeoutExplicit: true}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.keyfileTimeout = 45 * time.Second
+		m.keyfileTimeoutExplicit = true
 		require.Equal(t, 45*time.Second, resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("explicit zero means infinite", func(t *testing.T) {
-		m := &luksMapping{keyfileTimeout: 0, keyfileTimeoutExplicit: true}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
+		m.keyfileTimeout = 0
+		m.keyfileTimeoutExplicit = true
 		require.Equal(t, time.Duration(0), resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("unset falls to mount_timeout when set", func(t *testing.T) {
-		m := &luksMapping{} // keyfileTimeoutExplicit false, keyfileTimeout 0
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		} // keyfileTimeoutExplicit false, keyfileTimeout 0
 		require.Equal(t, 60*time.Second, resolveKeyfileTimeout(m, 60))
 	})
 	t.Run("unset with no mount_timeout uses 30s default", func(t *testing.T) {
-		m := &luksMapping{}
+		m := &luksMapping{
+			luksOptions: newLuksOptions(),
+		}
 		require.Equal(t, 30*time.Second, resolveKeyfileTimeout(m, 0))
 	})
 }
@@ -89,11 +101,15 @@ func TestKeyfileAbsentDeviceDoesNotHang(t *testing.T) {
 	require.NoError(t, err)
 
 	mapping := &luksMapping{
-		name:             "root",
-		keyfile:          "/.diskid",
-		keyfileDeviceRef: &deviceRef{refFsUUID, absent},
-		// keyfileTimeoutExplicit false, keyfileTimeout 0 → unset case → default applies
+
+		name: "root",
+
+		// keyfileTimeoutExplicit false, keyfileTimeout 0 → unset case → default applies,
+
+		luksOptions: newLuksOptions(),
 	}
+	mapping.keyfile = "/.diskid"
+	mapping.keyfileDeviceRef = &deviceRef{refFsUUID, absent}
 
 	done := make(chan error, 1)
 	go func() {
@@ -176,11 +192,17 @@ func TestMatchLuksMappingRewritesCmdRootOnRegularLoopMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	m := &luksMapping{
-		ref:          &deviceRef{format: refFsUUID, data: uuid},
-		name:         "cryptroot",
-		keySlot:      -1,
-		tokenTimeout: 30 * time.Second,
+
+		ref: &deviceRef{format: refFsUUID, data: uuid},
+
+		name: "cryptroot",
+
+		luksOptions: newLuksOptions(),
 	}
+
+	m.keySlot = -1
+
+	m.tokenTimeout = 30 * time.Second
 	luksMappings = []*luksMapping{m}
 	cmdRoot = &deviceRef{format: refFsUUID, data: uuid}
 
@@ -204,11 +226,17 @@ func TestMatchLuksMappingLeavesCmdRootAloneWhenItDoesNotMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	swap := &luksMapping{
-		ref:          &deviceRef{format: refFsUUID, data: swapUUID},
-		name:         "cryptswap",
-		keySlot:      -1,
-		tokenTimeout: 30 * time.Second,
+
+		ref: &deviceRef{format: refFsUUID, data: swapUUID},
+
+		name: "cryptswap",
+
+		luksOptions: newLuksOptions(),
 	}
+
+	swap.keySlot = -1
+
+	swap.tokenTimeout = 30 * time.Second
 	luksMappings = []*luksMapping{swap}
 
 	rootRef := &deviceRef{format: refFsUUID, data: rootUUID}
@@ -257,11 +285,17 @@ func TestMatchLuksMappingPreservesExplicitMapperPath(t *testing.T) {
 	require.NoError(t, err)
 
 	m := &luksMapping{
-		ref:          &deviceRef{format: refFsUUID, data: uuid},
-		name:         "cryptroot",
-		keySlot:      -1,
-		tokenTimeout: 30 * time.Second,
+
+		ref: &deviceRef{format: refFsUUID, data: uuid},
+
+		name: "cryptroot",
+
+		luksOptions: newLuksOptions(),
 	}
+
+	m.keySlot = -1
+
+	m.tokenTimeout = 30 * time.Second
 	luksMappings = []*luksMapping{m}
 
 	mapperRef := &deviceRef{format: refPath, data: "/dev/mapper/cryptroot"}

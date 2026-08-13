@@ -54,11 +54,7 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 			return nil, fmt.Errorf("crypttab: entry %q: invalid device %q: %v", name, deviceStr, err)
 		}
 
-		m := &luksMapping{
-			ref:     ref,
-			name:    name,
-			keySlot: -1,
-		}
+		m := newLuksMapping(ref, name)
 
 		// none/- means interactive passphrase
 		if keyfile != "" && keyfile != "none" && keyfile != "-" {
@@ -71,7 +67,6 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 		}
 
 		skip := false
-		tokenTimeoutExplicit := false
 		for opt := range strings.SplitSeq(optStr, ",") {
 			opt = strings.TrimSpace(opt)
 			if opt == "" {
@@ -121,7 +116,6 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 					}
 					m.tokenTimeout = d
 					m.tokenTimeoutExplicit = true
-					tokenTimeoutExplicit = true
 				case "header":
 					hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
 					if err != nil {
@@ -172,10 +166,6 @@ func parseCrypttabReader(r io.Reader) ([]*luksMapping, error) {
 
 		if skip {
 			continue
-		}
-
-		if !tokenTimeoutExplicit {
-			m.tokenTimeout = 30 * time.Second // systemd default: wait 30s for tokens before also prompting keyboard
 		}
 
 		mappings = append(mappings, m)

@@ -25,17 +25,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// specifies information needed to process/open a LUKS device
-// often these mappings specified by a user via command-line
-type luksMapping struct {
-	ref             *deviceRef
-	name            string
-	keyfile         string
+// luksOptions is everything the fourth crypttab(5) field can configure.
+type luksOptions struct {
 	options         []string
-	header          string        // detached LUKS header path (empty = embedded header)
-	headerDeviceRef *deviceRef    // non-nil when header is a file on a separate device
-	dataDeviceRef   *deviceRef    // non-nil when rd.luks.data= pins the data device (detached-header multi-device)
-	tokenTimeout    time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
+	header          string     // detached LUKS header path (empty = embedded header)
+	headerDeviceRef *deviceRef // non-nil when header is a file on a separate device
+
+	tokenTimeout time.Duration // how long to wait for tokens before also starting keyboard; 0 = wait forever
 
 	// tokenTimeoutExplicit is set when tokenTimeout came from an explicit
 	// crypttab/cmdline token-timeout= (not the implicit 30s default). It lets
@@ -43,15 +39,17 @@ type luksMapping struct {
 	// derived sum may be substituted instead.
 	tokenTimeoutExplicit bool
 
-	keyfileDeviceRef       *deviceRef    // non-nil when keyfile is on a separate device
 	keyfileTimeout         time.Duration // device wait timeout for keyfile device
 	keyfileTimeoutExplicit bool          // distinguishes keyfile-timeout=0 (wait forever) from unset
 
-	keySlot       int   // -1 = all slots; >=0 restricts unlock to that slot
-	tries         int   // 0 = unlimited keyboard retries; >0 = max attempts
-	noFail        bool  // non-fatal unlock failure — boot continues on error
+	// these describe the keyfile named by crypttab's third field, which is not
+	// an option and lives on the mapping
 	keyfileOffset int64 // bytes to skip at start of keyfile
 	keyfileSize   int64 // max bytes to read from keyfile (0 = all)
+
+	keySlot int  // -1 = all slots; >=0 restricts unlock to that slot
+	tries   int  // 0 = unlimited keyboard retries; >0 = max attempts
+	noFail  bool // non-fatal unlock failure — boot continues on error
 
 	// measurePCR is the tpm2-measure-pcr= setting for the PCR15 latch.
 	// Zero value = measurePCRAuto (extend iff a token binds PCR15).
@@ -60,6 +58,37 @@ type luksMapping struct {
 	// tpm2Signature is the tpm2-signature= setting (signed PCR policy): a path to
 	// a systemd PCR signature JSON, "false" to disable, or "" to auto-discover.
 	tpm2Signature string
+}
+
+// newLuksOptions returns an option set with nothing configured.
+func newLuksOptions() luksOptions {
+	return luksOptions{
+		keySlot:      -1,
+		tokenTimeout: 30 * time.Second, // systemd default: wait 30s for tokens before also prompting keyboard
+	}
+}
+
+// luksMapping specifies information needed to process/open a LUKS device;
+// often these mappings specified by a user via command-line. It mirrors
+// crypttab(5)'s four fields: the volume name, the encrypted device, the key
+// file, and the options.
+type luksMapping struct {
+	ref              *deviceRef // which device this is: rd.luks.uuid= and friends
+	name             string     // field 1, volume-name: rd.luks.name=
+	dataDeviceRef    *deviceRef // field 2, encrypted-device: rd.luks.data=
+	keyfile          string     // field 3, key-file: rd.luks.key=
+	keyfileDeviceRef *deviceRef // non-nil when the keyfile is on a separate device
+
+	luksOptions // field 4, options: rd.luks.options=
+}
+
+// newLuksMapping returns a mapping for ref with no options configured.
+func newLuksMapping(ref *deviceRef, name string) *luksMapping {
+	return &luksMapping{
+		ref:         ref,
+		name:        name,
+		luksOptions: newLuksOptions(),
+	}
 }
 
 // tryPassphraseAgainstSlots tries password against each slot, sending the opened
@@ -960,9 +989,9 @@ func tokenBindsPCR15(t luks.Token) bool {
 type latchMode int
 
 const (
-	latchNone     latchMode = iota // do not extend PCR15
-	latchRequired                  // extend, fail-closed (the key is bound to PCR15)
-	latchDefensive                 // extend, best-effort (no PCR15 token, but a TPM is present)
+	latchNone      latchMode = iota // do not extend PCR15
+	latchRequired                   // extend, fail-closed (the key is bound to PCR15)
+	latchDefensive                  // extend, best-effort (no PCR15 token, but a TPM is present)
 )
 
 // volumeKeyLatchMode maps the unlock context to a latch mode. tpm2-measure-pcr=
@@ -1903,12 +1932,7 @@ func matchLuksMapping(blk *blkInfo) *luksMapping {
 	// is to check whether this partition was specified as a 'root' and if yes - mount it and re-point root to the new location under /dev/mapper/xxx)
 	if blk.matchesRef(cmdRoot) {
 		info("LUKS device %s matches root=, unlock this device", blk.path)
-		m := &luksMapping{
-			ref:          cmdRoot,
-			name:         "root",
-			keySlot:      -1,
-			tokenTimeout: 30 * time.Second, // systemd default: wait 30s for tokens before also prompting keyboard
-		}
+		m := newLuksMapping(cmdRoot, "root")
 		cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/root"}
 		return m
 	}
@@ -1944,12 +1968,7 @@ func findOrCreateLuksMapping(uuid UUID) *luksMapping {
 	}
 
 	// didn't locate the device make a new one
-	m := &luksMapping{
-		ref:          &deviceRef{refFsUUID, uuid},
-		name:         "luks-" + uuid.toString(),
-		keySlot:      -1,
-		tokenTimeout: 30 * time.Second, // systemd default: wait 30s for tokens before also prompting keyboard
-	}
+	m := newLuksMapping(&deviceRef{refFsUUID, uuid}, "luks-"+uuid.toString())
 	luksMappings = append(luksMappings, m)
 
 	return m

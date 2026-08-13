@@ -8,7 +8,9 @@ import (
 )
 
 // goldenPHC was produced by the real argon2 CLI the manpage tells users to run:
-//   printf 'hunter2-correct' | argon2 'boostersalt12345' -id -t 3 -m 16 -p 4 -e
+//
+//	printf 'hunter2-correct' | argon2 'boostersalt12345' -id -t 3 -m 16 -p 4 -e
+//
 // It pins interop with that tool (unpadded base64, m=64MiB t=3 p=4).
 const goldenPHC = "$argon2id$v=19$m=65536,t=3,p=4$Ym9vc3RlcnNhbHQxMjM0NQ$YVOIENbv5h37WfbpMl6VgxCWPe7oOTlc0bJDgJhjUS4"
 
