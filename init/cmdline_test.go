@@ -370,3 +370,52 @@ func TestRepeatedPerDeviceListsAccumulate(t *testing.T) {
 	require.Equal(t, 5, m.tries, "the first list survives the second")
 	require.Equal(t, 2, m.keySlot)
 }
+func TestParseParamsGlobalLuksOptions(t *testing.T) {
+	const root = "ab6d7d78-b816-4495-928d-766d6607035e"
+	const data = "7843d77f-cdd6-4289-a4de-a708c4aacede"
+	const base = "rd.luks.name=" + root + "=root rd.luks.name=" + data + "=data"
+
+	// a list with no UUID now reaches the whole vocabulary, not just dm-crypt flags
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tries=3,nofail"))
+	for _, m := range luksMappings {
+		require.Equal(t, 3, m.tries)
+		require.True(t, m.noFail)
+	}
+
+	// the per-device form is the more specific of the two and wins
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tries=3 rd.luks.options="+root+"=tries=9"))
+	require.Equal(t, 9, luksMappings[0].tries)
+	require.Equal(t, 3, luksMappings[1].tries)
+
+	// order of the two forms on the command line does not matter
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options="+root+"=tries=9 rd.luks.options=tries=3"))
+	require.Equal(t, 9, luksMappings[0].tries)
+	require.Equal(t, 3, luksMappings[1].tries)
+
+	// a global header= cannot describe several volumes, so it is not applied
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=header=/luks.hdr"))
+	for _, m := range luksMappings {
+		require.Empty(t, m.header)
+	}
+
+	// a per-device option wins even when the value it sets is the zero value:
+	// tries=0 means unlimited, which must not read as "unset" and lose to the
+	// global list
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tries=3 rd.luks.options="+root+"=tries=0"))
+	require.Equal(t, 0, luksMappings[0].tries)
+	require.Equal(t, 3, luksMappings[1].tries)
+
+	// a global list that does not set token-timeout= leaves it unset, and the
+	// resolver still supplies the 30s default
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=discard"))
+	for _, m := range luksMappings {
+		require.Equal(t, luksOptionUnset, int(m.tokenTimeout))
+		require.Equal(t, defaultTokenTimeout, effectiveTokenTimeout(m, nil))
+	}
+}

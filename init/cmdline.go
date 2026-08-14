@@ -172,11 +172,7 @@ func getNextParam(params string, index int) (string, string, int) {
 }
 
 func parseParams(params string) error {
-	var luksOptions []string
-	var tokenTimeout time.Duration
-	var tokenTimeoutExplicit bool
-	measurePCR := measurePCRAuto
-	var tpm2Signature string
+	globalOptions := newLuksOptions()
 
 	var key, value string
 	i := 0
@@ -265,40 +261,14 @@ func parseParams(params string) error {
 					continue
 				}
 			}
-			for o := range strings.SplitSeq(value, ",") {
-				if after, ok := strings.CutPrefix(o, "token-timeout="); ok {
-					d, err := parseTokenTimeout(after)
-					if err != nil {
-						return fmt.Errorf("invalid token-timeout in rd.luks.options: %v", err)
-					}
-					tokenTimeout = d
-					tokenTimeoutExplicit = true
-					continue
-				}
-				if after, ok := strings.CutPrefix(o, "tpm2-measure-pcr="); ok {
-					s, valid := parseMeasurePCR(after)
-					if !valid {
-						return fmt.Errorf("invalid tpm2-measure-pcr in rd.luks.options: %q", after)
-					}
-					measurePCR = s
-					continue
-				}
-				if after, ok := strings.CutPrefix(o, "tpm2-signature="); ok {
-					tpm2Signature = after
-					continue
-				}
-				// Accept fido2-device= and tpm2-device= for compatibility with
-				// systemd-cryptsetup conventions. Booster auto-detects enrolled
-				// tokens from the LUKS header so no action is needed.
-				if strings.HasPrefix(o, "fido2-device=") || strings.HasPrefix(o, "tpm2-device=") {
-					continue
-				}
-				flag, ok := rdLuksOptions[o]
-				if !ok {
-					warning("rd.luks.options: unknown option %q, ignoring", o)
-					continue
-				}
-				luksOptions = append(luksOptions, flag)
+			// A list with no UUID goes through the same parser, into an
+			// option set held until every source is known.
+			skip, err := parseLuksOptions(&globalOptions, value, "rd.luks.options")
+			if err != nil {
+				return err
+			}
+			if skip {
+				warning("rd.luks.options: noauto has no effect on the kernel command line, ignoring")
 			}
 		case "rd.luks.name":
 			parts := strings.Split(value, "=")
@@ -403,16 +373,14 @@ func parseParams(params string) error {
 		}
 	}
 
-	// Hold the UUID-less rd.luks.options= list rather than applying it here:
-	// crypttab has not been read yet, so this is not the place that can decide
-	// what a device ends up with. resolveLuksOptions composes it.
-	globalLuksOptions = newLuksOptions()
-	globalLuksOptions.options = luksOptions
-	if tokenTimeoutExplicit {
-		globalLuksOptions.tokenTimeout = tokenTimeout
+	// Hold the UUID-less list rather than applying it here: crypttab has not
+	// been read yet, so this is not the place that can decide what a device
+	// ends up with. resolveLuksOptions composes it.
+	if globalOptions.header != "" {
+		warning("rd.luks.options: header= describes a single volume, so it is only accepted as rd.luks.options=$UUID=header=..., ignoring")
+		globalOptions.header, globalOptions.headerDeviceRef = "", nil
 	}
-	globalLuksOptions.measurePCR = measurePCR
-	globalLuksOptions.tpm2Signature = tpm2Signature
+	globalLuksOptions = globalOptions
 
 	return nil
 }
