@@ -38,6 +38,7 @@ var (
 
 	luksMappings      []*luksMapping // list of LUKS devices that booster unlocked during boot process
 	globalLuksOptions luksOptions    // the rd.luks.options= list that carried no UUID
+	globalLuksKeyfile string         // the rd.luks.key= path that carried no UUID
 
 	rootAutodiscoveryMode       bool
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags

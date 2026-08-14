@@ -173,6 +173,7 @@ func getNextParam(params string, index int) (string, string, int) {
 
 func parseParams(params string) error {
 	globalOptions := newLuksOptions()
+	globalKeyfile := ""
 
 	var key, value string
 	i := 0
@@ -297,16 +298,12 @@ func parseParams(params string) error {
 			parts := strings.SplitN(value, "=", 2)
 
 			if len(parts) == 1 {
-				// do we only have 1 luks device?
-				if len(luksMappings) == 1 {
-					// we attach to it and hope for the best
-					uuid = luksMappings[0].ref.data.(UUID)
-				} else {
-					// don't know what to do here
-					return fmt.Errorf("invalid rd.luks.key kernel parameter %s, more than 1 luks device", value)
-				}
-
-				keyfile = parts[0]
+				// No UUID: a default for every device the command line does not
+				// give a key file of its own. Held until resolveLuksOptions,
+				// because which devices exist is not known until crypttab has
+				// been read as well.
+				globalKeyfile = parts[0]
+				continue
 			} else if len(parts) == 2 {
 				var err error
 				uuid, err = parseUUID(parts[0])
@@ -385,6 +382,7 @@ func parseParams(params string) error {
 		globalOptions.header, globalOptions.headerDeviceRef = "", nil
 	}
 	globalLuksOptions = globalOptions
+	globalLuksKeyfile = globalKeyfile
 
 	return nil
 }

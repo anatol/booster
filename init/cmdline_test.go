@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -417,5 +419,41 @@ func TestParseParamsGlobalLuksOptions(t *testing.T) {
 	for _, m := range luksMappings {
 		require.Equal(t, luksOptionUnset, int(m.tokenTimeout))
 		require.Equal(t, defaultTokenTimeout, effectiveTokenTimeout(m, nil))
+	}
+}
+
+// No parameter's meaning may depend on what was read before it: conflicts are
+// settled by composing the sources, not by the order they appear on the command
+// line. Resolve the same set in every rotation and require one outcome.
+func TestParameterOrderDoesNotChangeTheOutcome(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	params := []string{
+		"rd.luks.name=" + u + "=root",
+		"rd.luks.key=/default.key",
+		"rd.luks.options=discard,tries=3",
+		"rd.luks.options=" + u + "=key-slot=2",
+		"rd.luks.header=" + u + "=/old.hdr",
+		"rd.luks.data=" + u + "=/dev/sdx",
+	}
+	const crypttab = "root UUID=" + u + " /entry.key luks,tries=9\n"
+
+	var first string
+	for i := range params {
+		rotated := append(append([]string{}, params[i:]...), params[:i]...)
+		luksMappings = nil
+		globalLuksOptions, globalLuksKeyfile = newLuksOptions(), ""
+		require.NoError(t, parseParams(strings.Join(rotated, " ")))
+		ct, err := parseCrypttabReader(strings.NewReader(crypttab))
+		require.NoError(t, err)
+		resolveLuksOptions(ct)
+
+		m := luksMappings[0]
+		got := fmt.Sprintf("keyfile=%q header=%q options=%v keySlot=%d tries=%d",
+			m.keyfile, m.header, m.options, m.keySlot, m.tries)
+		if i == 0 {
+			first = got
+			continue
+		}
+		require.Equal(t, first, got, "starting from %q resolved differently", rotated[0])
 	}
 }

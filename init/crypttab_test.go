@@ -724,3 +724,47 @@ func TestCrypttabKeyfileAndItsTimeoutSurvive(t *testing.T) {
 	require.Equal(t, "/crypttab/key", m.keyfile)
 	require.Equal(t, 10*time.Second, m.keyfileTimeout)
 }
+
+// A rd.luks.key= without a UUID used to be resolved the moment it was parsed,
+// against however many mappings existed at that instant: it demanded exactly
+// one, so it aborted the boot for two devices, for none, and whenever it was
+// written before the parameter naming the device. It is a default now, applied
+// where every source is known.
+func TestUUIDLessKeyfileIsADefault(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	const v = "ab6d7d78-b816-4495-928d-766d6607035e"
+
+	t.Run("reaches every device the command line names", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.name="+v+"=data rd.luks.key=/k.key", "")
+		require.Len(t, luksMappings, 2)
+		require.Equal(t, "/k.key", luksMappings[0].keyfile)
+		require.Equal(t, "/k.key", luksMappings[1].keyfile)
+	})
+
+	t.Run("does not depend on where it appears", func(t *testing.T) {
+		resolveSources(t, "rd.luks.key=/k.key rd.luks.name="+u+"=root", "")
+		require.Equal(t, "/k.key", luksMappings[0].keyfile)
+	})
+
+	t.Run("a per-device key file outranks it", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key=/default.key rd.luks.key="+u+"=/own.key", "")
+		require.Equal(t, "/own.key", luksMappings[0].keyfile)
+	})
+
+	t.Run("outranks a crypttab key file, as any cmdline one does", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key=/k.key",
+			"root UUID="+u+" /entry.key luks\n")
+		require.Equal(t, "/k.key", luksMappings[0].keyfile)
+	})
+
+	t.Run("leaves a device only crypttab names alone", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key=/k.key",
+			"data UUID="+v+" /entry.key luks\n")
+		require.Len(t, luksMappings, 2)
+		for _, m := range luksMappings {
+			if m.name == "data" {
+				require.Equal(t, "/entry.key", m.keyfile, "the entry's own key file stands")
+			}
+		}
+	})
+}

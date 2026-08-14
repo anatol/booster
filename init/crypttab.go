@@ -258,6 +258,15 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 //
 //	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
 func resolveLuksOptions(ctMappings []*luksMapping) {
+	if globalLuksKeyfile != "" {
+		// the command line's own default, so it fills before crypttab does
+		for _, m := range luksMappings {
+			if m.keyfile == "" {
+				m.keyfile = globalLuksKeyfile
+			}
+		}
+	}
+
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
 		existing := findLuksMapping(cm.ref)
