@@ -114,12 +114,10 @@ func TestFlagsAreNotDuplicated(t *testing.T) {
 	require.Equal(t, []string{luks.FlagAllowDiscards}, mappings[0].options)
 
 	// and once when two sources each name it
-	dst := &luksMapping{luksOptions: newLuksOptions()}
-	dst.options = []string{luks.FlagAllowDiscards}
-	src := &luksMapping{luksOptions: newLuksOptions()}
-	src.options = []string{luks.FlagAllowDiscards}
-	composeSources(dst, src)
-	require.Equal(t, []string{luks.FlagAllowDiscards}, dst.options)
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard",
+		"cryptroot UUID="+u+" none luks,discard\n")
+	require.Equal(t, []string{luks.FlagAllowDiscards}, luksMappings[0].options)
 }
 
 func TestParseCrypttabLuksOption(t *testing.T) {
@@ -411,114 +409,6 @@ func TestFindLuksMapping(t *testing.T) {
 	require.Nil(t, findLuksMapping(&deviceRef{format: refFsUUID, data: uuid3}))
 }
 
-// composeSources runs the boot-time composition over one cmdline mapping and
-// one crypttab entry, so the tests drive resolveLuksOptions rather than
-// restating what it does.
-func composeSources(dst, src *luksMapping) {
-	own := dst.luksOptions // what the command line set for this device
-	dst.cmdlineOptions = &own
-	luksMappings = []*luksMapping{dst}
-	globalLuksOptions = newLuksOptions()
-	resolveLuksOptions([]*luksMapping{src})
-}
-
-func TestMergeCrypttabOptions(t *testing.T) {
-	dst := &luksMapping{
-		name:        "cmdline-name",
-		luksOptions: newLuksOptions(),
-	}
-	src := &luksMapping{luksOptions: newLuksOptions()}
-	src.tries = 3
-	// an explicit token-timeout=, as parseCrypttabReader records it
-	src.tokenTimeout = 45 * time.Second
-	composeSources(dst, src)
-	require.Equal(t, 3, dst.tries)
-	require.Equal(t, 45*time.Second, dst.tokenTimeout) // cmdline mapping was not explicit → crypttab's explicit value adopted
-	require.Equal(t, "cmdline-name", dst.name)         // name must not be overwritten
-}
-
-func TestMergeKeepsExplicitTriesZero(t *testing.T) {
-	// tries=0 means unlimited retries. While unset was also 0 it was
-	// indistinguishable, so crypttab's tries= overwrote it and the user got a
-	// bounded count.
-	dst := &luksMapping{luksOptions: newLuksOptions()}
-	dst.tries = 0
-	src := &luksMapping{luksOptions: newLuksOptions()}
-	src.tries = 3
-	composeSources(dst, src)
-	require.Equal(t, 0, dst.tries, "an explicit tries=0 outranks the crypttab entry")
-}
-
-func TestMergeCrypttabOptionsDstWins(t *testing.T) {
-	dst := &luksMapping{
-		luksOptions: newLuksOptions(),
-	}
-	dst.keyfile = "/cmdline/key"
-	dst.keySlot = 2
-	dst.tries = 5
-	dst.header = "/cmdline/hdr"
-	src := &luksMapping{
-		luksOptions: newLuksOptions(),
-	}
-	src.keyfile = "/crypttab/key"
-	src.keySlot = 1
-	src.tries = 9
-	src.header = "/crypttab/hdr"
-	composeSources(dst, src)
-	require.Equal(t, "/cmdline/key", dst.keyfile) // cmdline keyfile wins
-	require.Equal(t, 2, dst.keySlot)              // cmdline key-slot wins
-	require.Equal(t, 5, dst.tries)                // cmdline tries wins
-	require.Equal(t, "/cmdline/hdr", dst.header)  // cmdline header wins
-}
-
-// An explicit token-timeout= on the kernel cmdline must outrank a crypttab
-// entry for the same device — both when crypttab omits token-timeout (its
-// parser still fills the 30s implicit default) and when crypttab sets a
-// different explicit value. This mirrors the keyfile/header/tries merges:
-// an explicit cmdline value always wins; crypttab fills only what the
-// cmdline left unset. Regression for the pre-existing `src != dst` merge
-// that let crypttab's implicit 30s clobber an explicit cmdline value.
-func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
-	t.Run("crypttab omits token-timeout (implicit 30s) → cmdline 10s survives", func(t *testing.T) {
-		dst := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		dst.tokenTimeout = 10 * time.Second
-		src := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		src.tokenTimeout = luksOptionUnset
-		composeSources(dst, src)
-		require.Equal(t, 10*time.Second, dst.tokenTimeout)
-	})
-
-	t.Run("crypttab sets a different explicit value → cmdline still wins", func(t *testing.T) {
-		dst := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		dst.tokenTimeout = 10 * time.Second
-		src := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		src.tokenTimeout = 60 * time.Second
-		composeSources(dst, src)
-		require.Equal(t, 10*time.Second, dst.tokenTimeout, "explicit cmdline token-timeout outranks explicit crypttab")
-	})
-
-	t.Run("cmdline not explicit → explicit crypttab is adopted", func(t *testing.T) {
-		dst := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		dst.tokenTimeout = luksOptionUnset
-		src := &luksMapping{
-			luksOptions: newLuksOptions(),
-		}
-		src.tokenTimeout = 60 * time.Second
-		composeSources(dst, src)
-		require.Equal(t, 60*time.Second, dst.tokenTimeout)
-	})
-}
-
 // rd.luks.name= on the kernel cmdline creates a mapping before crypttab is parsed.
 // The crypttab merge must adopt options (token-timeout, keyfile, etc.) from the
 // crypttab entry without creating a duplicate mapping or overwriting the name.
@@ -648,12 +538,189 @@ func TestParseCrypttabKeyfileTimeout(t *testing.T) {
 	})
 }
 
-func TestMergeCopiesKeyfileTimeout(t *testing.T) {
-	dst := &luksMapping{luksOptions: newLuksOptions()}
-	src := &luksMapping{luksOptions: newLuksOptions()}
-	src.keyfile = "/crypttab/key"
-	src.keyfileTimeout = 10 * time.Second
-	composeSources(dst, src)
-	require.Equal(t, "/crypttab/key", dst.keyfile)
-	require.Equal(t, 10*time.Second, dst.keyfileTimeout)
+// resolveSources runs the full cmdline-then-crypttab resolution the boot does.
+func resolveSources(t *testing.T, params, crypttab string) {
+	t.Helper()
+	luksMappings = nil
+	require.NoError(t, parseParams(params))
+	ct, err := parseCrypttabReader(strings.NewReader(crypttab))
+	require.NoError(t, err)
+	resolveLuksOptions(ct)
+}
+
+func TestOverlayAccumulatesDmCryptFlags(t *testing.T) {
+	a, b := newLuksOptions(), newLuksOptions()
+	a.options = []string{luks.FlagAllowDiscards}
+	b.options = []string{luks.FlagSameCPUCrypt}
+
+	merged := newLuksOptions()
+	overlay(&merged, &a)
+	overlay(&merged, &b)
+	require.Equal(t, []string{luks.FlagAllowDiscards, luks.FlagSameCPUCrypt}, merged.options)
+}
+
+func TestOverlayCallOrderIsPrecedence(t *testing.T) {
+	low, high := newLuksOptions(), newLuksOptions()
+	low.tries, low.keySlot = 1, 1
+	high.tries = 9
+
+	merged := newLuksOptions()
+	overlay(&merged, &low)
+	overlay(&merged, &high)
+	require.Equal(t, 9, merged.tries, "the later source wins where it sets a value")
+	require.Equal(t, 1, merged.keySlot, "and leaves alone what it does not set")
+
+	// swapping the calls swaps the precedence -- this is the whole mechanism
+	merged = newLuksOptions()
+	overlay(&merged, &high)
+	overlay(&merged, &low)
+	require.Equal(t, 1, merged.tries)
+}
+
+func TestOverlayCarriesKeyfileBoundsAsOptions(t *testing.T) {
+	// the bounds are ordinary options; the key file itself is crypttab's third
+	// field and is merged by whoever decides that field
+	low, high := newLuksOptions(), newLuksOptions()
+	low.keyfileOffset, low.keyfileSize = 4096, 64
+	high.keyfileOffset = 512
+
+	merged := newLuksOptions()
+	overlay(&merged, &low)
+	overlay(&merged, &high)
+	require.Equal(t, int64(512), merged.keyfileOffset, "the later source wins")
+	require.Equal(t, int64(64), merged.keyfileSize, "and leaves alone what it does not set")
+}
+
+func TestCrypttabFillsWhatTheCmdlineLeftUnset(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cmdline-name",
+		"cryptroot UUID="+u+" none luks,tries=3,token-timeout=45\n")
+	m := luksMappings[0]
+	require.Equal(t, 3, m.tries)
+	require.Equal(t, 45*time.Second, m.tokenTimeout)
+	require.Equal(t, "cmdline-name", m.name, "the name must not be overwritten")
+}
+
+func TestCmdlineTriesZeroOutranksCrypttab(t *testing.T) {
+	// tries=0 means unlimited retries. While unset was also 0 it was
+	// indistinguishable, so crypttab's tries= overwrote it.
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=tries=0",
+		"cryptroot UUID="+u+" none luks,tries=3\n")
+	require.Equal(t, 0, luksMappings[0].tries, "an explicit tries=0 outranks the crypttab entry")
+}
+
+func TestCmdlineOutranksCrypttabPerField(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=key-slot=2,tries=5",
+		"cryptroot UUID="+u+" /crypttab/key luks,key-slot=1,tries=9,header=/crypttab/hdr\n")
+	m := luksMappings[0]
+	require.Equal(t, 2, m.keySlot, "cmdline key-slot wins")
+	require.Equal(t, 5, m.tries, "cmdline tries wins")
+	require.Equal(t, "/crypttab/key", m.keyfile, "crypttab supplies what the cmdline did not")
+	require.Equal(t, "/crypttab/hdr", m.header)
+}
+
+// An explicit token-timeout= on the kernel cmdline must outrank a crypttab
+// entry for the same device — both when crypttab omits token-timeout (its
+// parser still fills the 30s implicit default) and when crypttab sets a
+// different explicit value. This mirrors the keyfile/header/tries merges:
+// an explicit cmdline value always wins; crypttab fills only what the
+// cmdline left unset. Regression for the pre-existing `src != dst` merge
+// that let crypttab's implicit 30s clobber an explicit cmdline value.
+func TestCmdlineTokenTimeoutOutranksCrypttab(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	t.Run("crypttab omits it, the cmdline value survives", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=token-timeout=10",
+			"cryptroot UUID="+u+" none luks\n")
+		require.Equal(t, 10*time.Second, luksMappings[0].tokenTimeout)
+	})
+
+	t.Run("both set it, the cmdline still wins", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=token-timeout=10",
+			"cryptroot UUID="+u+" none luks,token-timeout=60\n")
+		require.Equal(t, 10*time.Second, luksMappings[0].tokenTimeout)
+	})
+
+	t.Run("neither sets it, the resolver supplies the default", func(t *testing.T) {
+		resolveSources(t, "rd.luks.name="+u+"=cryptroot", "cryptroot UUID="+u+" none luks\n")
+		require.Equal(t, luksOptionUnset, int(luksMappings[0].tokenTimeout))
+		require.Equal(t, defaultTokenTimeout, effectiveTokenTimeout(luksMappings[0], nil))
+	})
+}
+
+func TestParseLuksOptionsRecordsAppliedOptions(t *testing.T) {
+	// An ordinary entry carries only markers booster acts on in no way, so
+	// replacing its options loses nothing and must not be announced as a loss.
+	for _, opts := range []string{"luks", "_netdev", "luks,_netdev", "",
+		"fido2-device=auto", "tpm2-device=auto"} {
+		o := newLuksOptions()
+		_, err := parseLuksOptions(&o, opts, "test")
+		require.NoError(t, err)
+		require.Empty(t, o.appliedOptions, "options %q set nothing booster acts on", opts)
+	}
+
+	// Only the options that set something are recorded, in the order given, so
+	// the dropped-options message names what a user would have to repeat.
+	o := newLuksOptions()
+	_, err := parseLuksOptions(&o, "luks,tries=2,_netdev,discard,key-slot=3", "test")
+	require.NoError(t, err)
+	require.Equal(t, []string{"tries=2", "discard", "key-slot=3"}, o.appliedOptions)
+}
+
+func TestJoinOptionsDropsRepeats(t *testing.T) {
+	// appliedOptions is a record of what was parsed, so it keeps repeats; a
+	// message telling the user what to paste must not echo them.
+	require.Equal(t, "discard,tries=2", joinOptions([]string{"discard", "tries=2", "discard"}))
+	require.Equal(t, "", joinOptions(nil))
+}
+
+func TestPerDeviceListReplacesCrypttabOptions(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// systemd-cryptsetup replaces an entry's option field when a per-device
+	// rd.luks.options= names the device, so the command line can remove an
+	// option and not only add one. tries= comes from the cmdline; discard and
+	// key-slot= were only in crypttab and do not survive.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
+		"cryptroot UUID="+u+" none luks,tries=2,discard,key-slot=3\n")
+	require.Len(t, luksMappings, 1)
+	m := luksMappings[0]
+	require.Equal(t, 9, m.tries)
+	require.Empty(t, m.options)
+	require.Equal(t, luksOptionUnset, m.keySlot)
+}
+
+func TestReplacedEntryKeepsItsKeyfile(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// The keyfile is crypttab's third field, not an option, so it survives the
+	// replacement. keyfile-offset= and keyfile-size= are options and do not.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=9",
+		"cryptroot UUID="+u+" /etc/luks.key luks,keyfile-offset=4096,keyfile-size=64\n")
+	m := luksMappings[0]
+	require.Equal(t, "/etc/luks.key", m.keyfile)
+	require.Zero(t, m.keyfileOffset)
+	require.Zero(t, m.keyfileSize)
+}
+
+func TestCrypttabMergesWhenNoPerDeviceList(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+
+	// Without a per-device list nothing about the merge changes: the command
+	// line still takes precedence and crypttab still fills what it left unset.
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options=discard",
+		"cryptroot UUID="+u+" none luks,tries=2\n")
+	m := luksMappings[0]
+	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
+	require.Equal(t, 2, m.tries)
+}
+func TestCrypttabKeyfileAndItsTimeoutSurvive(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot",
+		"cryptroot UUID="+u+" /crypttab/key luks,keyfile-timeout=10\n")
+	m := luksMappings[0]
+	require.Equal(t, "/crypttab/key", m.keyfile)
+	require.Equal(t, 10*time.Second, m.keyfileTimeout)
 }

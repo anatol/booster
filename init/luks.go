@@ -50,6 +50,13 @@ type luksOptions struct {
 
 	noFail bool // non-fatal unlock failure — boot continues; additive, no unset state
 
+	// appliedOptions lists the options that set something booster acts on.
+	// Markers that parse cleanly and configure nothing -- luks, _netdev, the
+	// fido2-device=/tpm2-device= hints taken from the LUKS2 header instead --
+	// are not recorded, so a message naming dropped options names only what a
+	// user would need to repeat.
+	appliedOptions []string
+
 	// measurePCR is the tpm2-measure-pcr= setting for the PCR15 latch.
 	// Zero value = measurePCRAuto (extend iff a token binds PCR15).
 	measurePCR measurePCRSetting
@@ -108,6 +115,7 @@ func overlay(dst, src *luksOptions) {
 	for _, f := range src.options {
 		dst.options = addFlag(dst.options, f)
 	}
+	dst.appliedOptions = append(dst.appliedOptions, src.appliedOptions...)
 
 	if src.keyfileOffset != 0 {
 		dst.keyfileOffset = src.keyfileOffset

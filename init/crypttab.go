@@ -47,36 +47,42 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 					return "", fmt.Errorf("%s: invalid tries= value %q", ctx, value)
 				}
 				m.tries = v
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "key-slot":
 				v, err := strconv.Atoi(value)
 				if err != nil {
 					return "", fmt.Errorf("%s: invalid key-slot= value %q", ctx, value)
 				}
 				m.keySlot = v
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "keyfile-offset":
 				v, err := strconv.ParseInt(value, 10, 64)
 				if err != nil {
 					return "", fmt.Errorf("%s: invalid keyfile-offset= value %q", ctx, value)
 				}
 				m.keyfileOffset = v
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "keyfile-size":
 				v, err := strconv.ParseInt(value, 10, 64)
 				if err != nil {
 					return "", fmt.Errorf("%s: invalid keyfile-size= value %q", ctx, value)
 				}
 				m.keyfileSize = v
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "keyfile-timeout":
 				d, err := parseCrypttabDuration(value)
 				if err != nil {
 					return "", fmt.Errorf("%s: invalid keyfile-timeout= value %q", ctx, value)
 				}
 				m.keyfileTimeout = d
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "token-timeout":
 				d, err := parseTokenTimeout(value)
 				if err != nil {
 					return "", fmt.Errorf("%s: invalid token-timeout= value %q", ctx, value)
 				}
 				m.tokenTimeout = d
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "header":
 				hdrPath, hdrRef, err := parsePathWithDeviceRef(value, "header")
 				if err != nil {
@@ -84,6 +90,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 				}
 				m.header = hdrPath
 				m.headerDeviceRef = hdrRef
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "tpm2-measure-pcr":
 				// yes forces the volume-key measurement, no suppresses it;
 				// unset = auto (extend iff a token binds PCR15).
@@ -92,10 +99,12 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 					return "", fmt.Errorf("%s: invalid tpm2-measure-pcr= value %q", ctx, value)
 				}
 				m.measurePCR = s
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "tpm2-signature":
 				// signed PCR policy: path to a systemd PCR signature JSON,
 				// "false" to disable, unset to auto-discover.
 				m.tpm2Signature = value
+				m.appliedOptions = append(m.appliedOptions, opt)
 			case "fido2-device", "tpm2-device":
 				// accepted for compatibility; token detection uses LUKS2 header
 			default:
@@ -111,6 +120,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 			skip = opt
 		case "nofail":
 			m.noFail = true
+			m.appliedOptions = append(m.appliedOptions, opt)
 		case "swap", "tmp", "plain", "bitlk", "tcrypt":
 			// booster unlocks LUKS volumes only
 			skip = opt
@@ -123,6 +133,7 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 		default:
 			if flag, ok := rdLuksOptions[key]; ok {
 				m.options = addFlag(m.options, flag)
+				m.appliedOptions = append(m.appliedOptions, opt)
 				continue
 			}
 			unknown = append(unknown, opt)
@@ -137,6 +148,21 @@ func parseLuksOptions(m *luksOptions, optStr, ctx string) (skip string, err erro
 		}
 	}
 	return skip, nil
+}
+
+// joinOptions renders an option list for a message. appliedOptions records
+// what was parsed, repeats included -- a flag named twice, two lists naming
+// the same one -- and echoing a repeat back as something to paste is noise.
+func joinOptions(opts []string) string {
+	seen := make(map[string]bool, len(opts))
+	unique := make([]string, 0, len(opts))
+	for _, o := range opts {
+		if !seen[o] {
+			seen[o] = true
+			unique = append(unique, o)
+		}
+	}
+	return strings.Join(unique, ",")
 }
 
 // reportSkippedEntry explains why ctx's device will not be unlocked.
@@ -259,7 +285,15 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 		merged := newLuksOptions()
 
 		if ct := m.crypttabOptions; ct != nil {
-			overlay(&merged, ct)
+			if m.cmdlineOptions != nil {
+				// A per-device rd.luks.options= replaces the entry's option
+				// field, so the entry contributes none of it.
+				if len(ct.appliedOptions) > 0 {
+					warning("crypttab: entry %q: options %q dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.", m.name, joinOptions(ct.appliedOptions))
+				}
+			} else {
+				overlay(&merged, ct)
+			}
 		}
 		applyGlobalOptions(&merged)
 		if h := m.deprecatedHeader; h != nil {

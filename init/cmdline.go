@@ -342,6 +342,10 @@ func parseParams(params string) error {
 			if err != nil {
 				return fmt.Errorf("rd.luks.header: %v", err)
 			}
+			// Deprecated: this parameter exists only because the command line
+			// had no per-device option form when it was added. It now does, and
+			// systemd spells the same thing through it.
+			warning("rd.luks.header= is deprecated, use rd.luks.options=%s=header=%s instead", value[:eqIdx], headerPath)
 			m := findOrCreateLuksMapping(uuid)
 			hdr := newLuksOptions()
 			hdr.header, hdr.headerDeviceRef = path, ref
