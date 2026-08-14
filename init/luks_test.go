@@ -734,3 +734,29 @@ func TestRecoverSystemdTPM2RejectsPcrlock(t *testing.T) {
 	_, err = recoverSystemdTPM2Password(context.Background(), pcrlockTok, "cryptroot", "")
 	require.ErrorContains(t, err, "pcrlock")
 }
+
+// The autodiscovered root is created after resolveLuksOptions has already run,
+// so the UUID-less rd.luks.options= list has to be applied at the creation site
+// or it never reaches the device.
+func TestAutodiscoveredRootGetsGlobalOptions(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	uuid, err := parseUUID("ab6d7d78-b816-4495-928d-766d6607035e")
+	require.NoError(t, err)
+
+	globalLuksOptions = newLuksOptions()
+	globalLuksOptions.options = []string{luks.FlagAllowDiscards}
+	globalLuksOptions.tries = 5
+	globalLuksOptions.header = "/luks.hdr" // rejected globally; must not reach a device
+
+	luksMappings = nil
+	cmdRoot = &deviceRef{format: refFsUUID, data: uuid}
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid})
+	require.NotNil(t, m)
+	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
+	require.Equal(t, 5, m.tries)
+	require.Empty(t, m.header, "a global header= must not reach a device")
+}

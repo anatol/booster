@@ -194,42 +194,46 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 	return nil
 }
 
-// mergeCrypttabOptions merges security-relevant options from a crypttab entry (src)
-// into a cmdline-derived mapping (dst). dst's ref and name are preserved; crypttab
-// supplies keyfile, header, and other unlock options that rd.luks.* params cannot express.
-func mergeCrypttabOptions(dst, src *luksMapping) {
-	// Adopt crypttab's token-timeout only when the cmdline mapping did not
-	// carry an explicit token-timeout= of its own. Mirrors the keyfile/
-	// header/tries merges below: an explicit cmdline value always wins;
-	// crypttab fills in only what the cmdline left unset. luksOptionUnset is
-	// what "left unset" means, so the value alone decides.
-	if dst.tokenTimeout == luksOptionUnset && src.tokenTimeout != luksOptionUnset {
-		dst.tokenTimeout = src.tokenTimeout
+// resolveLuksOptions composes the fourth crypttab field for every device,
+// lowest priority first, so the order of these calls is the precedence rule:
+//
+//	crypttab  ->  rd.luks.options=  ->  the rest of the command line
+func resolveLuksOptions(ctMappings []*luksMapping) {
+	for _, cm := range ctMappings {
+		opts := cm.luksOptions
+		existing := findLuksMapping(cm.ref)
+		if existing == nil {
+			// a device nothing else names: its own entry is its only source,
+			// and it is composed below like any other
+			cm.crypttabOptions = &opts
+			luksMappings = append(luksMappings, cm)
+			continue
+		}
+		existing.crypttabOptions = &opts
+		switch {
+		case existing.keyfile == "" && cm.keyfile != "":
+			existing.keyfile = cm.keyfile
+			existing.keyfileDeviceRef = cm.keyfileDeviceRef
+		case cm.keyfile != "":
+			// rd.luks.key= won field 3, so the entry's keyfile-* bounds describe
+			// a file booster is not going to read
+			opts.keyfileOffset, opts.keyfileSize = 0, 0
+			opts.keyfileTimeout = luksOptionUnset
+		}
 	}
-	if dst.keyfile == "" && src.keyfile != "" {
-		dst.keyfile = src.keyfile
-		dst.keyfileDeviceRef = src.keyfileDeviceRef
-		dst.keyfileOffset = src.keyfileOffset
-		dst.keyfileSize = src.keyfileSize
-		dst.keyfileTimeout = src.keyfileTimeout
+
+	for _, m := range luksMappings {
+		own := m.luksOptions // what the command line set for this device alone
+		merged := newLuksOptions()
+
+		if ct := m.crypttabOptions; ct != nil {
+			overlay(&merged, ct)
+		}
+		applyGlobalOptions(&merged)
+		overlay(&merged, &own)
+
+		m.luksOptions = merged
 	}
-	if dst.keySlot == luksOptionUnset && src.keySlot != luksOptionUnset {
-		dst.keySlot = src.keySlot
-	}
-	if dst.tries == luksOptionUnset && src.tries != luksOptionUnset {
-		dst.tries = src.tries
-	}
-	if dst.header == "" && src.header != "" {
-		dst.header = src.header
-		dst.headerDeviceRef = src.headerDeviceRef
-	}
-	if dst.measurePCR == measurePCRAuto && src.measurePCR != measurePCRAuto {
-		dst.measurePCR = src.measurePCR
-	}
-	if dst.tpm2Signature == "" && src.tpm2Signature != "" {
-		dst.tpm2Signature = src.tpm2Signature
-	}
-	dst.options = append(dst.options, src.options...)
 }
 
 // deviceRefEqual reports whether two deviceRefs refer to the same device.
@@ -248,4 +252,13 @@ func deviceRefEqual(a, b *deviceRef) bool {
 	default:
 		return false
 	}
+}
+
+// applyGlobalOptions overlays the rd.luks.options= list that carried no UUID.
+// A global header= was warned about while parsing; it is dropped here so it
+// cannot reach a device.
+func applyGlobalOptions(dst *luksOptions) {
+	global := globalLuksOptions
+	global.header, global.headerDeviceRef = "", nil
+	overlay(dst, &global)
 }

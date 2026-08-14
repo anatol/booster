@@ -372,6 +372,15 @@ func TestFindLuksMapping(t *testing.T) {
 	require.Nil(t, findLuksMapping(&deviceRef{format: refFsUUID, data: uuid3}))
 }
 
+// composeSources runs the boot-time composition over one cmdline mapping and
+// one crypttab entry, so the tests drive resolveLuksOptions rather than
+// restating what it does.
+func composeSources(dst, src *luksMapping) {
+	luksMappings = []*luksMapping{dst}
+	globalLuksOptions = newLuksOptions()
+	resolveLuksOptions([]*luksMapping{src})
+}
+
 func TestMergeCrypttabOptions(t *testing.T) {
 	dst := &luksMapping{
 		name:        "cmdline-name",
@@ -381,7 +390,7 @@ func TestMergeCrypttabOptions(t *testing.T) {
 	src.tries = 3
 	// an explicit token-timeout=, as parseCrypttabReader records it
 	src.tokenTimeout = 45 * time.Second
-	mergeCrypttabOptions(dst, src)
+	composeSources(dst, src)
 	require.Equal(t, 3, dst.tries)
 	require.Equal(t, 45*time.Second, dst.tokenTimeout) // cmdline mapping was not explicit → crypttab's explicit value adopted
 	require.Equal(t, "cmdline-name", dst.name)         // name must not be overwritten
@@ -395,7 +404,7 @@ func TestMergeKeepsExplicitTriesZero(t *testing.T) {
 	dst.tries = 0
 	src := &luksMapping{luksOptions: newLuksOptions()}
 	src.tries = 3
-	mergeCrypttabOptions(dst, src)
+	composeSources(dst, src)
 	require.Equal(t, 0, dst.tries, "an explicit tries=0 outranks the crypttab entry")
 }
 
@@ -414,7 +423,7 @@ func TestMergeCrypttabOptionsDstWins(t *testing.T) {
 	src.keySlot = 1
 	src.tries = 9
 	src.header = "/crypttab/hdr"
-	mergeCrypttabOptions(dst, src)
+	composeSources(dst, src)
 	require.Equal(t, "/cmdline/key", dst.keyfile) // cmdline keyfile wins
 	require.Equal(t, 2, dst.keySlot)              // cmdline key-slot wins
 	require.Equal(t, 5, dst.tries)                // cmdline tries wins
@@ -438,7 +447,7 @@ func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		src.tokenTimeout = luksOptionUnset
-		mergeCrypttabOptions(dst, src)
+		composeSources(dst, src)
 		require.Equal(t, 10*time.Second, dst.tokenTimeout)
 	})
 
@@ -451,7 +460,7 @@ func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		src.tokenTimeout = 60 * time.Second
-		mergeCrypttabOptions(dst, src)
+		composeSources(dst, src)
 		require.Equal(t, 10*time.Second, dst.tokenTimeout, "explicit cmdline token-timeout outranks explicit crypttab")
 	})
 
@@ -464,7 +473,7 @@ func TestMergeCrypttabOptionsExplicitCmdlineTokenTimeoutWins(t *testing.T) {
 			luksOptions: newLuksOptions(),
 		}
 		src.tokenTimeout = 60 * time.Second
-		mergeCrypttabOptions(dst, src)
+		composeSources(dst, src)
 		require.Equal(t, 60*time.Second, dst.tokenTimeout)
 	})
 }
@@ -488,13 +497,7 @@ func TestRdLuksNameMergesCrypttabOptions(t *testing.T) {
 	ctInput := "cryptroot UUID=" + uuidStr + " none fido2-device=auto,token-timeout=60\n"
 	ctMappings, err := parseCrypttabReader(strings.NewReader(ctInput))
 	require.NoError(t, err)
-	for _, cm := range ctMappings {
-		if existing := findLuksMapping(cm.ref); existing != nil {
-			mergeCrypttabOptions(existing, cm)
-		} else {
-			luksMappings = append(luksMappings, cm)
-		}
-	}
+	resolveLuksOptions(ctMappings)
 
 	require.Len(t, luksMappings, 1, "should still be one mapping, not two")
 	m := luksMappings[0]
@@ -609,7 +612,7 @@ func TestMergeCopiesKeyfileTimeout(t *testing.T) {
 	src := &luksMapping{luksOptions: newLuksOptions()}
 	src.keyfile = "/crypttab/key"
 	src.keyfileTimeout = 10 * time.Second
-	mergeCrypttabOptions(dst, src)
+	composeSources(dst, src)
 	require.Equal(t, "/crypttab/key", dst.keyfile)
 	require.Equal(t, 10*time.Second, dst.keyfileTimeout)
 }

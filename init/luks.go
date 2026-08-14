@@ -81,6 +81,11 @@ type luksMapping struct {
 	keyfileDeviceRef *deviceRef // non-nil when the keyfile is on a separate device
 
 	luksOptions // field 4, options: rd.luks.options=
+
+	// crypttabOptions is what /etc/crypttab said about this device, held until
+	// every source is known and then composed by resolveLuksOptions; nil means
+	// no entry described it.
+	crypttabOptions *luksOptions
 }
 
 // triesOrUnlimited maps unset onto 0, which the keyboard prompt treats as unlimited.
@@ -89,6 +94,46 @@ func (o *luksOptions) triesOrUnlimited() int {
 		return 0
 	}
 	return o.tries
+}
+
+// overlay copies onto dst every option src has set, leaving the rest of dst
+// alone. Callers apply their sources lowest priority first, so precedence is
+// the order of the calls.
+func overlay(dst, src *luksOptions) {
+	dst.options = append(dst.options, src.options...)
+
+	if src.keyfileOffset != 0 {
+		dst.keyfileOffset = src.keyfileOffset
+	}
+	if src.keyfileSize != 0 {
+		dst.keyfileSize = src.keyfileSize
+	}
+	if src.keyfileTimeout != luksOptionUnset {
+		dst.keyfileTimeout = src.keyfileTimeout
+	}
+
+	if src.header != "" {
+		dst.header = src.header
+		dst.headerDeviceRef = src.headerDeviceRef
+	}
+	if src.tokenTimeout != luksOptionUnset {
+		dst.tokenTimeout = src.tokenTimeout
+	}
+	if src.keySlot != luksOptionUnset {
+		dst.keySlot = src.keySlot
+	}
+	if src.tries != luksOptionUnset {
+		dst.tries = src.tries
+	}
+	if src.measurePCR != measurePCRAuto {
+		dst.measurePCR = src.measurePCR
+	}
+	if src.tpm2Signature != "" {
+		dst.tpm2Signature = src.tpm2Signature
+	}
+	if src.noFail {
+		dst.noFail = true
+	}
 }
 
 // newLuksMapping returns a mapping for ref with no options configured.
@@ -1942,6 +1987,9 @@ func matchLuksMapping(blk *blkInfo) *luksMapping {
 	if blk.matchesRef(cmdRoot) {
 		info("LUKS device %s matches root=, unlock this device", blk.path)
 		m := newLuksMapping(cmdRoot, "root")
+		// created after resolveLuksOptions has run, so the UUID-less list has to
+		// be applied here or it would never reach an autodiscovered root
+		applyGlobalOptions(&m.luksOptions)
 		cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/root"}
 		return m
 	}

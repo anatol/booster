@@ -382,20 +382,16 @@ func parseParams(params string) error {
 		}
 	}
 
-	for i := range luksMappings {
-		if luksOptions != nil {
-			luksMappings[i].options = luksOptions
-		}
-		if tokenTimeoutExplicit {
-			luksMappings[i].tokenTimeout = tokenTimeout
-		}
-		if measurePCR != measurePCRAuto {
-			luksMappings[i].measurePCR = measurePCR
-		}
-		if tpm2Signature != "" {
-			luksMappings[i].tpm2Signature = tpm2Signature
-		}
+	// Hold the UUID-less rd.luks.options= list rather than applying it here:
+	// crypttab has not been read yet, so this is not the place that can decide
+	// what a device ends up with. resolveLuksOptions composes it.
+	globalLuksOptions = newLuksOptions()
+	globalLuksOptions.options = luksOptions
+	if tokenTimeoutExplicit {
+		globalLuksOptions.tokenTimeout = tokenTimeout
 	}
+	globalLuksOptions.measurePCR = measurePCR
+	globalLuksOptions.tpm2Signature = tpm2Signature
 
 	return nil
 }

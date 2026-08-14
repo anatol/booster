@@ -8,6 +8,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// parseParamsResolved parses and then composes, which is what boot does: the
+// command line no longer decides on its own what a device ends up with.
+func parseParamsResolved(params string) error {
+	if err := parseParams(params); err != nil {
+		return err
+	}
+	resolveLuksOptions(nil)
+	return nil
+}
+
 func TestParseParamsInvalidLuksOptions(t *testing.T) {
 	luksMappings = nil
 
@@ -41,7 +51,7 @@ func TestParseParamsLuksData(t *testing.T) {
 func TestParseParams(t *testing.T) {
 	luksMappings = nil
 
-	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap rd.luks.options=no-read-workqueue zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt"))
+	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.name=7843d77f-cdd6-4289-a4de-a708c4aacede=swap rd.luks.name=7f28c723-fd6b-4640-bc94-9366edd8880d=cache root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f video=efifb:on add_efi_memmap rd.luks.options=no-read-workqueue zswap.enabled=1 zswap.max_pool_percent=100 zswap.zpool=z3fold resume=/dev/mapper/swap acpi=copy_dsdt"))
 	require.Equal(t, "/dev/mapper/swap", cmdResume.data)
 	require.Equal(t, refPath, cmdResume.format)
 	require.Equal(t, "e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f", cmdRoot.data.(UUID).toString())
@@ -71,38 +81,38 @@ func TestParseParamsMeasurePCR(t *testing.T) {
 	const base = "rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"
 
 	luksMappings = nil
-	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=yes"))
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tpm2-measure-pcr=yes"))
 	require.Len(t, luksMappings, 1)
 	require.Equal(t, measurePCRForce, luksMappings[0].measurePCR)
 
 	luksMappings = nil
-	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=no"))
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tpm2-measure-pcr=no"))
 	require.Equal(t, measurePCRDisabled, luksMappings[0].measurePCR)
 
 	// Unset on the cmdline leaves the auto default (crypttab/token-binding decides).
 	luksMappings = nil
-	require.NoError(t, parseParams(base))
+	require.NoError(t, parseParamsResolved(base))
 	require.Equal(t, measurePCRAuto, luksMappings[0].measurePCR)
 
 	// Invalid value is rejected (not silently dropped).
 	luksMappings = nil
-	require.Error(t, parseParams(base+" rd.luks.options=tpm2-measure-pcr=bogus"))
+	require.Error(t, parseParamsResolved(base+" rd.luks.options=tpm2-measure-pcr=bogus"))
 }
 
 func TestParseParamsSignature(t *testing.T) {
 	const base = "rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"
 
 	luksMappings = nil
-	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-signature=/run/sig.json"))
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tpm2-signature=/run/sig.json"))
 	require.Len(t, luksMappings, 1)
 	require.Equal(t, "/run/sig.json", luksMappings[0].tpm2Signature)
 
 	luksMappings = nil
-	require.NoError(t, parseParams(base+" rd.luks.options=tpm2-signature=false"))
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=tpm2-signature=false"))
 	require.Equal(t, "false", luksMappings[0].tpm2Signature)
 
 	luksMappings = nil
-	require.NoError(t, parseParams(base))
+	require.NoError(t, parseParamsResolved(base))
 	require.Equal(t, "", luksMappings[0].tpm2Signature)
 }
 
@@ -238,17 +248,17 @@ func TestParseParamsLuksHeaderInvalid(t *testing.T) {
 func TestParseParamsTokenTimeout(t *testing.T) {
 	// explicit duration suffix
 	luksMappings = nil
-	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=60s"))
+	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=60s"))
 	require.Equal(t, 60*time.Second, luksMappings[0].tokenTimeout)
 
 	// bare integer treated as seconds
 	luksMappings = nil
-	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=45"))
+	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=45"))
 	require.Equal(t, 45*time.Second, luksMappings[0].tokenTimeout)
 
 	// token-timeout=0 means wait forever
 	luksMappings = nil
-	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=0"))
+	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=0"))
 	require.Equal(t, time.Duration(0), luksMappings[0].tokenTimeout)
 }
 

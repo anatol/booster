@@ -36,7 +36,8 @@ var (
 
 	initBinary = "/sbin/init" // path to init binary inside the user's chroot
 
-	luksMappings []*luksMapping // list of LUKS devices that booster unlocked during boot process
+	luksMappings      []*luksMapping // list of LUKS devices that booster unlocked during boot process
+	globalLuksOptions luksOptions    // the rd.luks.options= list that carried no UUID
 
 	rootAutodiscoveryMode       bool
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags
@@ -1059,22 +1060,14 @@ func boost() error {
 		return err
 	}
 
-	// Merge /etc/crypttab entries with cmdline-derived mappings.
-	// rd.luks.* kernel parameters take precedence for device ref and name;
-	// crypttab supplies security options (fido2-device=, tpm2-device=, keyfile,
-	// header, tries, …) that rd.luks.* cannot express. When both sources cover
-	// the same device, merge rather than discard the crypttab entry.
-	if ctMappings, err := parseCrypttab(); err != nil {
+	// Compose the option sources. This runs even when crypttab could not be
+	// parsed: the command line's options must not depend on that file being
+	// readable, or a typo in it would silently drop every rd.luks.* option.
+	ctMappings, err := parseCrypttab()
+	if err != nil {
 		warning("crypttab: %v", err)
-	} else {
-		for _, cm := range ctMappings {
-			if existing := findLuksMapping(cm.ref); existing != nil {
-				mergeCrypttabOptions(existing, cm)
-			} else {
-				luksMappings = append(luksMappings, cm)
-			}
-		}
 	}
+	resolveLuksOptions(ctMappings)
 
 	// Diagnostic for the silent-hang case where root= names a /dev/mapper/<name>
 	// device but nothing in our config will create that mapper. Emitted as a
