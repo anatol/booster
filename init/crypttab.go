@@ -214,7 +214,7 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 // resolveLuksOptions composes the fourth crypttab field for every device,
 // lowest priority first, so the order of these calls is the precedence rule:
 //
-//	crypttab  ->  rd.luks.options=  ->  the rest of the command line
+//	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
 func resolveLuksOptions(ctMappings []*luksMapping) {
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
@@ -240,14 +240,18 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 	}
 
 	for _, m := range luksMappings {
-		own := m.luksOptions // what the command line set for this device alone
 		merged := newLuksOptions()
 
 		if ct := m.crypttabOptions; ct != nil {
 			overlay(&merged, ct)
 		}
 		applyGlobalOptions(&merged)
-		overlay(&merged, &own)
+		if h := m.deprecatedHeader; h != nil {
+			overlay(&merged, h)
+		}
+		if pd := m.cmdlineOptions; pd != nil {
+			overlay(&merged, pd)
+		}
 
 		m.luksOptions = merged
 	}

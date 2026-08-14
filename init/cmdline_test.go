@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anatol/luks.go"
+
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
@@ -234,7 +236,7 @@ func TestGetNextParamMulti(t *testing.T) {
 func TestParseParamsLuksHeader(t *testing.T) {
 	luksMappings = nil
 
-	require.NoError(t, parseParams("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e=/etc/luks-headers/root.hdr root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
+	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root rd.luks.header=ab6d7d78-b816-4495-928d-766d6607035e=/etc/luks-headers/root.hdr root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f"))
 	require.Len(t, luksMappings, 1)
 	require.Equal(t, "/etc/luks-headers/root.hdr", luksMappings[0].header)
 }
@@ -268,6 +270,47 @@ func TestParseParamsTokenTimeout(t *testing.T) {
 	luksMappings = nil
 	require.NoError(t, parseParamsResolved("rd.luks.name=ab6d7d78-b816-4495-928d-766d6607035e=root root=UUID=e8e81fc3-8f81-4a3a-ac3d-aab36aa0c45f rd.luks.options=token-timeout=0"))
 	require.Equal(t, time.Duration(0), luksMappings[0].tokenTimeout)
+}
+
+func TestParseParamsPerDeviceLuksOptions(t *testing.T) {
+	const root = "ab6d7d78-b816-4495-928d-766d6607035e"
+	const data = "7843d77f-cdd6-4289-a4de-a708c4aacede"
+	const base = "rd.luks.name=" + root + "=root rd.luks.name=" + data + "=data"
+
+	// scoped to the named device only — the other mapping is untouched
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options="+data+"=discard"))
+	require.Len(t, luksMappings, 2)
+	require.Empty(t, luksMappings[0].options)
+	require.Equal(t, []string{luks.FlagAllowDiscards}, luksMappings[1].options)
+
+	// the full crypttab vocabulary is reachable, not just the handful the
+	// cmdline used to special-case
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options="+root+"=tries=3,key-slot=2,keyfile-timeout=90"))
+	require.Equal(t, 3, luksMappings[0].tries)
+	require.Equal(t, 2, luksMappings[0].keySlot)
+	require.Equal(t, 90*time.Second, luksMappings[0].keyfileTimeout)
+
+	// systemd's documented detached-header example: the option value carries
+	// its own '=' separators
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options="+root+"=header=/luks.hdr:LABEL=hdrdev"))
+	require.Equal(t, "/luks.hdr", luksMappings[0].header)
+	require.Equal(t, &deviceRef{refFsLabel, "hdrdev"}, luksMappings[0].headerDeviceRef)
+
+	// a list with no UUID keeps applying to every mapping
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=discard"))
+	require.Equal(t, []string{luks.FlagAllowDiscards}, luksMappings[0].options)
+	require.Equal(t, []string{luks.FlagAllowDiscards}, luksMappings[1].options)
+
+	// an option value containing '=' is not mistaken for the per-device form
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved(base+" rd.luks.options=token-timeout=10"))
+	require.Equal(t, 10*time.Second, luksMappings[0].tokenTimeout)
+	require.Equal(t, 10*time.Second, luksMappings[1].tokenTimeout)
+
 }
 
 func TestParseParamsTokenTimeoutDefault(t *testing.T) {
@@ -315,4 +358,15 @@ func TestMountFlagsRoRw(t *testing.T) {
 	require.NoError(t, parseParams("rw ro"))
 	flags, _ = mountFlags()
 	require.NotZero(t, flags&unix.MS_RDONLY, "rw ro: ro is last, should be read-only")
+}
+
+func TestRepeatedPerDeviceListsAccumulate(t *testing.T) {
+	// The UUID-less form already accumulates across repeats; the per-device form
+	// used to let the last one silently discard the first.
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	luksMappings = nil
+	require.NoError(t, parseParamsResolved("rd.luks.name="+u+"=root rd.luks.options="+u+"=tries=5 rd.luks.options="+u+"=key-slot=2"))
+	m := luksMappings[0]
+	require.Equal(t, 5, m.tries, "the first list survives the second")
+	require.Equal(t, 2, m.keySlot)
 }

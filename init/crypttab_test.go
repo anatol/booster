@@ -406,6 +406,8 @@ func TestFindLuksMapping(t *testing.T) {
 // one crypttab entry, so the tests drive resolveLuksOptions rather than
 // restating what it does.
 func composeSources(dst, src *luksMapping) {
+	own := dst.luksOptions // what the command line set for this device
+	dst.cmdlineOptions = &own
 	luksMappings = []*luksMapping{dst}
 	globalLuksOptions = newLuksOptions()
 	resolveLuksOptions([]*luksMapping{src})

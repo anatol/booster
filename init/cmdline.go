@@ -246,6 +246,25 @@ func parseParams(params string) error {
 			b := false
 			rootReadOnly = &b
 		case "rd.luks.options":
+			// A leading token that parses as a UUID selects systemd's per-device
+			// form. An option value may itself contain '=', so cut only the first.
+			if head, rest, found := strings.Cut(value, "="); found {
+				if uuid, err := parseUUID(head); err == nil {
+					m := findOrCreateLuksMapping(uuid)
+					if m.cmdlineOptions == nil {
+						opts := newLuksOptions()
+						m.cmdlineOptions = &opts
+					}
+					skip, err := parseLuksOptions(m.cmdlineOptions, rest, "rd.luks.options: "+head)
+					if err != nil {
+						return err
+					}
+					if skip {
+						warning("rd.luks.options: %s: noauto has no effect on the kernel command line, ignoring", head)
+					}
+					continue
+				}
+			}
 			for o := range strings.SplitSeq(value, ",") {
 				if after, ok := strings.CutPrefix(o, "token-timeout="); ok {
 					d, err := parseTokenTimeout(after)
@@ -354,8 +373,9 @@ func parseParams(params string) error {
 				return fmt.Errorf("rd.luks.header: %v", err)
 			}
 			m := findOrCreateLuksMapping(uuid)
-			m.header = path
-			m.headerDeviceRef = ref
+			hdr := newLuksOptions()
+			hdr.header, hdr.headerDeviceRef = path, ref
+			m.deprecatedHeader = &hdr
 		case "rd.luks.data":
 			eqIdx := strings.Index(value, "=")
 			if eqIdx < 0 {

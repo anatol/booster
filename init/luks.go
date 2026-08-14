@@ -82,10 +82,15 @@ type luksMapping struct {
 
 	luksOptions // field 4, options: rd.luks.options=
 
-	// crypttabOptions is what /etc/crypttab said about this device, held until
-	// every source is known and then composed by resolveLuksOptions; nil means
-	// no entry described it.
+	// the sources held until every one of them is known, then composed by
+	// resolveLuksOptions; nil means that source said nothing about this device
 	crypttabOptions *luksOptions
+	cmdlineOptions  *luksOptions // a per-device rd.luks.options=$UUID=
+
+	// deprecatedHeader carries rd.luks.header=, booster's own spelling for a
+	// detached header. systemd has no such parameter -- it is only ever the
+	// header= option -- so this slot exists to be deleted with it.
+	deprecatedHeader *luksOptions
 }
 
 // triesOrUnlimited maps unset onto 0, which the keyboard prompt treats as unlimited.
