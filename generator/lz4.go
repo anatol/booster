@@ -11,7 +11,7 @@ func newLz4Reader(r io.Reader) (io.ReadCloser, error) {
 }
 
 func newLz4Writer(w io.Writer, legacy bool) (io.WriteCloser, error) {
-	args := []string{"-z", "-c"}
+	args := []string{"-9", "-c"}
 	if legacy {
 		args = append(args, "-l")
 	}

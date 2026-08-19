@@ -40,7 +40,7 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 	var compressor io.WriteCloser
 	switch compression {
 	case "zstd":
-		compressor, err = zstd.NewWriter(file)
+		compressor, err = zstd.NewWriter(file, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
 	case "gzip":
 		compressor = gzip.NewWriter(file)
 	case "xz":
