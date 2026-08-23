@@ -262,18 +262,12 @@ the file by either being ran as root, or by being passed
 > this warning is irrelevant with x-initrd.attach
 
 
-Crypttab entries and `rd.luks.*` parameters with the same LUKS UUID are
-merged, with cmdline parameters taking precedence and unspecified options
-being added from crypttab.
-
-A per-device `rd.luks.options=$UUID=` is the exception: it *replaces* that
-entry's options instead of adding to them, so the command line can remove
-an option and not only add one. This is what makes it usable to boot past a
-wrong crypttab entry, and it matches systemd-cryptsetup. The entry's first
-three fields are unaffected — the device and its keyfile survive — but
-`keyfile-offset=`, `keyfile-size=` and `keyfile-timeout=` are options, so
-repeat them on the command line if the keyfile needs them. Booster reports
-what was dropped.
+When a crypttab entry and `rd.luks.*` parameters describe the same LUKS UUID,
+the entry takes precedence, as in systemd-cryptsetup-generator: its volume
+name and key file are used over `rd.luks.name=` and `rd.luks.key=`.
+The exception is a per-device `rd.luks.options=$UUID=`, which replaces the
+entry's options. Repeat `keyfile-offset=`, `keyfile-size=` and
+`keyfile-timeout=` there if the entry's key file needs them.
 
 Booster-specific behaviour for selected options:
 

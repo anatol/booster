@@ -272,15 +272,6 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 // using the same device reference, then composes every record. It returns the
 // messages it logged.
 func resolveLuksOptions(ctMappings []*luksMapping) []string {
-	if globalLuksKeyfile != "" {
-		// the command line's own default, so it fills before crypttab does
-		for _, m := range luksMappings {
-			if m.keyfile == "" {
-				m.keyfile = globalLuksKeyfile
-			}
-		}
-	}
-
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
 		cm.crypttabOptions = &opts
@@ -296,6 +287,15 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm, nil)...)
 	}
 
+	if globalLuksKeyfile != "" {
+		for _, m := range luksMappings {
+			// a default for devices no entry describes, the rule the options follow
+			if m.crypttabOptions == nil && m.keyfile == "" {
+				m.keyfile, m.keyfileFrom = globalLuksKeyfile, "rd.luks.key= carrying no UUID"
+			}
+		}
+	}
+
 	logged := reportSetAside(cmdlineSetAside)
 	for _, m := range luksMappings {
 		m.luksOptions, m.optionConflicts, m.setAside = composedOptions(m)
@@ -305,18 +305,35 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 	return logged
 }
 
-// pairCrypttabEntry merges a crypttab entry into m. The entry's keyfile (field 3)
-// is used when m has none, and its options (field 4) are merged option by
-// option, so a second entry overrides only the options it sets. blk is nil when
-// crypttab is read.
+// pairCrypttabEntry pairs a crypttab entry with m. The entry's name, device and
+// keyfile (fields 1 to 3) win against the command line. When two entries name
+// the same disk, the first keeps fields 1 to 3 and their options (field 4)
+// combine per option. blk is nil when crypttab is read.
 func pairCrypttabEntry(m, entry *luksMapping, blk *blkInfo) []luksConflict {
 	opts := *entry.crypttabOptions
 	from := sourceLabel(entry)
 	var conflicts []luksConflict
 
-	if entry.name != m.name {
+	// systemd's generator takes the volume name (field 1) and keyfile (field 3)
+	// from the entry, and the command line only for the options.
+	if !m.fromCrypttab && len(m.crypttabNames) == 0 {
+		if entry.name != m.name {
+			conflicts = append(conflicts, luksConflict{
+				field: "volume name", kept: entry.name, keptFrom: fmt.Sprintf("crypttab entry %q", entry.name),
+				dropped: m.name, droppedFrom: sourceLabel(m),
+			})
+		}
+		if m.keyfile != "" && withDeviceRef(entry.keyfile, entry.keyfileDeviceRef) != withDeviceRef(m.keyfile, m.keyfileDeviceRef) {
+			conflicts = append(conflicts, luksConflict{
+				field: "key file", kept: withDeviceRef(entry.keyfile, entry.keyfileDeviceRef), keptFrom: keyfileLabel(entry),
+				dropped: withDeviceRef(m.keyfile, m.keyfileDeviceRef), droppedFrom: keyfileLabel(m),
+			})
+		}
+		m.name = entry.name
+		m.keyfile, m.keyfileDeviceRef, m.keyfileFrom = entry.keyfile, entry.keyfileDeviceRef, keyfileLabel(entry)
+	} else if entry.name != m.name {
 		conflicts = append(conflicts, luksConflict{
-			field: "volume name", kept: m.name, keptFrom: sourceLabel(m),
+			field: "volume name", kept: m.name, keptFrom: crypttabLabel(m),
 			dropped: entry.name, droppedFrom: from,
 		})
 	}

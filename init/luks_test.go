@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -820,7 +821,7 @@ func TestMappingsForOneDeviceAreCombined(t *testing.T) {
 
 			m := matchLuksMapping(tc.blk)
 			require.NotNil(t, m)
-			require.Equal(t, "root", m.name, "the command line names the volume")
+			require.Equal(t, "cryptroot", m.name, "the entry names the volume")
 			require.Equal(t, "/entry.key", m.keyfile, "the entry's key file takes effect")
 			require.Equal(t, 7, m.tries, "and its options do too")
 			require.Len(t, luksMappings, 2, "the list itself is not rewritten")
@@ -828,8 +829,10 @@ func TestMappingsForOneDeviceAreCombined(t *testing.T) {
 	}
 }
 
-// Combining must not let a crypttab entry outrank the command line.
-func TestCombinedMappingKeepsCmdlinePrecedence(t *testing.T) {
+// Combining must apply the same per-field rule as pairing while crypttab is
+// read: the entry owns the volume name and keyfile (fields 1 and 3), and a
+// per-device rd.luks.options= replaces the options (field 4).
+func TestCombinedMappingKeepsFieldPrecedence(t *testing.T) {
 	withLuksGlobals(t)
 
 	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
@@ -841,7 +844,8 @@ func TestCombinedMappingKeepsCmdlinePrecedence(t *testing.T) {
 
 	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
 	require.NotNil(t, m)
-	require.Equal(t, "/cmdline.key", m.keyfile, "rd.luks.key= wins the keyfile (field 3)")
+	require.Equal(t, "cryptroot", m.name, "the entry wins the volume name (field 1)")
+	require.Equal(t, "/entry.key", m.keyfile, "and the keyfile (field 3), against rd.luks.key=")
 	require.Equal(t, 2, m.tries, "the per-device list wins the options (field 4)")
 	require.Empty(t, m.options, "and it replaces the entry's options whole")
 }
@@ -849,9 +853,7 @@ func TestCombinedMappingKeepsCmdlinePrecedence(t *testing.T) {
 // The entry's device reference decides only *when* the two sources are paired,
 // never what the pairing does. Written UUID= it happens while crypttab is read,
 // written LABEL= only once the device arrives; the mapping booster unlocks has
-// to be the same either way. It was not: the offset bounding a key file the
-// command line replaced was cleared on one path and left on the other, so the
-// cmdline key file was read from the wrong offset.
+// to be the same either way: the entry's keyfile with the bounds it gives it.
 func TestPairingDoesNotDependOnTheEntrysDeviceRef(t *testing.T) {
 	withLuksGlobals(t)
 
@@ -866,9 +868,9 @@ func TestPairingDoesNotDependOnTheEntrysDeviceRef(t *testing.T) {
 
 			m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
 			require.NotNil(t, m)
-			require.Equal(t, "/cmdline.key", m.keyfile)
-			require.Zero(t, m.keyfileOffset, "the entry's bounds describe a file booster does not read")
-			require.Zero(t, m.keyfileSize)
+			require.Equal(t, "/entry.key", m.keyfile)
+			require.EqualValues(t, 512, m.keyfileOffset, "the entry's bounds describe the file booster reads")
+			require.EqualValues(t, 64, m.keyfileSize)
 		})
 	}
 }
@@ -952,4 +954,36 @@ func TestCrypttabEntriesForOneDeviceAreOverlaid(t *testing.T) {
 	require.NotNil(t, m)
 	require.Equal(t, 9, m.tries, "the first entry's retry count survives")
 	require.Contains(t, m.options, luks.FlagAllowDiscards, "and the second entry's flag applies")
+}
+
+// The per-field rule has to survive combining, where an entry and a parameter
+// that reference one disk in different forms are two records until it arrives.
+func TestCombinedMappingTakesTheCrypttabFields(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	for _, params := range []string{
+		"rd.luks.uuid=" + u,
+		"rd.luks.name=" + u + "=fromcmdline",
+		"rd.luks.uuid=" + u + " rd.luks.key=/default.key",
+	} {
+		t.Run(params, func(t *testing.T) {
+			luksMappings = nil
+			globalLuksOptions = newLuksOptions()
+			require.NoError(t, parseParams(params))
+			ct, err := parseCrypttabReader(strings.NewReader("cryptroot LABEL=crypt /entry.key luks\n"))
+			require.NoError(t, err)
+			resolveLuksOptions(ct)
+
+			m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+			require.NotNil(t, m)
+			require.Equal(t, "cryptroot", m.name)
+			require.Equal(t, "/entry.key", m.keyfile)
+		})
+	}
 }
