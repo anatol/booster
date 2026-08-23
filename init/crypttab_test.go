@@ -583,17 +583,17 @@ func TestNegativeOptionValuesAreRejected(t *testing.T) {
 		require.Error(t, err, "%s must be rejected", opt)
 	}
 }
-func TestBoundsDoNotFollowALosingKeyfile(t *testing.T) {
-	// keyfile-offset= describes the key file named beside it. When rd.luks.key=
-	// supplies a different one, applying the entry's bounds to it would read the
-	// wrong bytes and the unlock would fail.
+func TestBoundsStayWithTheKeyfileTheyDescribe(t *testing.T) {
+	// keyfile-offset= describes the key file named beside it in the same entry.
+	// The entry owns field 3, so the two always travel together and rd.luks.key=
+	// cannot leave the bounds pointing at a file booster never reads.
 	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
 	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.key="+u+"=/b.key",
 		"cryptroot UUID="+u+" /a.key luks,keyfile-offset=4096,keyfile-size=64\n")
 	m := luksMappings[0]
-	require.Equal(t, "/b.key", m.keyfile)
-	require.Zero(t, m.keyfileOffset)
-	require.Zero(t, m.keyfileSize)
+	require.Equal(t, "/a.key", m.keyfile)
+	require.EqualValues(t, 4096, m.keyfileOffset)
+	require.EqualValues(t, 64, m.keyfileSize)
 }
 
 func TestOverlayCarriesEveryOptionField(t *testing.T) {
@@ -668,7 +668,7 @@ func TestCrypttabFillsWhatTheCmdlineLeftUnset(t *testing.T) {
 	m := luksMappings[0]
 	require.Equal(t, 3, m.tries)
 	require.Equal(t, 45*time.Second, m.tokenTimeout)
-	require.Equal(t, "cmdline-name", m.name, "the name must not be overwritten")
+	require.Equal(t, "cryptroot", m.name, "an entry owns field 1, even against rd.luks.name=")
 }
 
 func TestCmdlineTriesZeroOutranksCrypttab(t *testing.T) {
@@ -931,10 +931,18 @@ func TestUUIDLessKeyfileIsADefault(t *testing.T) {
 		require.Equal(t, "/own.key", luksMappings[0].keyfile)
 	})
 
-	t.Run("outranks a crypttab key file, as any cmdline one does", func(t *testing.T) {
+	t.Run("a crypttab entry outranks it", func(t *testing.T) {
 		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key=/k.key",
 			"root UUID="+u+" /entry.key luks\n")
-		require.Equal(t, "/k.key", luksMappings[0].keyfile)
+		require.Equal(t, "/entry.key", luksMappings[0].keyfile)
+	})
+
+	t.Run("an entry asking for a prompt outranks it too", func(t *testing.T) {
+		// none is a value in field 3, not an absent one, so the entry still
+		// describes the device and the default stays off it.
+		resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key=/k.key",
+			"root UUID="+u+" none luks\n")
+		require.Empty(t, luksMappings[0].keyfile)
 	})
 
 	t.Run("leaves a device only crypttab names alone", func(t *testing.T) {
@@ -1232,16 +1240,16 @@ func TestLostVolumeNameWarnsWhenRootWaitsForIt(t *testing.T) {
 	uuid, err := parseUUID(u)
 	require.NoError(t, err)
 
-	resolveSources(t, "rd.luks.uuid="+u+" root=/dev/mapper/cryptroot", "cryptroot LABEL=crypt none luks\n")
+	resolveSources(t, "rd.luks.uuid="+u+" root=/dev/mapper/luks-"+u, "cryptroot LABEL=crypt none luks\n")
 	blk := &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"}
 	m := matchLuksMapping(blk)
 	require.NotNil(t, m)
 
 	reportedConflicts.Clear()
 	logged := reportLuksConflicts(blk.path, m.conflicts())
-	require.Contains(t, logged, `root=/dev/mapper/cryptroot will not appear: LUKS device /dev/sda2 is unlocked as "luks-`+u+`"`)
+	require.Contains(t, logged, `root=/dev/mapper/luks-`+u+` will not appear: LUKS device /dev/sda2 is unlocked as "cryptroot"`)
 
-	cmdRoot = &deviceRef{refPath, "/dev/mapper/luks-" + u}
+	cmdRoot = &deviceRef{refPath, "/dev/mapper/cryptroot"}
 	reportedConflicts.Clear()
 	for _, msg := range reportLuksConflicts(blk.path, m.conflicts()) {
 		require.NotContains(t, msg, "will not appear", "root= names the volume that does appear")
@@ -1263,7 +1271,8 @@ func TestKeyFileNamesTheOneEntryThatSetIt(t *testing.T) {
 	require.NotNil(t, m)
 
 	text := strings.Join(conflictMessages(m.conflicts()), "\n")
-	require.Contains(t, text, `"/entry.key" from crypttab entry "cryptroot" is not applied`)
+	require.Contains(t, text, `key file is "/entry.key" from crypttab entry "cryptroot"; "/cmdline.key" from the command line is not applied`)
+	require.Contains(t, text, `volume name is "cryptroot" from crypttab entry "cryptroot"`, "the name, too, comes from the one entry that set it")
 }
 
 // The same path on another device is another file: the entry's bounds go
@@ -1342,7 +1351,7 @@ func TestLostUnlockSettingsSurfaceWhenUnlockBreaks(t *testing.T) {
 
 	logged := surfaceLostUnlockSettings("/dev/sda2", m)
 	text := strings.Join(logged, "\n")
-	require.Contains(t, text, `key file is "/cmdline.key"`)
+	require.Contains(t, text, `key file is "/entry.key"`)
 	require.NotContains(t, text, "volume name", "a lost name does not stop an unlock")
 	require.NotContains(t, text, "tries is", "nor does a retry count")
 	require.Empty(t, surfaceLostUnlockSettings("/dev/sda2", m), "logged once per device")
@@ -1372,4 +1381,27 @@ func TestOnlyOneOptionSourceReachesADevice(t *testing.T) {
 			"cryptroot UUID="+u+" none luks,nofail\n")
 		require.False(t, luksMappings[0].noFail)
 	})
+}
+
+// systemd's generator passes a crypttab entry's own name and key file to
+// systemd-cryptsetup and reads the command-line record only for its option
+// list, so every rd.luks.* parameter loses fields 1 and 3 to an entry.
+func TestCrypttabOwnsNameAndKeyfile(t *testing.T) {
+	const u = "fc5197e2-df8f-43a6-9cc7-658dead3cfa4"
+	entry := "cryptroot UUID=" + u + " /entry.key luks\n"
+
+	for _, param := range []string{
+		"rd.luks.uuid=" + u,
+		"rd.luks.name=" + u + "=fromcmdline",
+		"rd.luks.key=" + u + "=/cmdline.key",
+		"rd.luks.key=/default.key rd.luks.uuid=" + u,
+		"rd.luks.options=" + u + "=tries=2",
+	} {
+		t.Run(param, func(t *testing.T) {
+			resolveSources(t, param, entry)
+			require.Len(t, luksMappings, 1)
+			require.Equal(t, "cryptroot", luksMappings[0].name)
+			require.Equal(t, "/entry.key", luksMappings[0].keyfile)
+		})
+	}
 }

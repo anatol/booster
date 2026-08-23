@@ -376,6 +376,31 @@ func TestLUKS2DetachedHeaderCmdlineRawDevice(t *testing.T) {
 // volume whose detached header lives as a file on a separate block device, specified
 // via the rd.luks.header=<UUID>=/root.hdr:UUID=<devuuid> kernel parameter.
 // This exercises the headerDeviceRef != nil path in acquireHeader (mountKeyDevice).
+// rd.luks.uuid= names nothing, so the entry supplies the name. Without that the
+// mapping kept its luks-UUID fallback, /dev/mapper/cryptroot was never created
+// and the boot waited out its root device timeout.
+func TestLUKS2CrypttabNamesTheVolume(t *testing.T) {
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.img",
+		kernelArgs: []string{
+			"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502",
+			"root=/dev/mapper/cryptroot",
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 	t.Parallel()
 
