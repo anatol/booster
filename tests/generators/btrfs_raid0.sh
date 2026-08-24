@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: mkfs.btrfs
 
 trap 'quit' EXIT ERR
 

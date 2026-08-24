@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# tools: cryptsetup swtpm swtpm_ioctl openssl python3 tpm2_create
+# tools: tpm2_createprimary tpm2_evictcontrol tpm2_flushcontext
+# tools: tpm2_policypassword tpm2_policypcr tpm2_startauthsession
 #
 # Generates a LUKS2 image with a systemd-tpm2 token in v252–254 format:
 # tpm2_srk present (persistent SRK at 0x81000001) but no tpm2_salt,

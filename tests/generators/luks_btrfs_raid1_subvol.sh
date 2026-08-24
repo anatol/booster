@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: parted partprobe mkfs.btrfs btrfs cryptsetup
 # Creates a single GPT disk with two LUKS2 partitions, each wrapping one member
 # of a btrfs RAID1 volume, with the root tree living in a subvolume named "@".
 #

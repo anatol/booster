@@ -284,6 +284,11 @@ go test ./...
 ```
 
 The `./tests` package contains QEMU integration tests and requires the host to have the needed boot and virtualization tooling installed.
+Build test assets and list required tooling:
+
+```shell
+go test ./tests -bootstrap -timeout=0
+```
 
 ## Credits
 

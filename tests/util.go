@@ -170,8 +170,10 @@ func fsUUID(t *testing.T, image string) string {
 func shell(script string, env ...string) error {
 	sh := exec.Command("bash", "-o", "errexit", script)
 	sh.Env = append(os.Environ(), env...)
+	sh.Env = append(sh.Env, "PATH="+generatorPath())
 
-	if testing.Verbose() {
+	// A bootstrap run exists to say why an image could not be built.
+	if testing.Verbose() || *bootstrapAssets {
 		sh.Stdout = os.Stdout
 		sh.Stderr = os.Stderr
 	}

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: tangctl
 
 mkdir -p assets/tang
 tangctl create > assets/tang/key.priv

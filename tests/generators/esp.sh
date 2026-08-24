@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: gdisk sgdisk mcopy
 
 # Writes the per-test half of the ESP autodiscovery image: the kernel, the
 # initramfs the test just built, its kernel options, and the GPT attribute under
@@ -14,7 +15,7 @@ if [ -n "${ENABLE_LUKS+1}" ]; then
 fi
 
 if [ ! -f "${base}" ]; then
-  echo "esp.sh: ${base} is missing, run with -assets.bootstrap to build it" >&2
+  echo "esp.sh: ${base} is missing, run with -bootstrap to build it" >&2
   exit 1
 fi
 

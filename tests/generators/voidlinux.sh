@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: xbps-install wget
 
 #trap 'quit' EXIT ERR
 

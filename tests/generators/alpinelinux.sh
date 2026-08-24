@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: apk
 
 trap 'quit' EXIT
 trap 'err' ERR

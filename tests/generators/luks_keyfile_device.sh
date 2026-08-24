@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup
 # Creates two disk images:
 #   $OUTPUT        — LUKS2 root disk, unlocked by keyfile only (no password slot)
 #   $KEYDEV_OUTPUT — small ext4 "key device" containing the keyfile at /keyfile

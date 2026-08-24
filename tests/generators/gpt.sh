@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: gdisk
 
 trap 'quit' EXIT ERR
 

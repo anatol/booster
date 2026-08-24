@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup
 
 trap 'quit' EXIT
 trap 'err' ERR

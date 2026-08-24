@@ -151,8 +151,10 @@ func TestRemoteUnlock(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("NIC Link is Up")) // wait for the network
 	time.Sleep(time.Second)
 
-	// unlock remotely
-	cmd := exec.Command("tangctl", "unlock", "localhost:34551", "assets/remote/key.priv")
+	// unlock remotely with the tangctl the suite builds itself
+	tangctl := findTool("tangctl")
+	require.NotEmpty(t, tangctl)
+	cmd := exec.Command(tangctl, "unlock", "localhost:34551", "assets/remote/key.priv")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

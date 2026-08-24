@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup
 # Creates a LUKS2 image with a DETACHED header and NO filesystem — a decoy
 # volume for the multi-device detached-header test. It operates on plain files
 # (no losetup, no dm-crypt open), so unlike luks_detached_header.sh it needs no

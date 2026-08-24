@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: grub-mkrescue
 
 trap 'quit' EXIT ERR
 

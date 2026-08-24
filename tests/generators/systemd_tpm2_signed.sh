@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup systemd-cryptenroll swtpm swtpm_ioctl openssl python3
 
 # Generates a LUKS2 image whose volume key is enrolled to a *signed* (authorized)
 # TPM2 PCR policy: systemd-cryptenroll --tpm2-public-key binds the key to a

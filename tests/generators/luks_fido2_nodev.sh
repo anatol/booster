@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup
 #
 # Creates a LUKS2 image with a fake systemd-fido2 token injected directly
 # into the LUKS2 metadata.  The credential and salt are random bytes that

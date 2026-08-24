@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: zpool zfs gdisk
 
 trap 'quit' EXIT ERR
 

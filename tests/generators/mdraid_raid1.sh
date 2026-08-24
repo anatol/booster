@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: mdadm
 
 trap 'quit' EXIT ERR
 

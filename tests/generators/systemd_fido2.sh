@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup systemd-cryptenroll udevadm
 #
 # Creates a LUKS2 image with FIDO2 enrolled via systemd-cryptenroll.
 #

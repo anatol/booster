@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: sgdisk mmd mcopy mkfs.fat cryptsetup
 
 # Builds the half of the ESP autodiscovery image that no test varies: the GPT, an
 # empty FAT ESP carrying the bootloader, and a root filesystem holding /sbin/init.

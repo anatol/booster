@@ -31,6 +31,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	if *bootstrapAssets {
+		code := generateAllAssets()
+		os.RemoveAll(binariesDir)
+		os.Exit(code)
+	}
+
 	os.Exit(m.Run())
 }
 

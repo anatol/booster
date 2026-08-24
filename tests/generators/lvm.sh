@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: pvcreate vgcreate vgchange lvcreate
 
 trap 'quit' EXIT ERR
 

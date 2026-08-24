@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup
 # Creates a LUKS2 image with a detached header.
 # The LUKS metadata lives in HEADER_OUTPUT; the encrypted payload lives in OUTPUT.
 # At boot, crypttab must supply header=<path> (or rd.luks.header=) pointing to

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: gdisk partprobe cryptsetup
 # Generate a disk whose root partition is LUKS-formatted AND tagged with
 # the amd64 DPS root partition type GUID (4f68bce3-e8cd-4db1-96e7-fbcaf984b709).
 # Boot harness pairs this disk with a crypttab entry naming the LUKS volume

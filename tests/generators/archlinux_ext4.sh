@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: pacstrap arch-chroot genfstab
 
 trap 'quit' EXIT ERR
 

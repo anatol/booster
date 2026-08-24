@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: swtpm swtpm_setup swtpm_ioctl tpm2_createprimary tpm2_evictcontrol
 
 if ! [ -d /var/lib/swtpm-localca ]; then
   sudo mkdir /var/lib/swtpm-localca

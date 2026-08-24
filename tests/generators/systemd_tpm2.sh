@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: cryptsetup systemd-cryptenroll swtpm swtpm_ioctl
 
 trap 'quit' EXIT ERR
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tools: parted partprobe cryptsetup
 # Creates a single GPT disk with two LUKS2 partitions sharing the same passphrase.
 #
 #   Partition 1 (extra): LUKS2, UUID=$LUKS_UUID1 — no inner filesystem
