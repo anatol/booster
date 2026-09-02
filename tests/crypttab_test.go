@@ -242,3 +242,35 @@ func TestCrypttabTPM2(t *testing.T) {
 
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
+
+// Combining only happens when one device answers to two records, and every
+// other bundled crypttab in this suite names its device UUID=, the same way
+// the command line does. Those pair while crypttab is being read and never
+// reach the combining path, so until now no boot had exercised it.
+//
+// Here the entry names the device by its path and the command line by UUID, so
+// only the arriving device can tell they are one disk.
+func TestCrypttabPathEntryPairsWithCmdlineUUID(t *testing.T) {
+	t.Parallel()
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot /dev/sda none luks,tries=7,x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:         "assets/luks2.img",
+		crypttabFile: crypttabPath,
+		kernelArgs: []string{
+			"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502",
+			"root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385",
+		},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("LUKS device /dev/sda is described twice"))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
