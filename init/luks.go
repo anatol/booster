@@ -94,6 +94,8 @@ type luksMapping struct {
 	crypttabOptions *luksOptions
 	cmdlineOptions  *luksOptions // a per-device rd.luks.options=$UUID=
 
+	fromCrypttab bool // an entry's own record; loses fields 1 and 2 to a cmdline one
+
 	// deprecatedHeader carries rd.luks.header=, booster's own spelling for a
 	// detached header. systemd has no such parameter -- it is only ever the
 	// header= option -- so this slot exists to be deleted with it.
@@ -1998,16 +2000,14 @@ func unreachableMapperName() (string, bool) {
 }
 
 func matchLuksMapping(blk *blkInfo) *luksMapping {
-	for _, m := range luksMappings {
-		if blk.matchesRef(m.ref) {
-			// Mirror the synthesis-fallback remap so root=UUID=<luks-uuid>
-			// keeps working after a crypttab/rd.luks.* entry adds the mapping.
-			if blk.matchesRef(cmdRoot) {
-				info("LUKS device %s matches root=, re-pointing root to /dev/mapper/%s", blk.path, m.name)
-				cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/" + m.name}
-			}
-			return m
+	if m := combinedLuksMapping(blk); m != nil {
+		// Mirror the synthesis-fallback remap so root=UUID=<luks-uuid>
+		// keeps working after a crypttab/rd.luks.* entry adds the mapping.
+		if blk.matchesRef(cmdRoot) {
+			info("LUKS device %s matches root=, re-pointing root to /dev/mapper/%s", blk.path, m.name)
+			cmdRoot = &deviceRef{format: refPath, data: "/dev/mapper/" + m.name}
 		}
+		return m
 	}
 
 	// a special case coming from autodiscoverable partitions https://systemd.io/DISCOVERABLE_PARTITIONS/
@@ -2023,6 +2023,45 @@ func matchLuksMapping(blk *blkInfo) *luksMapping {
 	}
 
 	return nil
+}
+
+// combinedLuksMapping must not write the shared records, which other device
+// goroutines are reading. handleGptBlockDevice still rewrites their refs.
+func combinedLuksMapping(blk *blkInfo) *luksMapping {
+	var matched []*luksMapping
+	for _, m := range luksMappings {
+		if blk.matchesRef(m.ref) {
+			matched = append(matched, m)
+		}
+	}
+	if len(matched) == 0 {
+		return nil
+	}
+
+	primary := matched[0]
+	for _, m := range matched {
+		if !m.fromCrypttab {
+			primary = m
+			break
+		}
+	}
+	if len(matched) == 1 {
+		return primary
+	}
+
+	combined := *primary
+	for _, m := range matched {
+		if m == primary || !m.fromCrypttab {
+			continue
+		}
+		info("LUKS device %s is described twice; taking the key file and options of crypttab entry %q into %q", blk.path, m.name, combined.name)
+		pairCrypttabEntry(&combined, m)
+	}
+
+	opts, dropped := composedOptions(&combined)
+	combined.luksOptions = opts
+	reportDroppedOptions(combined.name, dropped)
+	return &combined
 }
 
 func handleLuksBlockDevice(blk *blkInfo) error {
