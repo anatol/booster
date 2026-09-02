@@ -266,10 +266,9 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 	return nil
 }
 
-// resolveLuksOptions composes the fourth crypttab field for every device,
-// lowest priority first, so the order of these calls is the precedence rule:
-//
-//	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
+// resolveLuksOptions attaches every source to the device it describes, then
+// composes them. An entry whose device reference matches a command-line one is
+// paired here; the rest are paired by the device itself, on arrival.
 func resolveLuksOptions(ctMappings []*luksMapping) {
 	if globalLuksKeyfile != "" {
 		// the command line's own default, so it fills before crypttab does
@@ -282,51 +281,82 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
+		cm.crypttabOptions = &opts
+
 		existing := findLuksMapping(cm.ref)
 		if existing == nil {
 			// a device nothing else names: its own entry is its only source,
 			// and it is composed below like any other
-			cm.crypttabOptions = &opts
 			luksMappings = append(luksMappings, cm)
 			continue
 		}
-		existing.crypttabOptions = &opts
-		switch {
-		case existing.keyfile == "" && cm.keyfile != "":
-			existing.keyfile = cm.keyfile
-			existing.keyfileDeviceRef = cm.keyfileDeviceRef
-		case cm.keyfile != "":
-			// rd.luks.key= won field 3, so the entry's keyfile-* bounds describe
-			// a file booster is not going to read
-			opts.keyfileOffset, opts.keyfileSize = 0, 0
-			opts.keyfileTimeout = luksOptionUnset
-		}
+		pairCrypttabEntry(existing, cm)
 	}
 
 	for _, m := range luksMappings {
-		merged := newLuksOptions()
-
-		if ct := m.crypttabOptions; ct != nil {
-			if m.cmdlineOptions != nil {
-				// A per-device rd.luks.options= replaces the entry's option
-				// field, so the entry contributes none of it.
-				if len(ct.appliedOptions) > 0 {
-					warning("crypttab: entry %q: options %q dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.", m.name, joinOptions(ct.appliedOptions))
-				}
-			} else {
-				overlay(&merged, ct)
-			}
-		}
-		applyGlobalOptions(&merged)
-		if h := m.deprecatedHeader; h != nil {
-			overlay(&merged, h)
-		}
-		if pd := m.cmdlineOptions; pd != nil {
-			overlay(&merged, pd)
-		}
-
-		m.luksOptions = merged
+		opts, dropped := composedOptions(m)
+		m.luksOptions = opts
+		reportDroppedOptions(m.name, dropped)
 	}
+}
+
+// pairCrypttabEntry hands m the entry's fourth field and key file. Booster's
+// rule today is that the command line owns fields 1 and 2 and outranks the
+// entry on field 3, where systemd's generator and dracut both give all three
+// to the entry.
+func pairCrypttabEntry(m, entry *luksMapping) {
+	opts := *entry.crypttabOptions
+
+	switch {
+	case m.keyfile == "" && entry.keyfile != "":
+		m.keyfile = entry.keyfile
+		m.keyfileDeviceRef = entry.keyfileDeviceRef
+	case entry.keyfile != "":
+		// rd.luks.key= won field 3, so the entry's keyfile-* bounds describe
+		// a file booster is not going to read
+		opts.keyfileOffset, opts.keyfileSize = 0, 0
+		opts.keyfileTimeout = luksOptionUnset
+	}
+
+	m.crypttabOptions = &opts
+}
+
+// composedOptions folds a device's sources into the options it is unlocked
+// with, lowest priority first, so the order of these overlays is the precedence
+// rule:
+//
+//	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
+//
+// Displaced crypttab options are returned rather than reported, because this
+// runs a second time for a device that turns out to have two records.
+func composedOptions(m *luksMapping) (opts luksOptions, dropped []string) {
+	merged := newLuksOptions()
+
+	if ct := m.crypttabOptions; ct != nil {
+		if m.cmdlineOptions != nil {
+			// A per-device rd.luks.options= replaces the entry's option
+			// field, so the entry contributes none of it.
+			dropped = ct.appliedOptions
+		} else {
+			overlay(&merged, ct)
+		}
+	}
+	applyGlobalOptions(&merged)
+	if h := m.deprecatedHeader; h != nil {
+		overlay(&merged, h)
+	}
+	if pd := m.cmdlineOptions; pd != nil {
+		overlay(&merged, pd)
+	}
+
+	return merged, dropped
+}
+
+func reportDroppedOptions(name string, dropped []string) {
+	if len(dropped) == 0 {
+		return
+	}
+	warning("crypttab: entry %q: options %q dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.", name, joinOptions(dropped))
 }
 
 // deviceRefEqual reports whether two deviceRefs refer to the same device.
