@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -282,6 +283,7 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
 		cm.crypttabOptions = &opts
+		cm.fromCrypttab = true
 
 		existing := findLuksMapping(cm.ref)
 		if existing == nil {
@@ -304,6 +306,10 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 // rule today is that the command line owns fields 1 and 2 and outranks the
 // entry on field 3, where systemd's generator and dracut both give all three
 // to the entry.
+//
+// A device answering to two entries is paired twice, so the field is overlaid
+// rather than assigned: the later entry wins what it names and the earlier one
+// keeps the rest.
 func pairCrypttabEntry(m, entry *luksMapping) {
 	opts := *entry.crypttabOptions
 
@@ -318,7 +324,18 @@ func pairCrypttabEntry(m, entry *luksMapping) {
 		opts.keyfileTimeout = luksOptionUnset
 	}
 
-	m.crypttabOptions = &opts
+	if m.crypttabOptions == nil {
+		m.crypttabOptions = &opts
+		return
+	}
+
+	// The entry record is shared by every device goroutine that pairs with it,
+	// and appending to its slices in place would race. Merge into copies.
+	merged := *m.crypttabOptions
+	merged.options = slices.Clone(merged.options)
+	merged.appliedOptions = slices.Clone(merged.appliedOptions)
+	overlay(&merged, &opts)
+	m.crypttabOptions = &merged
 }
 
 // composedOptions folds a device's sources into the options it is unlocked
