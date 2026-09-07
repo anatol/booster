@@ -7,6 +7,7 @@ quit() {
   set +o errexit
   sudo umount "${dir}"
   rm -r "${dir}"
+  sudo losetup -d "${lodev}"
 }
 
 truncate --size 650M "${OUTPUT}"
