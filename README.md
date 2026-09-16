@@ -283,7 +283,7 @@ Run the full test suite:
 go test ./...
 ```
 
-The `./tests` package contains QEMU integration tests and requires the host to have the needed boot and virtualization tooling installed.
+The `./tests` package contains QEMU integration tests and requires the host to have the needed boot and virtualization tooling installed, including `qemu-img`, which some distributions package apart from the emulator.
 Build test assets and list required tooling:
 
 ```shell

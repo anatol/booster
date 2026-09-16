@@ -142,6 +142,9 @@ func TestArchLinuxHibernate(t *testing.T) {
 			// /dev/sda: when the swap disk wins, root= names a swap partition
 			// and the boot waits for a root filesystem that never appears.
 			// Name the root by UUID, which does not depend on probe order.
+			rootDisk := writableOverlay(t, "assets/archlinux.ext4.raw")
+			// Read the UUID from the asset, not the overlay: blkid sees a qcow2
+			// container there, not the filesystem inside it.
 			rootRef := "UUID=" + fsUUID(t, "assets/archlinux.ext4.raw")
 			opts := Opts{
 				kernelVersion: ver,
@@ -149,11 +152,15 @@ func TestArchLinuxHibernate(t *testing.T) {
 				compression:   compression,
 				params:        sshParams,
 				disks: []vmtest.QemuDisk{
-					{Path: "assets/archlinux.ext4.raw", Format: "raw", Controller: controller},
-					{Path: "assets/swap.raw", Format: "raw"},
+					{Path: rootDisk, Format: "qcow2", Controller: controller},
+					{Path: writableOverlay(t, "assets/swap.raw"), Format: "qcow2"},
 				},
 				// Full distro userspace, and it boots twice; see testArchLinux.
-				vmTimeout:  120 * time.Second,
+				vmTimeout: 120 * time.Second,
+				// The second VM resumes from the hibernation image the first one
+				// wrote, so these writes have to reach the disk rather than a
+				// discarded overlay.
+				persistent: true,
 				kernelArgs: []string{"root=" + rootRef, "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f", "rw"},
 			}
 
@@ -192,6 +199,12 @@ func TestArchLinuxHibernate(t *testing.T) {
 			require.NoError(t, sess2.Run("systemctl hibernate"))
 
 			require.NoError(t, vm.ConsoleExpect("PM: Image saving done"))
+
+			// The resumed VM reuses this one's forwarded port, so wait for its
+			// qemu to exit rather than assuming the guest powering itself off
+			// has already released it.  Kill blocks until the process is gone
+			// and is a no-op once it has.
+			vm.Kill()
 
 			// wakeing it up
 			vm2, err := buildVmInstance(t, opts)

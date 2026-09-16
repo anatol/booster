@@ -153,6 +153,36 @@ func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	return string(out)
 }
 
+// writableOverlay gives a test its own copy-on-write view of an asset, for the
+// tests whose guest writes have to outlive the VM and so cannot use -snapshot.
+// Writing straight to the asset would mutate what every other test of that
+// distro reads.  A qcow2 overlay opens the asset read-only and costs a few
+// hundred kilobytes, where copying the image costs its whole size on any
+// filesystem without reflink.
+func writableOverlay(t *testing.T, asset string) string {
+	t.Helper()
+
+	// Generate the source first if it is missing: the caller passes the overlay
+	// to the VM, and a temp path would not be recognised as an asset to build.
+	require.NoError(t, checkAsset(asset))
+
+	// qemu resolves a relative backing path against the overlay's directory,
+	// which is not where the asset is.
+	backing, err := filepath.Abs(asset)
+	require.NoError(t, err)
+
+	// qemu-img ships separately from the emulator on some distributions, and
+	// only this test needs it, so skip rather than fail the run over it.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed, needed to overlay " + asset)
+	}
+
+	dst := filepath.Join(t.TempDir(), filepath.Base(asset)+".qcow2")
+	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", "raw", "-b", backing, dst).CombinedOutput()
+	require.NoError(t, err, "qemu-img create %s: %s", dst, out)
+	return dst
+}
+
 // fsUUID reads a filesystem UUID out of an image file.  Tests that attach more
 // than one disk cannot name a root by kernel device: /dev/sda goes to whichever
 // disk the SCSI probe reaches first, and with two disks that order is not
