@@ -2,10 +2,12 @@ package tests
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,20 +59,22 @@ func copyFile(src, dst string) (int64, error) {
 
 // Note: if you see tpm2 tests fail with "integrity check failed" error make sure you pull clevis changes from
 // https://github.com/latchset/clevis/issues/244
-func startSwtpm() (*os.Process, []string, error) {
+// startSwtpm gives each caller its own TPM state and control socket, so tests
+// that need a TPM can run concurrently.
+func startSwtpm(t *testing.T) (*os.Process, []string, error) {
 	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
 		return nil, nil, err
 	}
 
-	_ = os.Remove("assets/tpm2/.lock")
-	_ = os.Remove("assets/swtpm-sock") // sometimes process crashes and leaves this file
-	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
+	dir := t.TempDir()
+	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", filepath.Join(dir, "tpm2-00.permall")); err != nil {
 		return nil, nil, err
 	}
+	sock := filepath.Join(dir, "swtpm-sock")
 
-	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
+	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir="+dir, "--tpm2", "--ctrl", "type=unixio,path="+sock, "--flags", "not-need-init")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -79,12 +83,42 @@ func startSwtpm() (*os.Process, []string, error) {
 		return nil, nil, unwrapExitError(err)
 	}
 
-	// wait till swtpm really starts
-	if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
+	if err := waitForFile(sock, 5*time.Second); err != nil {
+		return nil, nil, err
+	}
+	if err := waitForSwtpmReady(sock, 5*time.Second); err != nil {
 		return nil, nil, err
 	}
 
-	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=" + sock, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+}
+
+// waitForSwtpmReady asks the control channel for its capabilities.  The socket
+// appearing only means swtpm bound it, and a qemu that connects to one which is
+// not answering yet still starts, leaving the guest with no TPM at all.
+func waitForSwtpmReady(sock string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", sock, time.Second)
+		if err != nil {
+			lastErr = err
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// CMD_GET_CAPABILITY, answered with an eight byte capability mask.
+		if err := binary.Write(conn, binary.BigEndian, uint32(1)); err == nil {
+			_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+			if _, err = io.ReadFull(conn, make([]byte, 8)); err == nil {
+				_ = conn.Close()
+				return nil
+			}
+		}
+		lastErr = err
+		_ = conn.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("swtpm at %v did not answer its control channel: %v", sock, lastErr)
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {

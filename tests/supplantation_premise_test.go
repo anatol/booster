@@ -22,11 +22,6 @@ import (
 // Pure swtpm + tpm2-tools — no qemu boot, no booster image. Skipped when the
 // tools are unavailable (same pattern as TestSystemdTPM2LegacyPin).
 
-const (
-	swtpmTCPDataPort = "2321"
-	swtpmTCPCtrlPort = "2322"
-)
-
 func requireTool(t *testing.T, name string) {
 	t.Helper()
 	if _, err := exec.LookPath(name); err != nil {
@@ -35,15 +30,42 @@ func requireTool(t *testing.T, name string) {
 }
 
 // startSwtpmTCP starts swtpm in TCP server mode so tpm2-tools can drive it via
-// the swtpm TCTI. The integration harness' startSwtpm() uses a unixio control
+// the swtpm TCTI. The integration harness' startSwtpm(t) uses a unixio control
 // socket for QEMU; tpm2-tools needs the TCP data/ctrl ports instead. Returns
 // the TPM2TOOLS_TCTI string; the swtpm process is killed on test cleanup.
+// freePortPair returns n, n+1 with both free: the swtpm TCTI is given only the
+// data port and derives the control port as the next one.
+func freePortPair(t *testing.T) (int, int) {
+	t.Helper()
+
+	for attempt := 0; attempt < 20; attempt++ {
+		data := pickFreePort(t)
+		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(data+1))
+		if err != nil {
+			continue // neighbour taken, try another
+		}
+		require.NoError(t, ln.Close())
+		return data, data + 1
+	}
+	require.Fail(t, "no consecutive free port pair found")
+	return 0, 0
+}
+
 func startSwtpmTCP(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+
+	// Ports per invocation rather than fixed ones: these tests run back to back,
+	// and a swtpm killed at cleanup does not release its port instantly, so the
+	// next test could find it still bound and fail to reach its TPM.  The pair
+	// has to be consecutive — the swtpm TCTI takes only the data port and
+	// assumes control is the one after it — so probe until both are free.
+	data, ctrl := freePortPair(t)
+	dataPort, ctrlPort := strconv.Itoa(data), strconv.Itoa(ctrl)
+
 	cmd := exec.Command("swtpm", "socket", "--tpm2",
-		"--server", "type=tcp,port="+swtpmTCPDataPort,
-		"--ctrl", "type=tcp,port="+swtpmTCPCtrlPort,
+		"--server", "type=tcp,port="+dataPort,
+		"--ctrl", "type=tcp,port="+ctrlPort,
 		"--tpmstate", "dir="+dir,
 		"--flags", "not-need-init,startup-clear")
 	require.NoError(t, cmd.Start())
@@ -51,14 +73,14 @@ func startSwtpmTCP(t *testing.T) string {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+swtpmTCPDataPort, 200*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+dataPort, 200*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			break
 		}
 		require.False(t, time.Now().After(deadline), "swtpm TCP port did not open")
 	}
-	return "swtpm:host=127.0.0.1,port=" + swtpmTCPDataPort
+	return "swtpm:host=127.0.0.1,port=" + dataPort
 }
 
 func tpm2Run(t *testing.T, tcti string, args ...string) (string, error) {

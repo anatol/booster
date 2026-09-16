@@ -204,7 +204,7 @@ func TestCrypttabHeader(t *testing.T) {
 // TestCrypttabTPM2 verifies that a crypttab entry with tpm2-device=auto causes
 // the init to attempt TPM2 token unlock.  Uses the swtpm software emulator.
 func TestCrypttabTPM2(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 

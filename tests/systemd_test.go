@@ -55,7 +55,7 @@ func TestSystemdFido2(t *testing.T) {
 }
 
 func TestSystemdTPM2(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -84,7 +84,7 @@ func TestSystemdTPM2(t *testing.T) {
 // tpm2-signature=. See generators/systemd_tpm2_signed.sh for why the enter-initrd
 // phase value still matches without a stub measuring the UKI sections into PCR 11.
 func TestSystemdTPM2SignedPolicy(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -110,7 +110,7 @@ func TestSystemdTPM2SignedPolicy(t *testing.T) {
 }
 
 func TestSystemdTPM2WithPin(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -134,7 +134,7 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 // PolicyPCR with an empty selection even when len(pcrs)==0, which mutated the
 // digest and made the unseal fail regardless of PIN correctness.
 func TestSystemdTPM2NoPcrPin(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -153,7 +153,7 @@ func TestSystemdTPM2NoPcrPin(t *testing.T) {
 }
 
 func TestSystemdTPM2PinSkip(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -175,7 +175,7 @@ func TestSystemdTPM2PinSkip(t *testing.T) {
 }
 
 func TestSystemdTPM2PinRetry(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -197,7 +197,7 @@ func TestSystemdTPM2PinRetry(t *testing.T) {
 }
 
 func TestSystemdTPM2PinExhausted(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -227,7 +227,7 @@ func TestSystemdTPM2PinExhausted(t *testing.T) {
 // tpm2_srk in the token JSON. Booster must use that handle rather than deriving a
 // transient primary, otherwise tpm2.Load returns an integrity check failure.
 func TestSystemdTPM2SRK(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -253,7 +253,7 @@ func TestSystemdTPM2LegacyPin(t *testing.T) {
 		t.Skip("tpm2-tools not installed; skipping legacy-pin backward-compat test")
 	}
 
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 

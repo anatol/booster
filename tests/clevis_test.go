@@ -87,7 +87,7 @@ func TestLUKS2ClevisTangDHCP(t *testing.T) {
 }
 
 func TestLUKS1ClevisTpm2(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
@@ -103,7 +103,7 @@ func TestLUKS1ClevisTpm2(t *testing.T) {
 }
 
 func TestLUKS2ClevisTpm2(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 

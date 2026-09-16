@@ -211,7 +211,7 @@ func TestVirtualConsole(t *testing.T) {
 }
 
 func TestStripBinaries(t *testing.T) {
-	swtpm, params, err := startSwtpm()
+	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
 
