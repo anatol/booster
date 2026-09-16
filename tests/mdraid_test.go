@@ -7,6 +7,8 @@ import (
 )
 
 func TestMdRaid1Path(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
@@ -20,6 +22,8 @@ func TestMdRaid1Path(t *testing.T) {
 }
 
 func TestMdRaid1UUID(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid1.img.array",
@@ -33,6 +37,8 @@ func TestMdRaid1UUID(t *testing.T) {
 }
 
 func TestMdRaid5Path(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",
@@ -46,6 +52,8 @@ func TestMdRaid5Path(t *testing.T) {
 }
 
 func TestMdRaid5UUID(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		enableMdraid: true,
 		mdraidConf:   "assets/mdraid_raid5.img.array",

@@ -11,6 +11,8 @@ import (
 )
 
 func TestSystemdFido2(t *testing.T) {
+	t.Parallel()
+
 	// PIN is read from the environment to avoid hardcoding it in source.
 	// Set BOOSTER_TEST_FIDO2_PIN to the PIN on your FIDO2 device before running.
 	// Tip: use read -s to avoid shell history: read -s BOOSTER_TEST_FIDO2_PIN
@@ -55,6 +57,8 @@ func TestSystemdFido2(t *testing.T) {
 }
 
 func TestSystemdTPM2(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -84,6 +88,8 @@ func TestSystemdTPM2(t *testing.T) {
 // tpm2-signature=. See generators/systemd_tpm2_signed.sh for why the enter-initrd
 // phase value still matches without a stub measuring the UKI sections into PCR 11.
 func TestSystemdTPM2SignedPolicy(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -110,6 +116,8 @@ func TestSystemdTPM2SignedPolicy(t *testing.T) {
 }
 
 func TestSystemdTPM2WithPin(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -134,6 +142,8 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 // PolicyPCR with an empty selection even when len(pcrs)==0, which mutated the
 // digest and made the unseal fail regardless of PIN correctness.
 func TestSystemdTPM2NoPcrPin(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -153,6 +163,8 @@ func TestSystemdTPM2NoPcrPin(t *testing.T) {
 }
 
 func TestSystemdTPM2PinSkip(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -175,6 +187,8 @@ func TestSystemdTPM2PinSkip(t *testing.T) {
 }
 
 func TestSystemdTPM2PinRetry(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -197,6 +211,8 @@ func TestSystemdTPM2PinRetry(t *testing.T) {
 }
 
 func TestSystemdTPM2PinExhausted(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -227,6 +243,8 @@ func TestSystemdTPM2PinExhausted(t *testing.T) {
 // tpm2_srk in the token JSON. Booster must use that handle rather than deriving a
 // transient primary, otherwise tpm2.Load returns an integrity check failure.
 func TestSystemdTPM2SRK(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -249,6 +267,8 @@ func TestSystemdTPM2SRK(t *testing.T) {
 // The image is generated with raw tpm2-tools to be independent of the installed
 // systemd version.  The test is skipped when tpm2-tools are not available.
 func TestSystemdTPM2LegacyPin(t *testing.T) {
+	t.Parallel()
+
 	if _, err := exec.LookPath("tpm2_create"); err != nil {
 		t.Skip("tpm2-tools not installed; skipping legacy-pin backward-compat test")
 	}
@@ -272,6 +292,8 @@ func TestSystemdTPM2LegacyPin(t *testing.T) {
 }
 
 func TestSystemdRecovery(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/systemd-recovery.img",
 		kernelArgs: []string{"rd.luks.uuid=62020168-58b9-4095-a3d0-176403353d20", "root=UUID=b0cfeb48-c1e2-459d-a327-4d611804ac24"},

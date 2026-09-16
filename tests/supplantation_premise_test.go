@@ -165,6 +165,8 @@ const (
 // This is why sealing to an uninitialized PCR15 + extending it before pivot
 // closes the re-unseal oracle within a boot.
 func TestSupplantationPCR15NonResettable(t *testing.T) {
+	t.Parallel()
+
 	requireTool(t, "swtpm")
 	requireTool(t, "tpm2_pcrread")
 	requireTool(t, "tpm2_pcrextend")
@@ -197,6 +199,8 @@ func TestSupplantationPCR15NonResettable(t *testing.T) {
 // a policy that can be satisfied via the un-extended bank is bypassable. Booster
 // must extend PCR15 across every active bank, not just the token's recorded one.
 func TestSupplantationPCRBankIsolation(t *testing.T) {
+	t.Parallel()
+
 	requireTool(t, "swtpm")
 	requireTool(t, "tpm2_pcrread")
 	requireTool(t, "tpm2_pcrextend")
@@ -234,6 +238,8 @@ func TestSupplantationPCRBankIsolation(t *testing.T) {
 // unconditionally, B would fail too, so a green test genuinely shows that PCR11
 // — not PCR15 — is what catches the supplantation.
 func TestSupplantationPCR15WithoutPCR11Leaks(t *testing.T) {
+	t.Parallel()
+
 	requireTool(t, "swtpm")
 	for _, tool := range []string{
 		"tpm2_pcrextend", "tpm2_createprimary", "tpm2_createpolicy", "tpm2_create",
@@ -319,6 +325,8 @@ func TestSupplantationPCR15WithoutPCR11Leaks(t *testing.T) {
 // not exist yet — but the cryptographic claim (PCR11 blocks, PCR7+15 do not) is
 // the same one booster's enrollment guidance and Phase-1b warning rely on.
 func TestSupplantationCrossBootDenied(t *testing.T) {
+	t.Parallel()
+
 	requireTool(t, "swtpm")
 	for _, tool := range []string{
 		"tpm2_pcrextend", "tpm2_createprimary", "tpm2_evictcontrol", "tpm2_createpolicy",

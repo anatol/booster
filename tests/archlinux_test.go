@@ -11,6 +11,8 @@ import (
 )
 
 func TestArchLinuxExt4(t *testing.T) {
+	t.Parallel()
+
 	// boot Arch userspace (with systemd) against all installed linux packages
 	for pkg, ver := range kernelVersions {
 		t.Run(pkg, func(t *testing.T) {
@@ -41,6 +43,8 @@ func TestArchLinuxExt4(t *testing.T) {
 
 // more complex setup with LUKS and btrfs subvolumes
 func TestArchLinuxBtrfSubvolumes(t *testing.T) {
+	t.Parallel()
+
 	// boot Arch userspace (with systemd) against all installed linux packages
 	for pkg, ver := range kernelVersions {
 		t.Run(pkg, func(t *testing.T) {
@@ -123,6 +127,8 @@ func testArchLinux(t *testing.T, opts Opts, prompt, password string) {
 }
 
 func TestArchLinuxHibernate(t *testing.T) {
+	t.Parallel()
+
 	// boot Arch userspace (with systemd) against all installed linux packages
 	for pkg, ver := range kernelVersions {
 		t.Run(pkg, func(t *testing.T) {

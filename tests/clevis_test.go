@@ -10,6 +10,8 @@ import (
 )
 
 func TestLUKS2ClevisYubikey(t *testing.T) {
+	t.Parallel()
+
 	yubikeys, err := detectYubikeys()
 	require.NoError(t, err)
 	if len(yubikeys) == 0 {
@@ -34,6 +36,8 @@ func TestLUKS2ClevisYubikey(t *testing.T) {
 }
 
 func TestLUKS1ClevisTang(t *testing.T) {
+	t.Parallel()
+
 	tangd, params, err := startTangd()
 	require.NoError(t, err)
 	defer tangd.Stop()
@@ -51,6 +55,8 @@ func TestLUKS1ClevisTang(t *testing.T) {
 }
 
 func TestLUKS2ClevisTang(t *testing.T) {
+	t.Parallel()
+
 	tangd, params, err := startTangd()
 	require.NoError(t, err)
 	defer tangd.Stop()
@@ -68,6 +74,8 @@ func TestLUKS2ClevisTang(t *testing.T) {
 }
 
 func TestLUKS2ClevisTangDHCP(t *testing.T) {
+	t.Parallel()
+
 	tangd, params, err := startTangd()
 	require.NoError(t, err)
 	defer tangd.Stop()
@@ -87,6 +95,8 @@ func TestLUKS2ClevisTangDHCP(t *testing.T) {
 }
 
 func TestLUKS1ClevisTpm2(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -103,6 +113,8 @@ func TestLUKS1ClevisTpm2(t *testing.T) {
 }
 
 func TestLUKS2ClevisTpm2(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()
@@ -119,6 +131,8 @@ func TestLUKS2ClevisTpm2(t *testing.T) {
 }
 
 func TestInactiveNetwork(t *testing.T) {
+	t.Parallel()
+
 	tangd, params, err := startTangd()
 	require.NoError(t, err)
 	defer tangd.Stop()
@@ -139,6 +153,8 @@ func TestInactiveNetwork(t *testing.T) {
 }
 
 func TestRemoteUnlock(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:          "assets/luks2.clevis.remote.img",
 		enableNetwork: true,

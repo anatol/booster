@@ -290,6 +290,11 @@ Build test assets and list required tooling:
 go test ./tests -bootstrap -timeout=0
 ```
 
+New tests are asked to call `t.Parallel()` where they can. A plain run is still
+one test at a time, but `-parallel N` boots several VMs at once, and a test that
+cannot join in quietly costs wall clock rather than failing, so a note saying
+why is more useful than the missing call.
+
 How many VMs actually run at once is capped by what the host can serve, derived
 from its memory and cores. `-vm.smp`, `-vm.mem` and `-vm.max` override the guest
 size and that cap.

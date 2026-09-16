@@ -23,6 +23,8 @@ import (
 // which uses sudo for losetup/cryptsetup/mkfs); no qemu-claude bootstrap needed.
 // Its token binds PCR 10+13+15 — including PCR15, so the latch engages.
 func TestSupplantationPCR15Latch(t *testing.T) {
+	t.Parallel()
+
 	swtpm, params, err := startSwtpm(t)
 	require.NoError(t, err)
 	defer swtpm.Kill()

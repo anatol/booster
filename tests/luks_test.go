@@ -11,6 +11,8 @@ import (
 )
 
 func TestLUKS1WithName(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks1.img",
 		kernelArgs: []string{"rd.luks.name=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415=cryptroot", "root=/dev/mapper/cryptroot", "rd.luks.options=discard"},
@@ -24,6 +26,8 @@ func TestLUKS1WithName(t *testing.T) {
 }
 
 func TestLUKS1WithUUID(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks1.img",
 		kernelArgs: []string{"rd.luks.uuid=f0c89fd5-7e1e-4ecc-b310-8cd650bd5415", "root=UUID=ec09a1ea-d43c-4262-b701-bf2577a9ab27"},
@@ -37,6 +41,8 @@ func TestLUKS1WithUUID(t *testing.T) {
 }
 
 func TestLUKS2WithName(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot", "root=/dev/mapper/cryptroot"},
@@ -50,6 +56,8 @@ func TestLUKS2WithName(t *testing.T) {
 }
 
 func TestLUKS2WithUUID(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502", "root=UUID=7bbf9363-eb42-4476-8c1c-9f1f4d091385"},
@@ -63,6 +71,8 @@ func TestLUKS2WithUUID(t *testing.T) {
 }
 
 func TestLUKS2WithQuotesOverUUID(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.img",
 		kernelArgs: []string{"rd.luks.uuid=\"639b8fdd-36ba-443e-be3e-e5b335935502\"", "root=UUID=\"7bbf9363-eb42-4476-8c1c-9f1f4d091385\""},
@@ -77,6 +87,8 @@ func TestLUKS2WithQuotesOverUUID(t *testing.T) {
 
 // test that loadable crypto modules work https://github.com/anatol/booster/issues/188
 func TestLoadableCryptoModule(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		disk:       "assets/luks2.external.module.img",
 		kernelArgs: []string{"rd.luks.name=ad575500-a9e3-4692-b1b2-eed95a6e8ce2=cryptroot", "root=/dev/mapper/cryptroot"},
@@ -111,6 +123,8 @@ const (
 // spurious second prompt appears and goes unanswered, root never mounts and
 // the test times out — giving a reliable regression signal.
 func TestPassphraseCache(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.shared_pass.img"))
 
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
@@ -138,6 +152,8 @@ func TestPassphraseCache(t *testing.T) {
 // cache fails to supply the second device's key the root never mounts and the
 // test times out.
 func TestLuksBtrfsRaid1(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1.img"))
 
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
@@ -166,6 +182,8 @@ func TestLuksBtrfsRaid1(t *testing.T) {
 // assembles and the boot hangs until the test times out.  Mounting by filesystem
 // UUID hides the bug, because then every member matches root=.
 func TestLuksBtrfsRaid1MapperRoot(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1_distinct.img"))
 
 	vm, err := buildVmInstance(t, Opts{
@@ -220,6 +238,8 @@ const (
 // TestLUKS2DetachedHeaderCmdline verifies the detached-header unlock path
 // driven by the rd.luks.header= kernel parameter.
 func TestLUKS2DetachedHeaderCmdline(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 
 	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
@@ -246,6 +266,8 @@ func TestLUKS2DetachedHeaderCmdline(t *testing.T) {
 // device (here by path) for a detached-header volume — the cmdline analogue of
 // the crypttab encrypted-device field. Reuses the single detached-header asset.
 func TestLUKS2DetachedHeaderCmdlineDataPin(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 
 	headerPath, err := filepath.Abs("assets/luks2.detached_header.hdr")
@@ -277,6 +299,8 @@ func TestLUKS2DetachedHeaderCmdlineDataPin(t *testing.T) {
 // opens it with the wrong header, so the root never unlocks. Reaching
 // "Hello, booster!" proves the pinning routes each device to its own header.
 func TestLUKS2DetachedHeaderMultiDeviceCmdline(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.detached_header2.img")) // decoy (no fs)
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))  // root (has /sbin/init)
 
@@ -327,6 +351,8 @@ func TestLUKS2DetachedHeaderMultiDeviceCmdline(t *testing.T) {
 // via the rd.luks.header=<UUID>=/dev/vda kernel parameter.
 // This exercises the /dev/ prefix path in acquireHeader (waitForDeviceRef, no mount).
 func TestLUKS2DetachedHeaderCmdlineRawDevice(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 
 	vm, err := buildVmInstance(t, Opts{
@@ -351,6 +377,8 @@ func TestLUKS2DetachedHeaderCmdlineRawDevice(t *testing.T) {
 // via the rd.luks.header=<UUID>=/root.hdr:UUID=<devuuid> kernel parameter.
 // This exercises the headerDeviceRef != nil path in acquireHeader (mountKeyDevice).
 func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
+	t.Parallel()
+
 	// checkAsset for the main image first — it also creates the .hdr file.
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 	require.NoError(t, checkAsset("assets/luks2.detached_header.hdrdev.img"))
@@ -375,6 +403,8 @@ func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 // A per-device rd.luks.options= replaces the entry's options, so key-slot=3 --
 // an empty slot named by crypttab -- must not reach the device.
 func TestLUKS2PerDeviceOptionsReplaceCrypttab(t *testing.T) {
+	t.Parallel()
+
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
 	require.NoError(t, os.WriteFile(crypttabPath, []byte(
 		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach,key-slot=3\n",
@@ -404,6 +434,8 @@ func TestLUKS2PerDeviceOptionsReplaceCrypttab(t *testing.T) {
 // Unlocks a volume whose detached header lives on a separate block device via
 // systemd's spelling, rd.luks.options=<UUID>=header=<path>:<deviceref>.
 func TestLUKS2PerDeviceLuksOptionsHeader(t *testing.T) {
+	t.Parallel()
+
 	// checkAsset for the main image first — it also creates the .hdr file.
 	require.NoError(t, checkAsset("assets/luks2.detached_header.img"))
 	require.NoError(t, checkAsset("assets/luks2.detached_header.hdrdev.img"))
@@ -426,6 +458,8 @@ func TestLUKS2PerDeviceLuksOptionsHeader(t *testing.T) {
 }
 
 func TestLUKS2CmdlineOptionsSurviveACrypttabParseError(t *testing.T) {
+	t.Parallel()
+
 	// The detached header reaches the device only through rd.luks.options=. If a
 	// crypttab that fails to parse also discarded the command line's options,
 	// there would be no header and the boot would never reach userspace -- so a
