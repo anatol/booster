@@ -290,6 +290,10 @@ Build test assets and list required tooling:
 go test ./tests -bootstrap -timeout=0
 ```
 
+How many VMs actually run at once is capped by what the host can serve, derived
+from its memory and cores. `-vm.smp`, `-vm.mem` and `-vm.max` override the guest
+size and that cap.
+
 ## Credits
 
 Work on this project started during Twitter's hack week.
