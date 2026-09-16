@@ -371,20 +371,26 @@ func generateBoosterConfig(output string, opts Opts) error {
 }
 
 type Opts struct {
-	params               []string
-	compression          string
-	modules              string // extra modules to include into image
-	modulesForceLoad     string
-	enableNetwork        bool
-	useDhcp              bool
-	activeNetIfaces      string
-	kernelVersion        string // kernel version
-	kernelPath           string
-	modulesDirectory     string
-	kernelArgs           []string
-	disk                 string
-	disks                []vmtest.QemuDisk
-	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	params           []string
+	compression      string
+	modules          string // extra modules to include into image
+	modulesForceLoad string
+	enableNetwork    bool
+	useDhcp          bool
+	activeNetIfaces  string
+	kernelVersion    string // kernel version
+	kernelPath       string
+	modulesDirectory string
+	kernelArgs       []string
+	disk             string
+	disks            []vmtest.QemuDisk
+	containsESP      bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	// persistent keeps guest writes in the backing image instead of discarding
+	// them into a temporary overlay.  Only for a test whose writes must outlive
+	// its VM: TestArchLinuxHibernate resumes a second VM from what the first one
+	// wrote.  Left false, the image is opened read-only, so several tests can
+	// boot the same asset at once and none of them can corrupt it.
+	persistent           bool
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
 	mountTimeout         int           // in seconds
@@ -493,6 +499,9 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	// to enable network dump
 	// params = append(params, "-object", "filter-dump,id=f1,netdev=n1,file=network.dat")
 
+	if !opts.persistent {
+		params = append(params, "-snapshot")
+	}
 	params = append(params, opts.params...)
 
 	// provide host's directory as a guest block device

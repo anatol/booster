@@ -12,7 +12,7 @@
 trap 'quit' EXIT
 
 LUKS_PASSWORD=66789
-LUKS_DEV_NAME=booster_auto_root_$$
+LUKS_DEV_NAME=booster_auto_root_$$   # unique per run: a fixed name serialises concurrent generators
 
 quit() {
   set +o errexit

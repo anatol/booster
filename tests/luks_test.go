@@ -288,6 +288,11 @@ func TestLUKS2DetachedHeaderMultiDeviceCmdline(t *testing.T) {
 	require.NoError(t, err)
 
 	vm, err := buildVmInstance(t, Opts{
+		// Both images are also opened by the single-device detached-header
+		// tests, so nothing here may write to them: qemu takes an exclusive
+		// lock on a writable image and whichever VM starts second dies.  These
+		// drives are declared in params rather than through disk/disks, so they
+		// ride on the same -snapshot as the rest of the suite.
 		// Attach both disks as virtio-blk so their names are deterministic by
 		// cmdline order (/dev/vda, /dev/vdb). virtio-scsi would name them sda/sdb
 		// by async scan order, which can swap and break the path pins.
