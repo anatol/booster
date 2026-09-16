@@ -12,6 +12,8 @@ import (
 func TestLUKS2ClevisYubikey(t *testing.T) {
 	t.Parallel()
 
+	claimYubikey(t)
+
 	yubikeys, err := detectYubikeys()
 	require.NoError(t, err)
 	if len(yubikeys) == 0 {

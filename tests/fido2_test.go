@@ -30,6 +30,8 @@ func TestCrypttabFido2(t *testing.T) {
 		t.Skip("BOOSTER_TEST_FIDO2_PIN not set")
 	}
 
+	claimYubikey(t)
+
 	yubikeys, err := detectYubikeys()
 	require.NoError(t, err)
 	if len(yubikeys) == 0 {

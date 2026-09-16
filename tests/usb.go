@@ -5,7 +5,22 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
+	"testing"
 )
+
+// The host has one security key, and a test that wants it hands it to qemu for
+// the length of a boot, so while that VM runs the key is gone from the host and
+// from every other guest.  Enrolling against it from a sibling test then fails
+// with "No FIDO devices found".  Tests that claim it take this lock: they still
+// run alongside the rest of the suite, just never alongside each other.
+var yubikeyMu sync.Mutex
+
+func claimYubikey(t *testing.T) {
+	t.Helper()
+	yubikeyMu.Lock()
+	t.Cleanup(yubikeyMu.Unlock)
+}
 
 type usbdev struct {
 	bus, device string
