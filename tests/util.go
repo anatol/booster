@@ -309,6 +309,20 @@ func waitForFile(filename string, timeout time.Duration) error {
 	}
 }
 
+// trySSHCommand is runSSHCommand without the assertions, for callers that poll:
+// require.Eventually runs its condition in a goroutine, so a require failing in
+// there fails the test outright rather than letting the next attempt happen.
+func trySSHCommand(conn *ssh.Client, command string) (string, error) {
+	sess, err := conn.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+
+	out, err := sess.CombinedOutput(command)
+	return string(out), err
+}
+
 func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	sessAnalyze, err := conn.NewSession()
 	require.NoError(t, err)

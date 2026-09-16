@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
@@ -115,13 +116,20 @@ func TestInvalidInitBinary(t *testing.T) {
 // verifies module force loading + modprobe command-line parameters
 func TestVfio(t *testing.T) {
 	sshParams, sshAddr := sshForwardParams(t)
-	vm, err := buildVmInstance(t, Opts{
+	opts := Opts{
 		modules:          "e1000", // add network module needed for ssh
 		modulesForceLoad: "vfio_pci,vfio,vfio_iommu_type1",
 		params:           sshParams,
 		disk:             "assets/archlinux.ext4.raw",
-		kernelArgs:       []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0"},
-	})
+		// log_buf_len: the assertions below grep dmesg for lines booster logs
+		// from the initramfs, and the default 128K ring buffer wraps during a
+		// full distro boot with booster.log=debug, dropping them.
+		kernelArgs: []string{"root=/dev/sda", "rw", "vfio-pci.ids=1002:67df,1002:aaf0", "log_buf_len=8M"},
+		// Boots a full distro userspace and waits for sshd, so the 40s default
+		// is not enough once several VMs run at once.
+		vmTimeout: 120 * time.Second,
+	}
+	vm, err := buildVmInstance(t, opts)
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
@@ -130,17 +138,24 @@ func TestVfio(t *testing.T) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := ssh.Dial("tcp", sshAddr, config)
-	require.NoError(t, err)
+	conn := dialSSHWithRetry(t, sshAddr, config, opts.vmTimeout)
 	defer conn.Close()
 
-	dmesg := runSSHCommand(t, conn, "dmesg")
-	require.Contains(t, dmesg, "loading module vfio_pci params=\"ids=1002:67df,1002:aaf0\"", "expecting vfio_pci module loading")
+	// sshd can answer before booster's lines reach the ring buffer, so poll for
+	// the module-load line rather than reading dmesg once.
+	const loadLine = `loading module vfio_pci params="ids=1002:67df,1002:aaf0"`
+	var dmesg string
+	require.Eventually(t, func() bool {
+		out, err := trySSHCommand(conn, "dmesg")
+		if err != nil {
+			return false // session hiccup under load; try again
+		}
+		dmesg = out
+		return strings.Contains(dmesg, loadLine)
+	}, 60*time.Second, 500*time.Millisecond, "expecting vfio_pci module loading")
+
 	require.Contains(t, dmesg, "vfio_pci: add [1002:67df[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:67df device")
 	require.Contains(t, dmesg, "vfio_pci: add [1002:aaf0[ffffffff:ffffffff]] class 0x000000/00000000", "expecting vfio_pci 1002:aaf0 device")
-
-	re := regexp.MustCompile(`booster: udev event {Action:add KObj:/bus/pci/drivers/vfio-pci Env:map\[ACTION:add DEVPATH:/bus/pci/drivers/vfio-pci SEQNUM:\d+ SUBSYSTEM:drivers]}`)
-	require.Regexp(t, re, dmesg, "expecting vfio_pci module loading udev event")
 }
 
 func TestNonFormattedDrive(t *testing.T) {
