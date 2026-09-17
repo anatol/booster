@@ -147,6 +147,32 @@ func (blk *blkInfo) resolveGptRef(d *deviceRef) {
 	}
 }
 
+// String formats d the way crypttab and the command line write it.
+func (d *deviceRef) String() string {
+	switch d.format {
+	case refPath:
+		return d.data.(string)
+	case refGptType:
+		return "PARTTYPE=" + d.data.(UUID).toString()
+	case refGptUUID:
+		return "PARTUUID=" + d.data.(UUID).toString()
+	case refGptUUIDPartoff:
+		data := d.data.(gptPartoffData)
+		return fmt.Sprintf("PARTUUID=%s/PARTNROFF=%d", data.uuid.toString(), data.offset)
+	case refGptLabel:
+		return "PARTLABEL=" + d.data.(string)
+	case refFsUUID:
+		return "UUID=" + d.data.(UUID).toString()
+	case refFsLabel:
+		return "LABEL=" + d.data.(string)
+	case refHwPath:
+		return "HWPATH=" + d.data.(string)
+	case refWwID:
+		return "WWID=" + d.data.(string)
+	}
+	return fmt.Sprint(d.data)
+}
+
 func (d *deviceRef) dependsOnGpt() bool {
 	return d.format == refGptType ||
 		d.format == refGptUUID ||

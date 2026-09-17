@@ -15,6 +15,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,7 +95,17 @@ type luksMapping struct {
 	crypttabOptions *luksOptions
 	cmdlineOptions  *luksOptions // a per-device rd.luks.options=$UUID=
 
-	fromCrypttab bool // an entry's own record; loses fields 1 and 2 to a cmdline one
+	fromCrypttab  bool     // an entry's own record; loses the volume name and device (fields 1 and 2) to a cmdline one
+	crypttabNames []string // volume name (field 1) of every entry paired into this record, for messages
+	keyfileFrom   string   // the entry that supplied keyfile; empty means the record's own source
+
+	// Settings that did not take effect, reported on arrival. Kept apart
+	// because a device paired on arrival is composed again from scratch.
+	pairingConflicts []luksConflict
+	optionConflicts  []luksConflict
+
+	// a message per source another replaced whole, logged when crypttab is read
+	setAside []string
 
 	// deprecatedHeader carries rd.luks.header=, booster's own spelling for a
 	// detached header. systemd has no such parameter -- it is only ever the
@@ -108,6 +119,83 @@ func (o *luksOptions) triesOrUnlimited() int {
 		return 0
 	}
 	return o.tries
+}
+
+// luksConflict is one field two sources set differently. It records the
+// outcome only, so changing which source wins does not change this type. An
+// empty kept means the losing value was displaced with no replacement.
+type luksConflict struct {
+	field       string // written as a user writes it, so it can be searched for
+	kept        string
+	keptFrom    string
+	dropped     string
+	droppedFrom string
+	note        string // what to do about it, where that is not obvious
+}
+
+func (c luksConflict) String() string {
+	var s string
+	if c.kept != "" {
+		s = fmt.Sprintf("%s is %q from %s; %q from %s is not applied",
+			c.field, c.kept, c.keptFrom, c.dropped, c.droppedFrom)
+	} else {
+		s = fmt.Sprintf("%s %q from %s is not applied", c.field, c.dropped, c.droppedFrom)
+	}
+	if c.note != "" {
+		s += ". " + c.note
+	}
+	return s
+}
+
+func (m *luksMapping) conflicts() []luksConflict {
+	return append(slices.Clone(m.pairingConflicts), m.optionConflicts...)
+}
+
+func conflictMessages(conflicts []luksConflict) []string {
+	var msgs []string
+	for _, c := range conflicts {
+		msgs = append(msgs, c.String())
+	}
+	return msgs
+}
+
+// luksOptionFields is every option one source can take from another, named
+// as in crypttab(5). Keep it in step with overlay:
+// TestConflictingFieldsCoversEveryOverlaidField fails otherwise. dm-crypt flags
+// and nofail are absent because they only accumulate.
+var luksOptionFields = []struct {
+	name string
+	set  func(*luksOptions) bool
+	val  func(*luksOptions) string
+}{
+	{"header", func(o *luksOptions) bool { return o.header != "" }, func(o *luksOptions) string { return withDeviceRef(o.header, o.headerDeviceRef) }},
+	{"token-timeout", func(o *luksOptions) bool { return o.tokenTimeout != luksOptionUnset }, func(o *luksOptions) string { return o.tokenTimeout.String() }},
+	{"keyfile-timeout", func(o *luksOptions) bool { return o.keyfileTimeout != luksOptionUnset }, func(o *luksOptions) string { return o.keyfileTimeout.String() }},
+	{"key-slot", func(o *luksOptions) bool { return o.keySlot != luksOptionUnset }, func(o *luksOptions) string { return strconv.Itoa(o.keySlot) }},
+	{"tries", func(o *luksOptions) bool { return o.tries != luksOptionUnset }, func(o *luksOptions) string { return strconv.Itoa(o.tries) }},
+	{"keyfile-offset", func(o *luksOptions) bool { return o.keyfileOffset != 0 }, func(o *luksOptions) string { return strconv.FormatInt(o.keyfileOffset, 10) }},
+	{"keyfile-size", func(o *luksOptions) bool { return o.keyfileSize != 0 }, func(o *luksOptions) string { return strconv.FormatInt(o.keyfileSize, 10) }},
+	{"tpm2-measure-pcr", func(o *luksOptions) bool { return o.measurePCR != measurePCRAuto }, func(o *luksOptions) string { return o.measurePCR.String() }},
+	{"tpm2-signature", func(o *luksOptions) bool { return o.tpm2Signature != "" }, func(o *luksOptions) string { return o.tpm2Signature }},
+}
+
+func withDeviceRef(path string, ref *deviceRef) string {
+	if ref == nil {
+		return path
+	}
+	return path + ":" + ref.String()
+}
+
+// conflictingFields leaves the sources blank for the caller to fill in.
+func conflictingFields(lower, higher *luksOptions) []luksConflict {
+	var out []luksConflict
+	for _, f := range luksOptionFields {
+		if !f.set(lower) || !f.set(higher) || f.val(lower) == f.val(higher) {
+			continue
+		}
+		out = append(out, luksConflict{field: f.name, kept: f.val(higher), dropped: f.val(lower)})
+	}
+	return out
 }
 
 // overlay copies onto dst every option src has set, leaving the rest of dst
@@ -1983,14 +2071,10 @@ func loadRequiredCryptoModules(encryption string) error {
 // to surface a diagnostic for the boot pattern that silently hangs when a
 // LUKS unlock spec is missing.
 func unreachableMapperName() (string, bool) {
-	if cmdRoot == nil || cmdRoot.format != refPath {
+	name, ok := rootMapperName()
+	if !ok {
 		return "", false
 	}
-	p, ok := cmdRoot.data.(string)
-	if !ok || !strings.HasPrefix(p, "/dev/mapper/") {
-		return "", false
-	}
-	name := strings.TrimPrefix(p, "/dev/mapper/")
 	for _, m := range luksMappings {
 		if m.name == name {
 			return "", false
@@ -1999,8 +2083,22 @@ func unreachableMapperName() (string, bool) {
 	return name, true
 }
 
+// rootMapperName returns the volume name root=/dev/mapper/<name> waits for.
+func rootMapperName() (string, bool) {
+	if cmdRoot == nil || cmdRoot.format != refPath {
+		return "", false
+	}
+	p, ok := cmdRoot.data.(string)
+	if !ok || !strings.HasPrefix(p, "/dev/mapper/") {
+		return "", false
+	}
+	return strings.TrimPrefix(p, "/dev/mapper/"), true
+}
+
 func matchLuksMapping(blk *blkInfo) *luksMapping {
 	if m := combinedLuksMapping(blk); m != nil {
+		reportSetAside(m.setAside)
+		reportLuksConflicts(blk.path, m.conflicts())
 		// Mirror the synthesis-fallback remap so root=UUID=<luks-uuid>
 		// keeps working after a crypttab/rd.luks.* entry adds the mapping.
 		if blk.matchesRef(cmdRoot) {
@@ -2050,17 +2148,18 @@ func combinedLuksMapping(blk *blkInfo) *luksMapping {
 	}
 
 	combined := *primary
+	// appending to the copy's slice header would write into the record's own
+	// backing array, which another device's goroutine is reading
+	combined.pairingConflicts = slices.Clone(combined.pairingConflicts)
 	for _, m := range matched {
 		if m == primary || !m.fromCrypttab {
 			continue
 		}
 		info("LUKS device %s is described twice; taking the key file and options of crypttab entry %q into %q", blk.path, m.name, combined.name)
-		pairCrypttabEntry(&combined, m)
+		combined.pairingConflicts = append(combined.pairingConflicts, pairCrypttabEntry(&combined, m)...)
 	}
 
-	opts, dropped := composedOptions(&combined)
-	combined.luksOptions = opts
-	reportDroppedOptions(combined.name, dropped)
+	combined.luksOptions, combined.optionConflicts, combined.setAside = composedOptions(&combined)
 	return &combined
 }
 

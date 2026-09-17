@@ -173,9 +173,13 @@ func withLuksGlobals(t *testing.T) {
 	t.Helper()
 	origRoot := cmdRoot
 	origMappings := luksMappings
+	reportedConflicts.Clear()
+	reportedSetAside.Clear()
 	t.Cleanup(func() {
 		cmdRoot = origRoot
 		luksMappings = origMappings
+		reportedConflicts.Clear()
+		reportedSetAside.Clear()
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -267,10 +268,10 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 	return nil
 }
 
-// resolveLuksOptions attaches every source to the device it describes, then
-// composes them. An entry whose device reference matches a command-line one is
-// paired here; the rest are paired by the device itself, on arrival.
-func resolveLuksOptions(ctMappings []*luksMapping) {
+// resolveLuksOptions pairs each crypttab entry with the command-line record
+// using the same device reference, then composes every record. It returns the
+// messages it logged.
+func resolveLuksOptions(ctMappings []*luksMapping) []string {
 	if globalLuksKeyfile != "" {
 		// the command line's own default, so it fills before crypttab does
 		for _, m := range luksMappings {
@@ -292,14 +293,16 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 			luksMappings = append(luksMappings, cm)
 			continue
 		}
-		pairCrypttabEntry(existing, cm)
+		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm)...)
 	}
 
+	var logged []string
 	for _, m := range luksMappings {
-		opts, dropped := composedOptions(m)
-		m.luksOptions = opts
-		reportDroppedOptions(m.name, dropped)
+		m.luksOptions, m.optionConflicts, m.setAside = composedOptions(m)
+		// logged now, not on arrival, so a device that never shows up still reports it
+		logged = append(logged, reportSetAside(m.setAside)...)
 	}
+	return logged
 }
 
 // pairCrypttabEntry hands m the entry's fourth field and key file. Booster's
@@ -310,23 +313,49 @@ func resolveLuksOptions(ctMappings []*luksMapping) {
 // A device answering to two entries is paired twice, so the field is overlaid
 // rather than assigned: the later entry wins what it names and the earlier one
 // keeps the rest.
-func pairCrypttabEntry(m, entry *luksMapping) {
+func pairCrypttabEntry(m, entry *luksMapping) []luksConflict {
 	opts := *entry.crypttabOptions
+	from := sourceLabel(entry)
+	var conflicts []luksConflict
+
+	if entry.name != m.name {
+		conflicts = append(conflicts, luksConflict{
+			field: "volume name", kept: m.name, keptFrom: sourceLabel(m),
+			dropped: entry.name, droppedFrom: from,
+		})
+	}
 
 	switch {
 	case m.keyfile == "" && entry.keyfile != "":
 		m.keyfile = entry.keyfile
 		m.keyfileDeviceRef = entry.keyfileDeviceRef
+		m.keyfileFrom = from
 	case entry.keyfile != "":
-		// rd.luks.key= won field 3, so the entry's keyfile-* bounds describe
+		kept := keyfileLabel(m)
+		if entry.keyfile != m.keyfile {
+			conflicts = append(conflicts, luksConflict{
+				field: "key file", kept: withDeviceRef(m.keyfile, m.keyfileDeviceRef), keptFrom: kept,
+				dropped: withDeviceRef(entry.keyfile, entry.keyfileDeviceRef), droppedFrom: keyfileLabel(entry),
+			})
+		}
+		// another source won field 3, so the entry's keyfile-* bounds describe
 		// a file booster is not going to read
+		conflicts = append(conflicts, keyfileBoundConflicts(&opts, from, kept)...)
 		opts.keyfileOffset, opts.keyfileSize = 0, 0
 		opts.keyfileTimeout = luksOptionUnset
 	}
 
+	earlier := crypttabLabel(m)
+	m.crypttabNames = append(slices.Clone(entryNames(m)), entry.name)
+
 	if m.crypttabOptions == nil {
 		m.crypttabOptions = &opts
-		return
+		return conflicts
+	}
+
+	for _, c := range conflictingFields(m.crypttabOptions, &opts) {
+		c.keptFrom, c.droppedFrom = from, earlier
+		conflicts = append(conflicts, c)
 	}
 
 	// The entry record is shared by every device goroutine that pairs with it,
@@ -336,6 +365,68 @@ func pairCrypttabEntry(m, entry *luksMapping) {
 	merged.appliedOptions = slices.Clone(merged.appliedOptions)
 	overlay(&merged, &opts)
 	m.crypttabOptions = &merged
+
+	return conflicts
+}
+
+func sourceLabel(m *luksMapping) string {
+	if !m.fromCrypttab {
+		return "the command line"
+	}
+	return crypttabLabel(m)
+}
+
+// entryNames lists the volume name (field 1) of every entry merged into m, m's
+// own first when m is an entry.
+func entryNames(m *luksMapping) []string {
+	if len(m.crypttabNames) == 0 && m.fromCrypttab {
+		return []string{m.name}
+	}
+	return m.crypttabNames
+}
+
+// crypttabLabel names the entries a record's crypttab half came from.
+func crypttabLabel(m *luksMapping) string {
+	names := entryNames(m)
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = strconv.Quote(n)
+	}
+	if len(quoted) == 1 {
+		return "crypttab entry " + quoted[0]
+	}
+	return "crypttab entries " + strings.Join(quoted, ", ")
+}
+
+func keyfileLabel(m *luksMapping) string {
+	switch {
+	case m.keyfileFrom != "":
+		return m.keyfileFrom
+	case m.fromCrypttab:
+		// entries merged into this record share its options, not its key file
+		return fmt.Sprintf("crypttab entry %q", m.name)
+	}
+	return sourceLabel(m)
+}
+
+func keyfileBoundConflicts(opts *luksOptions, from, replacedBy string) []luksConflict {
+	displaced := func(field string, v any) luksConflict {
+		return luksConflict{
+			field: field, dropped: fmt.Sprint(v), droppedFrom: from,
+			note: fmt.Sprintf("It bounds a key file %s replaced", replacedBy),
+		}
+	}
+	var out []luksConflict
+	if opts.keyfileOffset != 0 {
+		out = append(out, displaced("keyfile-offset", opts.keyfileOffset))
+	}
+	if opts.keyfileSize != 0 {
+		out = append(out, displaced("keyfile-size", opts.keyfileSize))
+	}
+	if opts.keyfileTimeout != luksOptionUnset {
+		out = append(out, displaced("keyfile-timeout", opts.keyfileTimeout))
+	}
+	return out
 }
 
 // composedOptions folds a device's sources into the options it is unlocked
@@ -344,36 +435,96 @@ func pairCrypttabEntry(m, entry *luksMapping) {
 //
 //	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
 //
-// Displaced crypttab options are returned rather than reported, because this
-// runs a second time for a device that turns out to have two records.
-func composedOptions(m *luksMapping) (opts luksOptions, dropped []string) {
+// It reports nothing: a device with two records is composed a second time.
+func composedOptions(m *luksMapping) (opts luksOptions, conflicts []luksConflict, setAside []string) {
 	merged := newLuksOptions()
+
+	// owner records which source set each field's current value
+	owner := make(map[string]string, len(luksOptionFields))
+	apply := func(src *luksOptions, label string) {
+		for _, c := range conflictingFields(&merged, src) {
+			c.keptFrom, c.droppedFrom = label, owner[c.field]
+			conflicts = append(conflicts, c)
+		}
+		overlay(&merged, src)
+		for _, f := range luksOptionFields {
+			if f.set(src) {
+				owner[f.name] = label
+			}
+		}
+	}
 
 	if ct := m.crypttabOptions; ct != nil {
 		if m.cmdlineOptions != nil {
 			// A per-device rd.luks.options= replaces the entry's option
 			// field, so the entry contributes none of it.
-			dropped = ct.appliedOptions
+			if len(ct.appliedOptions) > 0 {
+				setAside = append(setAside, fmt.Sprintf("crypttab: %s: options %q dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.",
+					strings.TrimPrefix(crypttabLabel(m), "crypttab "), joinOptions(ct.appliedOptions)))
+			}
 		} else {
-			overlay(&merged, ct)
+			apply(ct, crypttabLabel(m))
 		}
 	}
-	applyGlobalOptions(&merged)
+
+	global := globalLuksOptions
+	global.header, global.headerDeviceRef = "", nil
+	apply(&global, "rd.luks.options= carrying no UUID")
+
 	if h := m.deprecatedHeader; h != nil {
-		overlay(&merged, h)
+		apply(h, "rd.luks.header=")
 	}
 	if pd := m.cmdlineOptions; pd != nil {
-		overlay(&merged, pd)
+		apply(pd, "rd.luks.options=$UUID=")
 	}
 
-	return merged, dropped
+	return merged, conflicts, setAside
 }
 
-func reportDroppedOptions(name string, dropped []string) {
-	if len(dropped) == 0 {
-		return
+// reportedSetAside keeps a set-aside warning from repeating when a device
+// is composed again on arrival.
+var reportedSetAside sync.Map
+
+func reportSetAside(msgs []string) []string {
+	var logged []string
+	for _, msg := range msgs {
+		if _, seen := reportedSetAside.LoadOrStore(msg, true); seen {
+			continue
+		}
+		info("%s", msg)
+		logged = append(logged, msg)
 	}
-	warning("crypttab: entry %q: options %q dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.", name, joinOptions(dropped))
+	return logged
+}
+
+// reportedConflicts keeps a parked headerless device, dispatched again for every
+// header device that shows up (retryPendingDevices), from repeating itself.
+var reportedConflicts sync.Map
+
+// reportLuksConflicts logs once per device and returns the messages, since
+// warning() reaches only /dev/kmsg and the console.
+func reportLuksConflicts(device string, conflicts []luksConflict) []string {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	if _, seen := reportedConflicts.LoadOrStore(device, true); seen {
+		return nil
+	}
+	msgs := conflictMessages(conflicts)
+	for _, msg := range msgs {
+		info("LUKS device %s: %s", device, msg)
+	}
+	// a lost volume name is only a problem when root= waits for it
+	if root, ok := rootMapperName(); ok {
+		for _, c := range conflicts {
+			if c.field == "volume name" && c.dropped == root {
+				msg := fmt.Sprintf("root=/dev/mapper/%s will not appear: LUKS device %s is unlocked as %q", root, device, c.kept)
+				warning("%s", msg)
+				msgs = append(msgs, msg)
+			}
+		}
+	}
+	return msgs
 }
 
 // deviceRefEqual reports whether two deviceRefs refer to the same device.
