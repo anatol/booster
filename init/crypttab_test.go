@@ -852,3 +852,303 @@ func TestUUIDLessKeyfileIsADefault(t *testing.T) {
 		}
 	})
 }
+
+// conflictingFields walks the same fields overlay does. A field added to
+// luksOptions and to overlay but not to conflictingFields would be overwritten
+// silently, which is the failure the reporter exists to prevent, so the two
+// lists are pinned against the struct itself.
+func TestConflictingFieldsCoversEveryOverlaidField(t *testing.T) {
+	covered := []string{
+		"header", "tokenTimeout", "keyfileTimeout", "keySlot", "tries",
+		"keyfileOffset", "keyfileSize", "measurePCR", "tpm2Signature",
+	}
+	// options and noFail are additive, so a second source never displaces them.
+	// appliedOptions is bookkeeping and headerDeviceRef travels with header.
+	additive := []string{"options", "noFail", "appliedOptions", "headerDeviceRef"}
+
+	var got []string
+	ty := reflect.TypeOf(luksOptions{})
+	for i := range ty.NumField() {
+		got = append(got, ty.Field(i).Name)
+	}
+	require.ElementsMatch(t, append(covered, additive...), got,
+		"a new luksOptions field must be added to overlay and conflictingFields, or listed as additive here")
+}
+
+func TestConflictingFieldsNamesOnlyWhatIsOverwritten(t *testing.T) {
+	lower, higher := newLuksOptions(), newLuksOptions()
+	lower.tries, lower.header = 2, "/from-entry.hdr"
+	higher.tries, higher.keySlot = 9, 3
+
+	got := conflictingFields(&lower, &higher)
+	require.Len(t, got, 1, "header and key-slot are set by one source each")
+	require.Equal(t, "tries", got[0].field)
+	require.Equal(t, "9", got[0].kept)
+	require.Equal(t, "2", got[0].dropped)
+}
+
+func TestConflictingFieldsIsQuietWhenSourcesAgree(t *testing.T) {
+	lower, higher := newLuksOptions(), newLuksOptions()
+	lower.tries, higher.tries = 4, 4
+	require.Empty(t, conflictingFields(&lower, &higher))
+}
+
+// Fields 1 to 3 are decided in pairCrypttabEntry, so that is where an entry
+// losing one has to be noticed.
+func TestPairingReportsTheFieldsAnEntryLoses(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key="+u+"=/cmdline.key",
+		"cryptroot LABEL=crypt /entry.key luks\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, "volume name")
+	require.Contains(t, text, `"cryptroot"`)
+	require.Contains(t, text, `"root"`)
+	require.Contains(t, text, "key file")
+	require.Contains(t, text, "/entry.key")
+	require.Contains(t, text, "/cmdline.key")
+}
+
+// The message a per-device list displaces a whole option field with is the one
+// already released, so the remedy it names has to survive being generalised.
+func TestPerDeviceListKeepsTheReleasedRemedyText(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.options="+u+"=tries=2",
+		"cryptroot LABEL=crypt none luks,tries=7,discard\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(m.setAside, "\n")
+	require.Contains(t, text, "tries=7")
+	require.Contains(t, text, "discard")
+	require.Contains(t, text, "replaces a crypttab entry's options rather than adding to them")
+	require.Contains(t, text, "Repeat on the command line any that are still needed")
+}
+
+// The message is logged when crypttab is read, in the wording releases have
+// printed, so a device that never arrives still reports it.
+func TestPerDeviceListWarnsWhenCrypttabIsRead(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name="+u+"=root rd.luks.options="+u+"=tries=2"))
+	ct, err := parseCrypttabReader(strings.NewReader("cryptroot UUID=" + u + " none luks,key-slot=3\n"))
+	require.NoError(t, err)
+
+	logged := resolveLuksOptions(ct)
+	require.Equal(t, []string{`crypttab: entry "cryptroot": options "key-slot=3" dropped. A per-device rd.luks.options= replaces a crypttab entry's options rather than adding to them. Repeat on the command line any that are still needed.`}, logged)
+}
+
+// A marker configures nothing, so losing it costs the user nothing and naming
+// it would train them to ignore the message.
+func TestMarkersAreNeverReportedAsLost(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot rd.luks.options="+u+"=tries=2",
+		"cryptroot LABEL=crypt none luks,_netdev,fido2-device=auto\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+	require.Empty(t, conflictMessages(m.conflicts()), "the entry set nothing booster acts on")
+}
+
+// Agreement is the common shape: a bundled entry and a command line that name
+// the same volume must not warn on every boot.
+func TestAgreeingSourcesProduceNoConflict(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=cryptroot",
+		"cryptroot LABEL=crypt none luks,tries=7\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+	require.Empty(t, conflictMessages(m.conflicts()))
+}
+
+// A parked headerless device is dispatched again for every header device that
+// arrives, and each dispatch recomposes its sources. The report is keyed on the
+// device, so only the first dispatch speaks.
+func TestConflictsAreReportedOncePerDevice(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root", "cryptroot LABEL=crypt none luks,tries=7\n")
+	blk := &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"}
+
+	m := matchLuksMapping(blk)
+	require.NotNil(t, m)
+	require.NotEmpty(t, m.conflicts())
+
+	// matchLuksMapping has already reported this arrival. Clearing the guard
+	// lets the test watch the first report happen.
+	reportedConflicts.Clear()
+	require.NotEmpty(t, reportLuksConflicts(blk.path, m.conflicts()), "first arrival logs it")
+	require.Empty(t, reportLuksConflicts(blk.path, m.conflicts()), "every later one is silent")
+}
+
+// A device paired on arrival is composed a second time. The first
+// composition's findings must not come back with the second's, or every lost
+// option is announced twice.
+func TestArrivalReportsEachConflictOnce(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u+" rd.luks.options=tries=3",
+		"a UUID="+u+" none luks,tries=5\nb LABEL=crypt none luks,key-slot=2\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Equal(t, 1, strings.Count(text, `tries is "3"`), text)
+}
+
+// Two entries for one device: each value is credited to the entry that wrote
+// it, so the message sends the user to the right line of crypttab.
+func TestEntryConflictNamesBothEntries(t *testing.T) {
+	withLuksGlobals(t)
+
+	resolveSources(t, "", "a LABEL=crypt none luks,tries=5\nb LABEL=crypt none luks,tries=6\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `tries is "6" from crypttab entry "b"; "5" from crypttab entry "a" is not applied`)
+}
+
+// An option two entries disagree on is never blamed on a command line that
+// did not set it.
+func TestEntryConflictIsNotBlamedOnTheCommandLine(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u,
+		"a UUID="+u+" none luks,key-slot=1\nb LABEL=crypt none luks,key-slot=2\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `key-slot is "2" from crypttab entry "b"; "1" from crypttab entry "a" is not applied`)
+	require.NotContains(t, text, `"1" from the command line`)
+}
+
+// A key file an earlier entry supplied is not the command line's, and the
+// bounds note names the source that replaced the file.
+func TestKeyFileConflictNamesTheEntryThatWon(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u, "a UUID="+u+" /ka luks\nb LABEL=crypt /kb luks,keyfile-offset=16\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `key file is "/ka" from crypttab entry "a"; "/kb" from crypttab entry "b" is not applied`)
+	require.Contains(t, text, `It bounds a key file crypttab entry "a" replaced`)
+	require.NotContains(t, text, `from the command line; "/kb"`)
+}
+
+// Two headers at the same path on different devices are different headers,
+// and the message has to show the devices or it reads as a value losing to
+// itself.
+func TestHeaderConflictNamesTheDevice(t *testing.T) {
+	withLuksGlobals(t)
+
+	const (
+		u = "ab6d7d78-b816-4495-928d-766d6607035e"
+		a = "11111111-1111-1111-1111-111111111111"
+		b = "22222222-2222-2222-2222-222222222222"
+	)
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u,
+		"a UUID="+u+" none header=/h.img:UUID="+a+"\nb LABEL=crypt none header=/h.img:UUID="+b+"\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `header is "/h.img:UUID=`+b+`" from crypttab entry "b"; "/h.img:UUID=`+a+`" from crypttab entry "a" is not applied`)
+}
+
+// A lost volume name is ordinary until root= waits for it: then the boot hangs
+// on a node nothing creates, and that one conflict is a warning.
+func TestLostVolumeNameWarnsWhenRootWaitsForIt(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u+" root=/dev/mapper/cryptroot", "cryptroot LABEL=crypt none luks\n")
+	blk := &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"}
+	m := matchLuksMapping(blk)
+	require.NotNil(t, m)
+
+	reportedConflicts.Clear()
+	logged := reportLuksConflicts(blk.path, m.conflicts())
+	require.Contains(t, logged, `root=/dev/mapper/cryptroot will not appear: LUKS device /dev/sda2 is unlocked as "luks-`+u+`"`)
+
+	cmdRoot = &deviceRef{refPath, "/dev/mapper/luks-" + u}
+	reportedConflicts.Clear()
+	for _, msg := range reportLuksConflicts(blk.path, m.conflicts()) {
+		require.NotContains(t, msg, "will not appear", "root= names the volume that does appear")
+	}
+}
+
+// Entries merged into one record share its options but not its key file, so a
+// key file conflict names the one entry that set it.
+func TestKeyFileNamesTheOneEntryThatSetIt(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key="+u+"=/cmdline.key",
+		"cryptroot LABEL=crypt /entry.key luks\nother LABEL=crypt none luks,tries=2\n")
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `"/entry.key" from crypttab entry "cryptroot" is not applied`)
+}
