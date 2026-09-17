@@ -381,6 +381,15 @@ func acquireFido2Lock(ctx context.Context) error {
 
 func releaseFido2Lock() { <-fido2Sem }
 
+// clevisHardwareNotReady reports whether a clevis pin failed because its device
+// has not appeared yet, rather than because the binding cannot be satisfied.
+func clevisHardwareNotReady(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "USB error") ||
+		strings.Contains(msg, "no yubikey present") ||
+		strings.Contains(msg, "No such device")
+}
+
 func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) ([]byte, error) {
 	var payload []byte
 	// Note that token metadata stored differently in LUKS v1 and v2
@@ -416,8 +425,7 @@ func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) (
 					// timed out waiting for tpm
 					return nil, err
 				}
-			} else if strings.Contains(err.Error(), "USB error") {
-				// USB device not yet ready (e.g. YubiKey still enumerating).
+			} else if clevisHardwareNotReady(err) {
 				if time.Now().After(deadline) {
 					return nil, fmt.Errorf("timeout waiting for USB device")
 				}

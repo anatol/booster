@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -759,4 +760,31 @@ func TestAutodiscoveredRootGetsGlobalOptions(t *testing.T) {
 	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
 	require.Equal(t, 5, m.tries)
 	require.Empty(t, m.header, "a global header= must not reach a device")
+}
+
+// A clevis token gets one attempt: recoverTokenPassword returns on the first
+// error, and the retry loop inside recoverClevisPassword is what keeps the
+// token racing the keyboard while its device appears. Classifying a
+// hardware-not-there-yet error as fatal therefore forfeits the race for good,
+// which is invisible in use because the passphrase prompt still unlocks.
+func TestClevisHardwareNotReadyClassification(t *testing.T) {
+	for _, tc := range []struct {
+		err   string
+		retry bool
+	}{
+		// what libykpers says while the key is still enumerating
+		{"exit status 1: Yubikey core error: no yubikey present", true},
+		// and once it is there but not answering
+		{"exit status 1: USB error: something", true},
+		// and when it goes away mid-operation, which a re-enumerating hub does
+		{"exit status 1: No such device (it may have been disconnected)", true},
+		// a timeout is what an unprogrammed slot returns, and waiting cannot fix
+		// that, so it must not spin for the whole deadline
+		{"exit status 1: Yubikey core error: timeout", false},
+		// a binding that cannot be satisfied must not spin for 60s
+		{"exit status 1: Unable to perform decryption", false},
+		{"invalid JWE", false},
+	} {
+		require.Equal(t, tc.retry, clevisHardwareNotReady(errors.New(tc.err)), tc.err)
+	}
 }
