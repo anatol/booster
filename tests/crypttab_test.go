@@ -270,6 +270,9 @@ func TestCrypttabPathEntryPairsWithCmdlineUUID(t *testing.T) {
 	defer vm.Shutdown()
 
 	require.NoError(t, vm.ConsoleExpect("LUKS device /dev/sda is described twice"))
+	// the entry named the volume and the command line did not, so the name it
+	// declared is the setting this pairing costs it
+	require.NoError(t, vm.ConsoleExpect(`"cryptroot" from crypttab entry "cryptroot" is not applied`))
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
