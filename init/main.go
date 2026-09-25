@@ -395,7 +395,7 @@ func processBlkInfo(blk *blkInfo) error {
 	}
 
 	if blk.matchesRef(cmdResume) {
-		if err := resume(devpath); err != nil {
+		if err := bootResume.run(func() error { return resume(devpath) }); err != nil {
 			return err
 		}
 	}
@@ -606,6 +606,16 @@ func fsck(dev string) error {
 }
 
 func mountRootFs(dev, fstype string) error {
+	// Device discovery and LUKS unlocking run concurrently. Do not start
+	// filesystem checks or mounting until the configured resume attempt returns.
+	if cmdResume != nil {
+		info("waiting for hibernation resume check before mounting root")
+		if err := bootResume.wait(); err != nil {
+			return fmt.Errorf("cannot mount root before checking hibernation image: %w", err)
+		}
+		info("hibernation resume check returned; root mounting may proceed")
+	}
+
 	// some fs have module names that differs from the fs name itself
 	fstypeModules := map[string]string{
 		"iso9660": "isofs",
