@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cavaliergopher/cpio"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -68,6 +69,7 @@ type options struct {
 	enableMdraid                 bool
 	mdraidConfigPath             string
 	enableFido2                  bool
+	enableClevis                 bool
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -176,12 +178,15 @@ func createTestInitRamfs(t *testing.T, o *options) {
 	}
 
 	initBinary := "/usr/bin/false"
-	if o.enableFido2 {
-		// fido2plugin.so is read from the same directory as the init binary.
-		// Create dummy stand-ins in the work directory so the generator can find them.
+	if o.enableFido2 || o.enableClevis {
 		initBinary = wd + "/init"
 		require.NoError(t, os.WriteFile(initBinary, []byte("dummy"), 0o755))
-		require.NoError(t, os.WriteFile(wd+"/fido2plugin.so", []byte("dummy"), 0o755))
+		if o.enableFido2 {
+			require.NoError(t, os.WriteFile(wd+"/fido2plugin.so", []byte("dummy"), 0o755))
+		}
+		if o.enableClevis {
+			require.NoError(t, os.WriteFile(wd+"/clevisplugin.so", []byte("dummy"), 0o755))
+		}
 	}
 
 	conf := generatorConfig{
@@ -202,6 +207,7 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		enableMdraid:        o.enableMdraid,
 		mdraidConfigPath:    o.mdraidConfigPath,
 		enableFido2:         o.enableFido2,
+		enableClevis:        o.enableClevis,
 		crypttabFile:        "/dev/null", // tests run without root; avoid reading /etc/crypttab
 	}
 	if o.vConsoleConfig != "" {
@@ -857,3 +863,215 @@ func TestDeterministicImage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, b1, b2, "image must be byte-for-byte identical across builds")
 }
+
+func TestPluginBundlingInCpio(t *testing.T) {
+	wd := t.TempDir()
+	initBinary := wd + "/init"
+	require.NoError(t, os.WriteFile(initBinary, []byte("dummy-init"), 0o755))
+	require.NoError(t, os.WriteFile(wd+"/fido2plugin.so", []byte("dummy-fido2"), 0o755))
+	require.NoError(t, os.WriteFile(wd+"/clevisplugin.so", []byte("dummy-clevis"), 0o755))
+
+	modulesDir := t.TempDir()
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	conf := &generatorConfig{
+		initBinary:          initBinary,
+		compression:         "none",
+		universal:           false,
+		kernelVersion:       "matestkernel",
+		modulesDir:          modulesDir,
+		output:              wd + "/test.img",
+		readDeviceAliases:   func() (set, error) { return make(set), nil },
+		readHostModules:     func(string) (set, error) { return make(set), nil },
+		readModprobeOptions: func() (map[string]string, error) { return nil, nil },
+		crypttabFile:        "/dev/null",
+		enableFido2:         true,
+		enableClevis:        true,
+	}
+
+	require.NoError(t, generateInitRamfs(conf))
+
+	f, err := os.Open(conf.output)
+	require.NoError(t, err)
+	defer f.Close()
+
+	reader := cpio.NewReader(f)
+	foundFiles := make(map[string]bool)
+	for {
+		hdr, err := reader.Next()
+		if err != nil {
+			break
+		}
+		foundFiles[hdr.Name] = true
+	}
+
+	require.True(t, foundFiles["usr/lib/booster/fido2plugin.so"], "fido2plugin.so should be in cpio")
+	require.True(t, foundFiles["usr/lib/booster/clevisplugin.so"], "clevisplugin.so should be in cpio")
+}
+
+func TestClevisAutoDetectedFromHost(t *testing.T) {
+	wd := t.TempDir()
+	initBinary := wd + "/init"
+	require.NoError(t, os.WriteFile(initBinary, []byte("dummy-init"), 0o755))
+	require.NoError(t, os.WriteFile(wd+"/clevisplugin.so", []byte("dummy-clevis"), 0o755))
+
+	modulesDir := t.TempDir()
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	conf := &generatorConfig{
+		initBinary:           initBinary,
+		compression:          "none",
+		universal:            false,
+		kernelVersion:        "matestkernel",
+		modulesDir:           modulesDir,
+		output:               wd + "/test.img",
+		readDeviceAliases:    func() (set, error) { return make(set), nil },
+		readHostModules:      func(string) (set, error) { return make(set), nil },
+		readModprobeOptions:  func() (map[string]string, error) { return nil, nil },
+		readHostClevisTokens: func() (bool, error) { return true, nil },
+		crypttabFile:         "/dev/null",
+	}
+
+	require.NoError(t, generateInitRamfs(conf))
+
+	f, err := os.Open(conf.output)
+	require.NoError(t, err)
+	defer f.Close()
+
+	reader := cpio.NewReader(f)
+	foundClevis := false
+	for {
+		hdr, err := reader.Next()
+		if err != nil {
+			break
+		}
+		if hdr.Name == "usr/lib/booster/clevisplugin.so" {
+			foundClevis = true
+		}
+	}
+
+	require.True(t, foundClevis, "clevisplugin.so should be auto-bundled when host clevis tokens detected")
+}
+
+func TestClevisExplicitlyDisabledOverridesHost(t *testing.T) {
+	wd := t.TempDir()
+	initBinary := wd + "/init"
+	require.NoError(t, os.WriteFile(initBinary, []byte("dummy-init"), 0o755))
+	require.NoError(t, os.WriteFile(wd+"/clevisplugin.so", []byte("dummy-clevis"), 0o755))
+
+	modulesDir := t.TempDir()
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	conf := &generatorConfig{
+		initBinary:           initBinary,
+		compression:          "none",
+		universal:            false,
+		kernelVersion:        "matestkernel",
+		modulesDir:           modulesDir,
+		output:               wd + "/test.img",
+		readDeviceAliases:    func() (set, error) { return make(set), nil },
+		readHostModules:      func(string) (set, error) { return make(set), nil },
+		readModprobeOptions:  func() (map[string]string, error) { return nil, nil },
+		readHostClevisTokens: func() (bool, error) { return true, nil },
+		crypttabFile:         "/dev/null",
+		enableClevis:         false,
+		explicitEnableClevis: true,
+	}
+
+	require.NoError(t, generateInitRamfs(conf))
+
+	f, err := os.Open(conf.output)
+	require.NoError(t, err)
+	defer f.Close()
+
+	reader := cpio.NewReader(f)
+	foundClevis := false
+	for {
+		hdr, err := reader.Next()
+		if err != nil {
+			break
+		}
+		if hdr.Name == "usr/lib/booster/clevisplugin.so" {
+			foundClevis = true
+		}
+	}
+
+	require.False(t, foundClevis, "clevisplugin.so must NOT be bundled when explicitly disabled")
+}
+
+func TestClevisMissingPluginImplicitWarnsAndSucceeds(t *testing.T) {
+	wd := t.TempDir()
+	initBinary := wd + "/init"
+	require.NoError(t, os.WriteFile(initBinary, []byte("fake init binary"), 0o755))
+	// Notice: clevisplugin.so is NOT created in wd
+
+	modulesDir := t.TempDir()
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	conf := &generatorConfig{
+		initBinary:           initBinary,
+		compression:          "none",
+		universal:            true,
+		kernelVersion:        "matestkernel",
+		modulesDir:           modulesDir,
+		output:               wd + "/test.img",
+		readDeviceAliases:    func() (set, error) { return make(set), nil },
+		readHostModules:      func(string) (set, error) { return make(set), nil },
+		readModprobeOptions:  func() (map[string]string, error) { return nil, nil },
+		crypttabFile:         "/dev/null",
+		enableClevis:         true,
+		explicitEnableClevis: false,
+	}
+
+	require.NoError(t, generateInitRamfs(conf), "implicit clevis must not fail the build if plugin is missing")
+	require.False(t, conf.enableClevis, "enableClevis must be set to false when plugin is missing")
+}
+
+func TestClevisMissingPluginExplicitFails(t *testing.T) {
+	wd := t.TempDir()
+	initBinary := wd + "/init"
+	require.NoError(t, os.WriteFile(initBinary, []byte("fake init binary"), 0o755))
+	// Notice: clevisplugin.so is NOT created in wd
+
+	modulesDir := t.TempDir()
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.builtin.modinfo", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.alias", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.dep", []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(modulesDir+"/modules.softdep", []byte{}, 0o644))
+
+	conf := &generatorConfig{
+		initBinary:           initBinary,
+		compression:          "none",
+		universal:            false,
+		kernelVersion:        "matestkernel",
+		modulesDir:           modulesDir,
+		output:               wd + "/test.img",
+		readDeviceAliases:    func() (set, error) { return make(set), nil },
+		readHostModules:      func(string) (set, error) { return make(set), nil },
+		readModprobeOptions:  func() (map[string]string, error) { return nil, nil },
+		crypttabFile:         "/dev/null",
+		enableClevis:         true,
+		explicitEnableClevis: true,
+	}
+
+	require.Error(t, generateInitRamfs(conf), "explicit enable_clevis: true must fail if plugin is missing")
+}
+
+

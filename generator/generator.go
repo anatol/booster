@@ -37,6 +37,7 @@ type generatorConfig struct {
 	readDeviceAliases       func() (set, error)
 	readHostModules         func(kernelVer string) (set, error)
 	readModprobeOptions     func() (map[string]string, error)
+	readHostClevisTokens    func() (bool, error)
 	stripBinaries           bool
 	stripExtraSections      []string
 	enableLVM               bool
@@ -57,8 +58,10 @@ type generatorConfig struct {
 	enableVirtualConsole     bool
 	vconsolePath, localePath string
 
-	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
-	enableFido2  bool
+	crypttabFile         string // path to host crypttab; empty = use /etc/crypttab
+	enableFido2          bool
+	enableClevis         bool
+	explicitEnableClevis bool
 
 	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
 	tokenTimeout    int  // device-level keyboard-fallback timer (seconds); 0 = unset
@@ -140,7 +143,7 @@ func generateInitRamfs(conf *generatorConfig) error {
 	if !explicitCrypttab {
 		crypttabPath = "/etc/crypttab"
 	}
-	if hasFido2, err := img.appendCrypttab(crypttabPath); err != nil {
+	if hasFido2, hasClevis, err := img.appendCrypttab(crypttabPath); err != nil {
 		switch {
 		case explicitCrypttab:
 			return err
@@ -151,9 +154,20 @@ func generateInitRamfs(conf *generatorConfig) error {
 		default:
 			return err
 		}
-	} else if hasFido2 {
-		// auto-enable fido2 plugin when any crypttab entry uses fido2-device=
-		conf.enableFido2 = true
+	} else {
+		if hasFido2 {
+			// auto-enable fido2 plugin when any crypttab entry uses fido2-device=
+			conf.enableFido2 = true
+		}
+		if hasClevis && !conf.explicitEnableClevis {
+			conf.enableClevis = true
+		}
+	}
+
+	if !conf.explicitEnableClevis && !conf.enableClevis && conf.readHostClevisTokens != nil {
+		if detected, err := conf.readHostClevisTokens(); err == nil && detected {
+			conf.enableClevis = true
+		}
 	}
 
 	for _, f := range conf.extraFiles {
@@ -172,6 +186,22 @@ func generateInitRamfs(conf *generatorConfig) error {
 		}
 		if err := img.AppendContent("/usr/lib/booster/fido2plugin.so", 0o755, content); err != nil {
 			return fmt.Errorf("fido2 plugin: %v", err)
+		}
+	}
+
+	if conf.enableClevis {
+		pluginPath := filepath.Join(filepath.Dir(conf.initBinary), "clevisplugin.so")
+		content, err := os.ReadFile(pluginPath)
+		if err != nil {
+			if conf.explicitEnableClevis {
+				return fmt.Errorf("clevis plugin %s: %v", pluginPath, err)
+			}
+			warning("clevis plugin %s unavailable, building without clevis: %v", pluginPath, err)
+			conf.enableClevis = false
+		} else {
+			if err := img.AppendContent("/usr/lib/booster/clevisplugin.so", 0o755, content); err != nil {
+				return fmt.Errorf("clevis plugin: %v", err)
+			}
 		}
 	}
 
@@ -515,6 +545,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.EnableZfs = conf.enableZfs
 	initConfig.ZfsImportParams = conf.zfsImportParams
 	initConfig.EnablePlymouth = conf.enablePlymouth
+	initConfig.EnableClevis = conf.enableClevis
 	initConfig.SerializeTokens = conf.serializeTokens
 	initConfig.TokenTimeout = conf.tokenTimeout
 	initConfig.PinDelay = conf.pinDelay

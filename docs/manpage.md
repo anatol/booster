@@ -95,6 +95,8 @@ printf 'your-password' | argon2 "$(head -c16 /dev/urandom)" -id -t 3 -m 16 -p 4 
 
  * `enable_fido2` is a boolean flag that enables FIDO2 hardware token support.
 
+ * `enable_clevis` is a boolean flag that controls bundling of the Clevis / Tang network unlock plugin (`clevisplugin.so`). In host mode (`universal: false`), when omitted (default), booster auto-detects whether any host LUKS2 partition or crypttab entry uses Clevis tokens and only includes the plugin when needed. In universal mode (`universal: true`), it defaults to enabled. Can be set to `true` or `false` to explicitly override auto-detection.
+
  * `serialize_tokens` makes booster try a device's LUKS tokens one at a time in ascending token-ID order instead of racing them concurrently (default off). A non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled before a PIN token then unlocks the device before the PIN prompt is reached. Each non-interactive token is bounded by a per-type timeout so a stuck one cannot hang the boot; on expiry booster moves to the next. PIN tokens are not bounded (empty-Enter already skips them). Keys:
 
     * `serialize_tokens.enabled` — boolean, default `false`.

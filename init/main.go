@@ -1008,6 +1008,13 @@ func boost() error {
 		return err
 	}
 
+	// After /dev/kmsg, so a failure here can be reported rather than dying mute.
+	if config.EnableClevis {
+		if err := loadClevisPlugin(); err != nil {
+			return err
+		}
+	}
+
 	if err := mount("sys", "/sys", "sysfs", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, ""); err != nil {
 		return err
 	}

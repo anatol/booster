@@ -42,10 +42,15 @@ build() {
   cd ../init
   CGO_ENABLED=1 go build -trimpath -mod=readonly -modcacherw
 
-  cd fido2plugin
-  CGO_ENABLED=1 CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}" \
-    go build -trimpath -mod=readonly -modcacherw -buildmode=plugin -o ../fido2plugin.so .
-  cd ../..
+  for plugin_dir in fido2plugin clevisplugin; do
+    if [ -d "$plugin_dir" ]; then
+      cd "$plugin_dir"
+      CGO_ENABLED=1 CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}" \
+        go build -trimpath -mod=readonly -modcacherw -buildmode=plugin -o "../${plugin_dir}.so" .
+      cd ..
+    fi
+  done
+  cd ..
 
   ronn docs/manpage.md
 }
@@ -63,7 +68,9 @@ package() {
   install -Dp -m755 generator/generator "$pkgdir/usr/bin/booster"
   install -Dp -m644 docs/manpage.1 "$pkgdir/usr/share/man/man1/booster.1"
   install -Dp -m755 init/init "$pkgdir/usr/lib/booster/init"
-  install -Dp -m755 init/fido2plugin.so "$pkgdir/usr/lib/booster/fido2plugin.so"
+  for p in init/*.so; do
+    [ -f "$p" ] && install -Dp -m755 "$p" "$pkgdir/usr/lib/booster/$(basename "$p")"
+  done
   install -Dp -m755 packaging/arch/regenerate_images "$pkgdir/usr/lib/booster/regenerate_images"
   install -Dp -m755 packaging/arch/regenerate_uki "$pkgdir/usr/lib/booster/regenerate_uki"
   install -Dp -m755 packaging/common/60-booster.install "$pkgdir/usr/lib/kernel/install.d/60-booster.install"

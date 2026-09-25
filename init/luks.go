@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anatol/clevis.go"
 	"github.com/anatol/luks.go"
 	"github.com/google/go-tpm/tpmutil"
 	"golang.org/x/sys/unix"
@@ -396,13 +395,16 @@ func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) (
 		payload = node.Jwe
 	}
 
+	if clevisPlugin == nil {
+		return nil, errors.New("clevis: plugin is not loaded")
+	}
 	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
 	waitedForTpm := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		password, err := clevis.Decrypt(payload)
+		password, err := clevisPlugin.Decrypt(payload)
 		if err != nil {
 			var netError *net.OpError
 			if errors.Is(err, fs.ErrNotExist) && !waitedForTpm {
