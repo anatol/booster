@@ -40,6 +40,7 @@ var (
 	globalLuksOptions luksOptions    // the rd.luks.options= list that carried no UUID
 	globalLuksKeyfile string         // the rd.luks.key= path that carried no UUID
 	cmdlineSetAside   []string       // rd.luks.* values a later one replaced, logged with crypttab's
+	readCrypttab      = true         // rd.luks.crypttab=
 
 	rootAutodiscoveryMode       bool
 	rootAutodiscoveryMountFlags uintptr // autodiscovery mode uses GPT attribute to configure mount flags
