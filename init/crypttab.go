@@ -314,9 +314,8 @@ func pairCrypttabEntry(m, entry *luksMapping, blk *blkInfo) []luksConflict {
 	from := sourceLabel(entry)
 	var conflicts []luksConflict
 
-	// systemd's generator takes the volume name (field 1) and keyfile (field 3)
-	// from the entry, and the command line only for the options.
-	if !m.fromCrypttab && len(m.crypttabNames) == 0 {
+	first := !m.fromCrypttab && len(m.crypttabNames) == 0
+	if first {
 		if entry.name != m.name {
 			conflicts = append(conflicts, luksConflict{
 				field: "volume name", kept: entry.name, keptFrom: fmt.Sprintf("crypttab entry %q", entry.name),
@@ -338,14 +337,21 @@ func pairCrypttabEntry(m, entry *luksMapping, blk *blkInfo) []luksConflict {
 		})
 	}
 
-	// The pin and the entry may reference one disk in two forms, which only the
+	// Two references may name one disk in different forms, which only the
 	// arrived device can confirm.
-	if pin := m.dataDeviceRef; pin != nil && !deviceRefEqual(pin, entry.ref) &&
-		(blk == nil || !blk.matchesRef(pin) || !blk.matchesRef(entry.ref)) {
-		conflicts = append(conflicts, luksConflict{
-			field: "encrypted device", kept: pin.String(), keptFrom: sourceLabel(m),
-			dropped: entry.ref.String(), droppedFrom: from,
-		})
+	sameDisk := func(a, b *deviceRef) bool {
+		return deviceRefEqual(a, b) || (blk != nil && blk.matchesRef(a) && blk.matchesRef(b))
+	}
+	if pin := m.dataDeviceRef; pin != nil && !sameDisk(pin, entry.ref) {
+		c := luksConflict{field: "encrypted device", kept: pin.String(), keptFrom: sourceLabel(m), dropped: entry.ref.String(), droppedFrom: from}
+		if first {
+			c = luksConflict{field: "encrypted device", kept: entry.ref.String(), keptFrom: fmt.Sprintf("crypttab entry %q", entry.name), dropped: pin.String(), droppedFrom: sourceLabel(m)}
+		}
+		conflicts = append(conflicts, c)
+	}
+	if first {
+		// the entry's device (field 2) is the disk both references resolved to
+		m.dataDeviceRef = nil
 	}
 
 	switch {
