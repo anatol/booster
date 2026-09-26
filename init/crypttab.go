@@ -16,6 +16,10 @@ import (
 // parseCrypttab reads /etc/crypttab from the image and returns LUKS mappings.
 // Silently succeeds if the file is absent.
 func parseCrypttab() ([]*luksMapping, error) {
+	if !readCrypttab {
+		info("crypttab: ignored, rd.luks.crypttab=no")
+		return nil, nil
+	}
 	f, err := os.Open("/etc/crypttab")
 	if os.IsNotExist(err) {
 		return nil, nil

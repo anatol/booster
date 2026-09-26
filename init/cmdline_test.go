@@ -527,3 +527,28 @@ func TestRepeatedLuksOptionsReplace(t *testing.T) {
 		require.NotContains(t, msg, `"no-read-workqueue" dropped`, "a repeat of the same list replaces nothing")
 	}
 }
+
+// rd.luks.crypttab=no ignores the bundled crypttab, as systemd's generator
+// does, so an entry that stops a boot can be switched off from the boot
+// loader. rd.luks.* parameters keep working. The value is systemd's boolean.
+func TestRdLuksCrypttabSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		params string
+		read   bool
+	}{
+		{"", true},
+		{"rd.luks.crypttab=no", false},
+		{"rd.luks.crypttab=0", false},
+		{"rd.luks.crypttab=OFF", false},
+		{"rd.luks.crypttab=no rd.luks.crypttab=yes", true},
+		{"rd.luks.crypttab", true},
+		{"rd.luks.crypttab=maybe", true},
+	} {
+		t.Run(tc.params, func(t *testing.T) {
+			withLuksGlobals(t)
+			luksMappings = nil
+			require.NoError(t, parseParams(tc.params))
+			require.Equal(t, tc.read, readCrypttab)
+		})
+	}
+}

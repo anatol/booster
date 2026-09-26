@@ -169,6 +169,8 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  
  * `rd.luks.header=$UUID=$PATH` **deprecated**, use `rd.luks.options=$UUID=header=$PATH` instead. Detached LUKS header for LUKS volume with UUID.`$PATH` can be an absolute path in the initramfs (to file included via `extra_files:`/block device) or a `$path:$deviceref` which will temporarely mount the device as read-only.
  
+ * `rd.luks.crypttab=no` ignores the [crypttab](#crypttab) bundled into the image. `rd.luks.*` parameters still apply. Takes a boolean and defaults to yes.
+
  * `rd.luks.data=$UUID=$deviceref` data device for the LUKS volume with UUID as the device itself does not hold it.
  
  * `rd.luks.options=opt1,opt2` global options for LUKS devices that have no [crypttab](#crypttab) entry or `rd.luks.options=$UUID=` list. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.

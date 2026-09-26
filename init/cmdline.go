@@ -180,6 +180,7 @@ func parseParams(params string) error {
 	var setAside []string
 	set := make(map[string]bool)
 	var globalOptionsRaw string
+	useCrypttab := true
 	optionsRaw := make(map[string]string) // per-device rd.luks.options= as written, by UUID
 	replace := func(param string, uuid UUID, old, new string) {
 		id := param + uuid.toString()
@@ -294,6 +295,15 @@ func parseParams(params string) error {
 			}
 			if skip != "" {
 				warning("rd.luks.options: %q selects a volume type or opts out of unlocking, which the kernel command line cannot do; ignoring it", skip)
+			}
+		case "rd.luks.crypttab":
+			// a bare switch means yes, as in systemd
+			if value == "" {
+				useCrypttab = true
+			} else if b, ok := parseBoolean(value); ok {
+				useCrypttab = b
+			} else {
+				warning("rd.luks.crypttab=%s is not a boolean, ignoring", value)
 			}
 		case "rd.luks.name":
 			parts := strings.Split(value, "=")
@@ -418,8 +428,21 @@ func parseParams(params string) error {
 	globalLuksOptions = globalOptions
 	globalLuksKeyfile = globalKeyfile
 	cmdlineSetAside = setAside
+	readCrypttab = useCrypttab
 
 	return nil
+}
+
+// parseBoolean accepts the spellings of systemd's parse_boolean()
+// (src/basic/parse-util.c).
+func parseBoolean(s string) (value, ok bool) {
+	switch strings.ToLower(s) {
+	case "1", "yes", "y", "true", "t", "on":
+		return true, true
+	case "0", "no", "n", "false", "f", "off":
+		return false, true
+	}
+	return false, false
 }
 
 // parseTokenTimeout parses a token-timeout value from rd.luks.options.
