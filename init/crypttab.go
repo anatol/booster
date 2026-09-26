@@ -296,7 +296,7 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm)...)
 	}
 
-	var logged []string
+	logged := reportSetAside(cmdlineSetAside)
 	for _, m := range luksMappings {
 		m.luksOptions, m.optionConflicts, m.setAside = composedOptions(m)
 		// logged now, not on arrival, so a device that never shows up still reports it
