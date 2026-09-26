@@ -1616,7 +1616,7 @@ func acquireKeyfilePassword(mapping *luksMapping) ([]byte, error) {
 	return readKeyfile(path, mapping.keyfileOffset, mapping.keyfileSize)
 }
 
-func recoverKeyfilePassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, mapping *luksMapping) {
+func recoverKeyfilePassword(ctx context.Context, volumes chan *luks.Volume, d luks.Device, checkSlots []int, dev string, mapping *luksMapping) {
 	password, err := acquireKeyfilePassword(mapping)
 	if err != nil {
 		warning("reading keyfile %s: %v", mapping.keyfile, err)
@@ -1629,6 +1629,7 @@ func recoverKeyfilePassword(ctx context.Context, volumes chan *luks.Volume, d lu
 	}
 
 	warning("password in keyfile %s was unable to unseal %s", mapping.keyfile, mapping.name)
+	surfaceLostUnlockSettings(dev, mapping)
 
 	// fall back to keyboard
 	requestKeyboardPassword(ctx, volumes, d, checkSlots, mapping.name, mapping.triesOrUnlimited())
@@ -1976,8 +1977,9 @@ func luksOpen(dev string, mapping *luksMapping) error {
 		if len(checkSlotsWithPassword) > 0 {
 			senderWg.Go(func() {
 				if mapping.keyfile != "" {
-					recoverKeyfilePassword(ctx, volumes, d, checkSlotsWithPassword, mapping)
+					recoverKeyfilePassword(ctx, volumes, d, checkSlotsWithPassword, dev, mapping)
 				} else {
+					surfaceLostUnlockSettings(dev, mapping)
 					requestKeyboardPassword(ctx, volumes, d, checkSlotsWithPassword, mapping.name, mapping.triesOrUnlimited())
 				}
 			})
@@ -2180,6 +2182,9 @@ func handleLuksBlockDevice(blk *blkInfo) error {
 	info("a mapping for LUKS device %s has been found", blk.path)
 
 	err := luksOpen(blk.path, m)
+	if err != nil {
+		surfaceLostUnlockSettings(blk.path, m)
+	}
 	if err != nil && m.noFail {
 		warning("ignoring error unlocking LUKS device %s (nofail): %v", blk.path, err)
 		return nil
