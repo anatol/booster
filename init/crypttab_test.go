@@ -1228,3 +1228,26 @@ func TestEncryptedDeviceReferencedTwoWaysIsNotAConflict(t *testing.T) {
 	require.NotNil(t, m)
 	require.NotContains(t, strings.Join(conflictMessages(m.conflicts()), "\n"), "encrypted device")
 }
+
+// When a device falls back to a prompt or fails to unlock, a setting another
+// source displaced may be why, so it is repeated as a warning. Only settings
+// that take part in unlocking qualify, and each device logs them once.
+func TestLostUnlockSettingsSurfaceWhenUnlockBreaks(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key="+u+"=/cmdline.key",
+		"cryptroot LABEL=crypt /entry.key luks,tries=7\nother LABEL=crypt none luks,tries=2\n")
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+
+	logged := surfaceLostUnlockSettings("/dev/sda2", m)
+	text := strings.Join(logged, "\n")
+	require.Contains(t, text, `key file is "/cmdline.key"`)
+	require.NotContains(t, text, "volume name", "a lost name does not stop an unlock")
+	require.NotContains(t, text, "tries is", "nor does a retry count")
+	require.Empty(t, surfaceLostUnlockSettings("/dev/sda2", m), "logged once per device")
+}
