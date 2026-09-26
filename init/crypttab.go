@@ -501,6 +501,33 @@ func reportSetAside(msgs []string) []string {
 	return logged
 }
 
+// surfacedLostSettings keeps a device that falls back more than once, for
+// example from its keyfile to the prompt, from repeating itself.
+var surfacedLostSettings sync.Map
+
+// surfaceLostUnlockSettings repeats as warnings the settings that take part in
+// unlocking which another source displaced, for a device whose unlock has just
+// fallen back or failed. It returns the messages it logged.
+func surfaceLostUnlockSettings(device string, m *luksMapping) []string {
+	var lost []luksConflict
+	for _, c := range m.conflicts() {
+		if c.field != "volume name" && c.field != "tries" {
+			lost = append(lost, c)
+		}
+	}
+	if len(lost) == 0 {
+		return nil
+	}
+	if _, seen := surfacedLostSettings.LoadOrStore(device, true); seen {
+		return nil
+	}
+	msgs := conflictMessages(lost)
+	for _, msg := range msgs {
+		warning("LUKS device %s: %s", device, msg)
+	}
+	return msgs
+}
+
 // reportedConflicts keeps a parked headerless device, dispatched again for every
 // header device that shows up (retryPendingDevices), from repeating itself.
 var reportedConflicts sync.Map

@@ -175,6 +175,7 @@ func withLuksGlobals(t *testing.T) {
 	origMappings := luksMappings
 	reportedConflicts.Clear()
 	reportedSetAside.Clear()
+	surfacedLostSettings.Clear()
 	t.Cleanup(func() {
 		cmdRoot = origRoot
 		luksMappings = origMappings
