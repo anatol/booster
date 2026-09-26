@@ -293,7 +293,7 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 			luksMappings = append(luksMappings, cm)
 			continue
 		}
-		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm)...)
+		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm, nil)...)
 	}
 
 	logged := reportSetAside(cmdlineSetAside)
@@ -305,15 +305,11 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 	return logged
 }
 
-// pairCrypttabEntry hands m the entry's fourth field and key file. Booster's
-// rule today is that the command line owns fields 1 and 2 and outranks the
-// entry on field 3, where systemd's generator and dracut both give all three
-// to the entry.
-//
-// A device answering to two entries is paired twice, so the field is overlaid
-// rather than assigned: the later entry wins what it names and the earlier one
-// keeps the rest.
-func pairCrypttabEntry(m, entry *luksMapping) []luksConflict {
+// pairCrypttabEntry merges a crypttab entry into m. The entry's keyfile (field 3)
+// is used when m has none, and its options (field 4) are merged option by
+// option, so a second entry overrides only the options it sets. blk is nil when
+// crypttab is read.
+func pairCrypttabEntry(m, entry *luksMapping, blk *blkInfo) []luksConflict {
 	opts := *entry.crypttabOptions
 	from := sourceLabel(entry)
 	var conflicts []luksConflict
@@ -322,6 +318,16 @@ func pairCrypttabEntry(m, entry *luksMapping) []luksConflict {
 		conflicts = append(conflicts, luksConflict{
 			field: "volume name", kept: m.name, keptFrom: sourceLabel(m),
 			dropped: entry.name, droppedFrom: from,
+		})
+	}
+
+	// The pin and the entry may reference one disk in two forms, which only the
+	// arrived device can confirm.
+	if pin := m.dataDeviceRef; pin != nil && !deviceRefEqual(pin, entry.ref) &&
+		(blk == nil || !blk.matchesRef(pin) || !blk.matchesRef(entry.ref)) {
+		conflicts = append(conflicts, luksConflict{
+			field: "encrypted device", kept: pin.String(), keptFrom: sourceLabel(m),
+			dropped: entry.ref.String(), droppedFrom: from,
 		})
 	}
 
