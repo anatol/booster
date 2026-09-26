@@ -474,3 +474,33 @@ func TestParameterOrderDoesNotChangeTheOutcome(t *testing.T) {
 		require.Equal(t, first, got, "starting from %q resolved differently", rotated[0])
 	}
 }
+
+// Each rd.luks.* field keeps the last value it is given, as systemd's
+// generator does; the earlier one is named so a stale parameter left behind
+// by an edit does not vanish without a word. Repeating a value changes
+// nothing and is not reported.
+func TestRepeatedLuksParamsAreReported(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.name="+u+"=a rd.luks.name="+u+"=b"+
+		" rd.luks.key="+u+"=/k1 rd.luks.key="+u+"=/k2"+
+		" rd.luks.data="+u+"=/dev/sda rd.luks.data="+u+"=/dev/sdb"+
+		" rd.luks.key=/g1 rd.luks.key=/g2"+
+		" rd.luks.name="+u+"=b"))
+	logged := resolveLuksOptions(nil)
+
+	require.Len(t, luksMappings, 1)
+	m := luksMappings[0]
+	require.Equal(t, "b", m.name)
+	require.Equal(t, "/k2", m.keyfile)
+	require.Equal(t, "/dev/sdb", m.dataDeviceRef.String())
+
+	require.Equal(t, []string{
+		`rd.luks.name: ` + u + `: "a" dropped. A later rd.luks.name= for the same device replaces it.`,
+		`rd.luks.key: ` + u + `: "/k1" dropped. A later rd.luks.key= for the same device replaces it.`,
+		`rd.luks.data: ` + u + `: "/dev/sda" dropped. A later rd.luks.data= for the same device replaces it.`,
+		`rd.luks.key: "/g1" dropped. A later rd.luks.key= replaces it.`,
+	}, logged)
+}

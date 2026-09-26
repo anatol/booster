@@ -175,6 +175,18 @@ func parseParams(params string) error {
 	globalOptions := newLuksOptions()
 	globalKeyfile := ""
 
+	// set tracks which fields a parameter has set, so a mapping's default name
+	// is not reported as replaced.
+	var setAside []string
+	set := make(map[string]bool)
+	replace := func(param string, uuid UUID, old, new string) {
+		id := param + uuid.toString()
+		if set[id] && old != new {
+			setAside = append(setAside, fmt.Sprintf("%s: %s: %q dropped. A later %s= for the same device replaces it.", param, uuid.toString(), old, param))
+		}
+		set[id] = true
+	}
+
 	var key, value string
 	i := 0
 
@@ -285,6 +297,7 @@ func parseParams(params string) error {
 			}
 
 			m := findOrCreateLuksMapping(uuid)
+			replace("rd.luks.name", uuid, m.name, parts[1])
 			m.name = parts[1]
 		case "rd.luks.uuid":
 			uuid, err := parseUUID(value)
@@ -304,6 +317,9 @@ func parseParams(params string) error {
 				// give a key file of its own. Held until resolveLuksOptions,
 				// because which devices exist is not known until crypttab has
 				// been read as well.
+				if globalKeyfile != "" && globalKeyfile != parts[0] {
+					setAside = append(setAside, fmt.Sprintf("rd.luks.key: %q dropped. A later rd.luks.key= replaces it.", globalKeyfile))
+				}
 				globalKeyfile = parts[0]
 				continue
 			} else if len(parts) == 2 {
@@ -319,6 +335,7 @@ func parseParams(params string) error {
 			}
 
 			m := findOrCreateLuksMapping(uuid)
+			replace("rd.luks.key", uuid, m.keyfile, keyfile)
 			m.keyfile = keyfile
 		case "rd.luks.header":
 			// Format: rd.luks.header=<UUID>=<path>
@@ -363,6 +380,11 @@ func parseParams(params string) error {
 				return fmt.Errorf("rd.luks.data: %v", err)
 			}
 			m := findOrCreateLuksMapping(uuid)
+			var old string
+			if m.dataDeviceRef != nil {
+				old = m.dataDeviceRef.String()
+			}
+			replace("rd.luks.data", uuid, old, ref.String())
 			m.dataDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
@@ -385,6 +407,7 @@ func parseParams(params string) error {
 	}
 	globalLuksOptions = globalOptions
 	globalLuksKeyfile = globalKeyfile
+	cmdlineSetAside = setAside
 
 	return nil
 }
