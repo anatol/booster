@@ -912,7 +912,7 @@ func switchRoot() error {
 
 	// Run the OS init
 	info("Switching to the new userspace now. Да пабачэння!")
-	if err := unix.Exec(initBinary, initArgs, nil); err != nil {
+	if err := unix.Exec(initBinary, initArgs, os.Environ()); err != nil {
 		return fmt.Errorf("Can't run the rootfs init (%v): %v", initBinary, err)
 	}
 	return nil // unreachable
