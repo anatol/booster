@@ -330,16 +330,14 @@ func pairCrypttabEntry(m, entry *luksMapping) []luksConflict {
 		m.keyfile = entry.keyfile
 		m.keyfileDeviceRef = entry.keyfileDeviceRef
 		m.keyfileFrom = from
-	case entry.keyfile != "":
+	case entry.keyfile != "" && withDeviceRef(entry.keyfile, entry.keyfileDeviceRef) != withDeviceRef(m.keyfile, m.keyfileDeviceRef):
 		kept := keyfileLabel(m)
-		if entry.keyfile != m.keyfile {
-			conflicts = append(conflicts, luksConflict{
-				field: "key file", kept: withDeviceRef(m.keyfile, m.keyfileDeviceRef), keptFrom: kept,
-				dropped: withDeviceRef(entry.keyfile, entry.keyfileDeviceRef), droppedFrom: keyfileLabel(entry),
-			})
-		}
-		// another source won field 3, so the entry's keyfile-* bounds describe
-		// a file booster is not going to read
+		conflicts = append(conflicts, luksConflict{
+			field: "key file", kept: withDeviceRef(m.keyfile, m.keyfileDeviceRef), keptFrom: kept,
+			dropped: withDeviceRef(entry.keyfile, entry.keyfileDeviceRef), droppedFrom: keyfileLabel(entry),
+		})
+		// the keyfile (field 3) comes from another source, so the entry's
+		// keyfile-offset, keyfile-size and keyfile-timeout no longer apply
 		conflicts = append(conflicts, keyfileBoundConflicts(&opts, from, kept)...)
 		opts.keyfileOffset, opts.keyfileSize = 0, 0
 		opts.keyfileTimeout = luksOptionUnset
