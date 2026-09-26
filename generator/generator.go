@@ -315,6 +315,14 @@ func generateInitRamfs(conf *generatorConfig) error {
 				return err
 			}
 		}
+
+		if content, err := os.ReadFile("/etc/hostid"); err == nil {
+			if err := img.AppendContent("/etc/hostid", 0o444, content); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 
 	if conf.enableFido2 {

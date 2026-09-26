@@ -15,7 +15,7 @@ Booster is built around a simple promise: early boot should be quick, clear, sec
 Highlights:
 
 * **Boot faster with smaller images** - generate lean images quickly and keep early boot focused on the work your system actually needs.
-* **Make encrypted Linux feel effortless** - unlock LUKS roots using passphrases, keyfiles, detached headers, TPM2, FIDO2 security keys, Clevis-style bindings, or remote SSH unlock.
+* **Make encrypted Linux feel effortless** - unlock LUKS roots using passphrases, keyfiles, detached headers, TPM2, FIDO2 security keys, Clevis-style bindings, or remote SSH unlock. Native encrypted ZFS roots support passphrases, keyfiles, and remote SSH unlock.
 * **Use modern security hardware confidently** - support `systemd-cryptenroll` TPM2 and FIDO2 tokens, including native FIDO2 support through Booster's plugin path.
 * **Enjoy calm, coordinated prompts** - hardware-token, PIN, and passphrase flows work together; successful unlock paths cancel prompts that are no longer needed.
 * **Get a smoother FIDO2 boot** - Booster can pre-check connected FIDO2 keys before asking for a PIN, skip the wrong key silently, and fall back cleanly when a token is missing.
@@ -34,7 +34,7 @@ Booster is a strong fit for encrypted laptops, developer workstations, servers w
 Booster treats full-disk encryption as a first-class workflow, not an add-on.
 It can unlock LUKS devices from kernel parameters, `/etc/crypttab`, GPT autodiscovery, direct `root=` references to LUKS containers, keyfiles, detached headers, and hardware-backed tokens.
 
-Supported unlock styles include:
+Supported LUKS unlock styles include:
 
 * Plain passphrase unlock with careful prompt handling.
 * Shared passphrase caching for related encrypted volumes.
@@ -43,6 +43,8 @@ Supported unlock styles include:
 * `systemd-cryptenroll` TPM2 and FIDO2 tokens.
 * Clevis-style bindings for TPM2, Tang, and other supported policies.
 * SSH-based remote passphrase unlock for systems you cannot physically reach.
+
+Native encrypted ZFS datasets support passphrases and keyfiles, including remote passphrase entry over SSH.
 
 ### Hardware Tokens Without Rough Edges
 

@@ -48,7 +48,7 @@ serialize_tokens:
     The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
     Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
     If `interfaces` node is not specified then all the interfaces are activated at boot.
-    The `network` node also accepts `ssh_host_key`, `ssh_authorized_keys`, and `ssh_listen` to enable remote LUKS unlock over SSH. `ssh_host_key` is a path to an OpenSSH- or PEM-encoded SSH host private key, `ssh_authorized_keys` is a path to an authorized_keys file, and `ssh_listen` is the listen address (default `:22`). Both `ssh_host_key` and `ssh_authorized_keys` must be set together, and SSH requires `dhcp: true` or a static `ip`. See [REMOTE UNLOCK](#remote-unlock) below.
+    The `network` node also accepts `ssh_host_key`, `ssh_authorized_keys`, and `ssh_listen` to enable remote LUKS and ZFS unlock over SSH. `ssh_host_key` is a path to an OpenSSH- or PEM-encoded SSH host private key, `ssh_authorized_keys` is a path to an authorized_keys file, and `ssh_listen` is the listen address (default `:22`). Both `ssh_host_key` and `ssh_authorized_keys` must be set together, and SSH requires `dhcp: true` or a static `ip`. See [REMOTE UNLOCK](#remote-unlock) below.
 
  * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
@@ -293,12 +293,12 @@ Booster-specific behaviour for selected options:
 
 ## REMOTE UNLOCK
 
-Booster can unlock LUKS volumes from a remote SSH client during early boot.
+Booster can unlock LUKS volumes and encrypted ZFS datasets from a remote SSH client during early boot.
 The SSH server starts once networking is up (DHCP lease acquired or static
-`ip` configured) and prompts the connecting client for a LUKS passphrase.
-The submitted passphrase is broadcast to every LUKS device currently
-waiting at a keyboard prompt; a successful unlock seeds the in-boot
-passphrase cache so sibling volumes with the same key unlock without
+`ip` configured) and prompts the connecting client for a passphrase.
+The submitted passphrase is broadcast to every LUKS device and ZFS dataset
+currently waiting at a keyboard prompt; a successful unlock seeds the in-boot
+passphrase cache so sibling volumes/datasets with the same key unlock without
 further prompts. Equivalent to Debian's `dropbear-initramfs` setup but
 native to booster — uses Go's `golang.org/x/crypto/ssh` rather than
 bundling dropbear.

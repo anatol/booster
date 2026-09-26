@@ -193,13 +193,25 @@ var passphraseCache struct {
 	passwords [][]byte
 }
 
-// keyboardMu serializes keyboard password prompts across concurrent luksOpen calls.
+// keyboardSem serializes keyboard password prompts across concurrent unlocks.
 // Without this, two devices unlocked simultaneously (e.g. root + swap LUKS, or
 // btrfs RAID1 members) both check passphraseCache before either has stored a
-// successful password, causing a double prompt. Holding the mutex ensures the
+// successful password, causing a double prompt. Holding the semaphore ensures the
 // second device re-checks the cache after the first has finished prompting and
 // stored its passphrase.
-var keyboardMu sync.Mutex
+// Waiting for the semaphore is cancellable by remote unlock.
+var keyboardSem = make(chan struct{}, 1)
+
+// acquireKeyboard returns an idempotent release function, including when canceled.
+func acquireKeyboard(ctx context.Context) (release func(), ok bool) {
+	select {
+	case keyboardSem <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-keyboardSem }) }, true
+	case <-ctx.Done():
+		return func() {}, false
+	}
+}
 
 // pendingPrompts holds the set of keyboard prompts currently awaiting a
 // passphrase. Out-of-band password sources (SSH remote unlock) submit through
@@ -208,7 +220,9 @@ var keyboardMu sync.Mutex
 // devices themselves.
 var pendingPrompts struct {
 	sync.Mutex
-	entries map[*promptRegistration]struct{}
+	entries      map[*promptRegistration]struct{}
+	zfsDiscovery bool
+	changed      chan struct{}
 }
 
 type promptRegistration struct {
@@ -224,8 +238,11 @@ type promptRegistration struct {
 	d           luks.Device
 	checkSlots  []int
 	mappingName string
+	// unlock is an optional custom unlock function for non-LUKS backends (e.g. ZFS).
+	// If nil, tryPassphraseAgainstSlots is used with volumes, d, and checkSlots.
+	unlock func(ctx context.Context, password []byte) bool
 	// inflight counts goroutines that submitted via trySubmitPassphraseToPending
-	// (today: SSH remote unlock) and may still be mid-UnsealVolume after
+	// (today: SSH remote unlock) and may still be mid-UnsealVolume / unlock after
 	// senderWg.Wait() returns. luksOpen's watcher waits on this before
 	// close(volumes) so the goroutine can't send on a closed channel and
 	// panic pid 1.
@@ -239,12 +256,14 @@ func registerPendingPrompt(p *promptRegistration) {
 		pendingPrompts.entries = make(map[*promptRegistration]struct{})
 	}
 	pendingPrompts.entries[p] = struct{}{}
+	notifyPendingPromptsLocked()
 }
 
 func unregisterPendingPrompt(p *promptRegistration) {
 	pendingPrompts.Lock()
 	defer pendingPrompts.Unlock()
 	delete(pendingPrompts.entries, p)
+	notifyPendingPromptsLocked()
 }
 
 // trySubmitPassphraseToPending tries password against every currently-pending
@@ -262,7 +281,7 @@ func trySubmitPassphraseToPending(password []byte) []string {
 	pendingPrompts.Lock()
 	snapshot := make([]*promptRegistration, 0, len(pendingPrompts.entries))
 	for p := range pendingPrompts.entries {
-		if p.ctx.Err() != nil {
+		if p.ctx != nil && p.ctx.Err() != nil {
 			continue
 		}
 		// Bump inflight under the same lock that owns entries — luksOpen's
@@ -282,13 +301,25 @@ func trySubmitPassphraseToPending(password []byte) []string {
 	for _, p := range snapshot {
 		wg.Go(func() {
 			defer p.inflight.Done()
-			if tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password) {
+			var ok bool
+			if p.unlock != nil {
+				ctx := p.ctx
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				ok = p.unlock(ctx, password)
+			} else {
+				ok = tryPassphraseAgainstSlots(p.ctx, p.volumes, p.d, p.checkSlots, password)
+			}
+			if ok {
 				// Dismiss this device's unlock orchestration now that the
-				// volume is in hand — mirrors the token-success cancel.
+				// volume/key is in hand — mirrors the token-success cancel.
 				// pendingDeviceNames filters by ctx.Err(), so the next
 				// sshPromptLoop iteration won't re-list this device while
 				// luksOpen is still finishing SetupMapper.
-				p.cancel()
+				if p.cancel != nil {
+					p.cancel()
+				}
 				mu.Lock()
 				unlocked = append(unlocked, p.mappingName)
 				mu.Unlock()
@@ -310,17 +341,42 @@ func trySubmitPassphraseToPending(password []byte) []string {
 // the operator can see which devices a submission will be broadcast against,
 // and so the loop can detect "everything unlocked" and disconnect cleanly.
 func pendingDeviceNames() []string {
+	names, _, _ := pendingPromptState()
+	return names
+}
+
+// pendingPromptState snapshots discovery and registrations together so SSH cannot
+// miss a newly registered encryption root while waiting between ZFS datasets.
+func pendingPromptState() ([]string, bool, <-chan struct{}) {
 	pendingPrompts.Lock()
+	defer pendingPrompts.Unlock()
+	if pendingPrompts.changed == nil {
+		pendingPrompts.changed = make(chan struct{})
+	}
 	names := make([]string, 0, len(pendingPrompts.entries))
 	for p := range pendingPrompts.entries {
-		if p.ctx.Err() != nil {
+		if p.ctx != nil && p.ctx.Err() != nil {
 			continue
 		}
 		names = append(names, p.mappingName)
 	}
-	pendingPrompts.Unlock()
 	sort.Strings(names)
-	return names
+	return names, pendingPrompts.zfsDiscovery, pendingPrompts.changed
+}
+
+func setZfsUnlockDiscovery(active bool) {
+	pendingPrompts.Lock()
+	defer pendingPrompts.Unlock()
+	pendingPrompts.zfsDiscovery = active
+	notifyPendingPromptsLocked()
+}
+
+// notifyPendingPromptsLocked requires pendingPrompts to be locked.
+func notifyPendingPromptsLocked() {
+	if pendingPrompts.changed != nil {
+		close(pendingPrompts.changed)
+	}
+	pendingPrompts.changed = make(chan struct{})
 }
 
 // rd luks options match systemd naming https://www.freedesktop.org/software/systemd/man/crypttab.html
@@ -1578,8 +1634,11 @@ func requestKeyboardPassword(ctx context.Context, volumes chan *luks.Volume, d l
 	// keyboard goroutine starts while the first device is prompting will block
 	// here, then re-check the cache after the first device succeeds and releases
 	// the lock — avoiding a double prompt for shared passphrases (issue #306).
-	keyboardMu.Lock()
-	defer keyboardMu.Unlock()
+	release, ok := acquireKeyboard(ctx)
+	if !ok {
+		return
+	}
+	defer release()
 
 	// Re-check after acquiring the lock: another device may have just unlocked.
 	select {
