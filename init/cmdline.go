@@ -179,6 +179,8 @@ func parseParams(params string) error {
 	// is not reported as replaced.
 	var setAside []string
 	set := make(map[string]bool)
+	var globalOptionsRaw string
+	optionsRaw := make(map[string]string) // per-device rd.luks.options= as written, by UUID
 	replace := func(param string, uuid UUID, old, new string) {
 		id := param + uuid.toString()
 		if set[id] && old != new {
@@ -260,10 +262,13 @@ func parseParams(params string) error {
 			if head, rest, found := strings.Cut(value, "="); found {
 				if uuid, err := parseUUID(head); err == nil {
 					m := findOrCreateLuksMapping(uuid)
-					if m.cmdlineOptions == nil {
-						opts := newLuksOptions()
-						m.cmdlineOptions = &opts
+					if prev, ok := optionsRaw[uuid.toString()]; ok && prev != rest {
+						setAside = append(setAside, fmt.Sprintf("rd.luks.options: %s: %q dropped. A later rd.luks.options= for the same device replaces it.", uuid.toString(), joinOptions(m.cmdlineOptions.appliedOptions)))
 					}
+					optionsRaw[uuid.toString()] = rest
+					// a repeat replaces the list whole, as in systemd
+					opts := newLuksOptions()
+					m.cmdlineOptions = &opts
 					skip, err := parseLuksOptions(m.cmdlineOptions, rest, "rd.luks.options: "+head)
 					if err != nil {
 						return err
@@ -278,6 +283,11 @@ func parseParams(params string) error {
 			}
 			// A list with no UUID goes through the same parser, into an
 			// option set held until every source is known.
+			if globalOptionsRaw != "" && globalOptionsRaw != value {
+				setAside = append(setAside, fmt.Sprintf("rd.luks.options: %q dropped. A later rd.luks.options= replaces it.", joinOptions(globalOptions.appliedOptions)))
+			}
+			globalOptionsRaw = value
+			globalOptions = newLuksOptions()
 			skip, err := parseLuksOptions(&globalOptions, value, "rd.luks.options")
 			if err != nil {
 				return err
