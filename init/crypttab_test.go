@@ -1193,3 +1193,38 @@ func TestKeyFileOnAnotherDeviceIsAnotherFile(t *testing.T) {
 	text := strings.Join(conflictMessages(m.conflicts()), "\n")
 	require.Contains(t, text, `key file is "/k:UUID=`+a+`" from crypttab entry "a"; "/k:UUID=`+b+`" from crypttab entry "b" is not applied`)
 }
+
+// An entry's second field is the device it unlocks. rd.luks.data= naming
+// another one wins today, and the entry's is named as not applied.
+func TestEncryptedDeviceConflictIsReported(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.data="+u+"=/dev/sdb", "root UUID="+u+" none luks\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sdb", format: "luks", uuid: uuid})
+	require.NotNil(t, m)
+	require.Equal(t, "/dev/sdb", m.dataDeviceRef.String())
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `encrypted device is "/dev/sdb" from the command line; "UUID=`+u+`" from crypttab entry "root" is not applied`)
+}
+
+// Paired on arrival, the pin and the entry can reference the arrived device in
+// two forms, here WWID= and a path. That is agreement, not a conflict.
+func TestEncryptedDeviceReferencedTwoWaysIsNotAConflict(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.data="+u+"=WWID=disk0", "root /dev/sdb none luks\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sdb", format: "luks", uuid: uuid, wwid: []string{"disk0"}})
+	require.NotNil(t, m)
+	require.NotContains(t, strings.Join(conflictMessages(m.conflicts()), "\n"), "encrypted device")
+}

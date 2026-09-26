@@ -2156,7 +2156,7 @@ func combinedLuksMapping(blk *blkInfo) *luksMapping {
 			continue
 		}
 		info("LUKS device %s is described twice; taking the key file and options of crypttab entry %q into %q", blk.path, m.name, combined.name)
-		combined.pairingConflicts = append(combined.pairingConflicts, pairCrypttabEntry(&combined, m)...)
+		combined.pairingConflicts = append(combined.pairingConflicts, pairCrypttabEntry(&combined, m, blk)...)
 	}
 
 	combined.luksOptions, combined.optionConflicts, combined.setAside = composedOptions(&combined)
