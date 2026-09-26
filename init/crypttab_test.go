@@ -1299,8 +1299,8 @@ func TestKeyFileOnAnotherDeviceIsAnotherFile(t *testing.T) {
 	require.Contains(t, text, `key file is "/k:UUID=`+a+`" from crypttab entry "a"; "/k:UUID=`+b+`" from crypttab entry "b" is not applied`)
 }
 
-// An entry's second field is the device it unlocks. rd.luks.data= naming
-// another one wins today, and the entry's is named as not applied.
+// An entry's device (field 2) is the device it unlocks, so rd.luks.data=
+// naming another one is not applied, and is named as such.
 func TestEncryptedDeviceConflictIsReported(t *testing.T) {
 	withLuksGlobals(t)
 
@@ -1312,10 +1312,10 @@ func TestEncryptedDeviceConflictIsReported(t *testing.T) {
 
 	m := matchLuksMapping(&blkInfo{path: "/dev/sdb", format: "luks", uuid: uuid})
 	require.NotNil(t, m)
-	require.Equal(t, "/dev/sdb", m.dataDeviceRef.String())
+	require.Nil(t, m.dataDeviceRef)
 
 	text := strings.Join(conflictMessages(m.conflicts()), "\n")
-	require.Contains(t, text, `encrypted device is "/dev/sdb" from the command line; "UUID=`+u+`" from crypttab entry "root" is not applied`)
+	require.Contains(t, text, `encrypted device is "UUID=`+u+`" from crypttab entry "root"; "/dev/sdb" from the command line is not applied`)
 }
 
 // Paired on arrival, the pin and the entry can reference the arrived device in

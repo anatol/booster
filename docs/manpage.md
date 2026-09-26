@@ -264,7 +264,8 @@ the file by either being ran as root, or by being passed
 
 When a crypttab entry and `rd.luks.*` parameters describe the same LUKS UUID,
 the entry takes precedence, as in systemd-cryptsetup-generator: its volume
-name and key file are used over `rd.luks.name=` and `rd.luks.key=`.
+name, device and key file are used over `rd.luks.name=`, `rd.luks.data=` and
+`rd.luks.key=`.
 The exception is a per-device `rd.luks.options=$UUID=`, which replaces the
 entry's options. Repeat `keyfile-offset=`, `keyfile-size=` and
 `keyfile-timeout=` there if the entry's key file needs them.
