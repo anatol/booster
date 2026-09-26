@@ -1066,6 +1066,23 @@ func TestEntryConflictIsNotBlamedOnTheCommandLine(t *testing.T) {
 	require.NotContains(t, text, `"1" from the command line`)
 }
 
+// The command line naming the entry's own key file replaces nothing, so the
+// entry's bounds still describe the file that is read. Clearing them reads the
+// wrong bytes and the unlock fails.
+func TestSameKeyFileKeepsTheEntrysBounds(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	resolveSources(t, "rd.luks.name="+u+"=a rd.luks.key="+u+"=/k",
+		"a UUID="+u+" /k luks,keyfile-offset=512,keyfile-size=64\n")
+
+	require.Len(t, luksMappings, 1)
+	m := luksMappings[0]
+	require.Equal(t, int64(512), m.keyfileOffset)
+	require.Equal(t, int64(64), m.keyfileSize)
+	require.Empty(t, conflictMessages(m.conflicts()))
+}
+
 // A key file an earlier entry supplied is not the command line's, and the
 // bounds note names the source that replaced the file.
 func TestKeyFileConflictNamesTheEntryThatWon(t *testing.T) {
@@ -1151,4 +1168,28 @@ func TestKeyFileNamesTheOneEntryThatSetIt(t *testing.T) {
 
 	text := strings.Join(conflictMessages(m.conflicts()), "\n")
 	require.Contains(t, text, `"/entry.key" from crypttab entry "cryptroot" is not applied`)
+}
+
+// The same path on another device is another file: the entry's bounds go
+// with it, and the message shows both devices.
+func TestKeyFileOnAnotherDeviceIsAnotherFile(t *testing.T) {
+	withLuksGlobals(t)
+
+	const (
+		u = "ab6d7d78-b816-4495-928d-766d6607035e"
+		a = "11111111-1111-1111-1111-111111111111"
+		b = "22222222-2222-2222-2222-222222222222"
+	)
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=a",
+		"a UUID="+u+" /k:UUID="+a+" luks\nb LABEL=crypt /k:UUID="+b+" luks,keyfile-offset=512\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+	require.Zero(t, m.keyfileOffset)
+
+	text := strings.Join(conflictMessages(m.conflicts()), "\n")
+	require.Contains(t, text, `key file is "/k:UUID=`+a+`" from crypttab entry "a"; "/k:UUID=`+b+`" from crypttab entry "b" is not applied`)
 }
