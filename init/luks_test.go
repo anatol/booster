@@ -173,9 +173,14 @@ func withLuksGlobals(t *testing.T) {
 	t.Helper()
 	origRoot := cmdRoot
 	origMappings := luksMappings
+	reportedConflicts.Clear()
+	reportedSetAside.Clear()
+	surfacedLostSettings.Clear()
 	t.Cleanup(func() {
 		cmdRoot = origRoot
 		luksMappings = origMappings
+		reportedConflicts.Clear()
+		reportedSetAside.Clear()
 	})
 }
 
@@ -759,4 +764,164 @@ func TestAutodiscoveredRootGetsGlobalOptions(t *testing.T) {
 	require.Equal(t, []string{luks.FlagAllowDiscards}, m.options)
 	require.Equal(t, 5, m.tries)
 	require.Empty(t, m.header, "a global header= must not reach a device")
+}
+
+// A crypttab entry and a command-line parameter can reference one disk
+// differently, which neither source can resolve on its own. Until the device
+// appears they are two records, and combining them makes the entry take effect.
+func TestMappingsForOneDeviceAreCombined(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		ctDevice string
+		blk      *blkInfo
+	}{
+		{"label", "LABEL=crypt", &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"}},
+		{"path", "/dev/sda2", &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid}},
+		{"wwid", "WWID=scsi-360", &blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, wwid: []string{"scsi-360"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolveSources(t, "rd.luks.name="+u+"=root",
+				"cryptroot "+tc.ctDevice+" /entry.key luks,tries=7\n")
+			require.Len(t, luksMappings, 2, "two records until the device resolves them")
+
+			m := matchLuksMapping(tc.blk)
+			require.NotNil(t, m)
+			require.Equal(t, "root", m.name, "the command line names the volume")
+			require.Equal(t, "/entry.key", m.keyfile, "the entry's key file takes effect")
+			require.Equal(t, 7, m.tries, "and its options do too")
+			require.Len(t, luksMappings, 2, "the list itself is not rewritten")
+		})
+	}
+}
+
+// Combining must not let a crypttab entry outrank the command line.
+func TestCombinedMappingKeepsCmdlinePrecedence(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key="+u+"=/cmdline.key rd.luks.options="+u+"=tries=2",
+		"cryptroot LABEL=crypt /entry.key luks,tries=7,discard\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+	require.Equal(t, "/cmdline.key", m.keyfile, "rd.luks.key= wins the keyfile (field 3)")
+	require.Equal(t, 2, m.tries, "the per-device list wins the options (field 4)")
+	require.Empty(t, m.options, "and it replaces the entry's options whole")
+}
+
+// The entry's device reference decides only *when* the two sources are paired,
+// never what the pairing does. Written UUID= it happens while crypttab is read,
+// written LABEL= only once the device arrives; the mapping booster unlocks has
+// to be the same either way. It was not: the offset bounding a key file the
+// command line replaced was cleared on one path and left on the other, so the
+// cmdline key file was read from the wrong offset.
+func TestPairingDoesNotDependOnTheEntrysDeviceRef(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	for _, ref := range []string{"UUID=" + u, "LABEL=crypt"} {
+		t.Run(ref, func(t *testing.T) {
+			resolveSources(t, "rd.luks.name="+u+"=root rd.luks.key="+u+"=/cmdline.key",
+				"cryptroot "+ref+" /entry.key luks,keyfile-offset=512,keyfile-size=64\n")
+
+			m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+			require.NotNil(t, m)
+			require.Equal(t, "/cmdline.key", m.keyfile)
+			require.Zero(t, m.keyfileOffset, "the entry's bounds describe a file booster does not read")
+			require.Zero(t, m.keyfileSize)
+		})
+	}
+}
+
+// Devices arrive on their own goroutine, one per device. Combining must not
+// write to the shared list: under -race this catches the read/write pair
+// directly, and the assertions catch a combination that mixes up records.
+func TestConcurrentArrivalsCombineSafely(t *testing.T) {
+	withLuksGlobals(t)
+
+	const uA = "639b8fdd-36ba-443e-be3e-e5b335935502"
+	const uB = "ab6d7d78-b816-4495-928d-766d6607035e"
+	ua, err := parseUUID(uA)
+	require.NoError(t, err)
+	ub, err := parseUUID(uB)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+uA+" rd.luks.uuid="+uB,
+		"one LABEL=lblA none luks,tries=2\ntwo LABEL=lblB none luks,tries=3\n")
+	require.Len(t, luksMappings, 4, "two references each, unpaired until the devices arrive")
+
+	got := make([]*luksMapping, 2)
+	var wg sync.WaitGroup
+	for i, blk := range []*blkInfo{
+		{path: "/dev/sda2", format: "luks", uuid: ua, label: "lblA"},
+		{path: "/dev/sdb2", format: "luks", uuid: ub, label: "lblB"},
+	} {
+		wg.Add(1)
+		go func(i int, b *blkInfo) {
+			defer wg.Done()
+			got[i] = matchLuksMapping(b)
+		}(i, blk)
+	}
+	wg.Wait()
+
+	require.NotNil(t, got[0])
+	require.NotNil(t, got[1])
+	require.NotSame(t, got[0], got[1], "two devices must not resolve to one mapping")
+	require.Equal(t, 2, got[0].tries, "the entry that named lblA supplied its options")
+	require.Equal(t, 3, got[1].tries, "and likewise for lblB")
+}
+
+// Two entries can name one disk differently, and each is paired separately:
+// the UUID= one while crypttab is read, the other only once the device
+// arrives. Pairing replaced the fourth field wholesale, so an entry that
+// configures nothing erased the bounds and retry count of the entry that named
+// the key file, and booster read that file from offset 0 at full length.
+func TestASecondCrypttabEntryDoesNotEraseTheFirst(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.name="+u+"=root",
+		"cryptroot UUID="+u+" /entry.key luks,keyfile-offset=512,keyfile-size=64,tries=3\n"+
+			"cryptold /dev/sda2 none luks\n")
+	require.Len(t, luksMappings, 2, "the path entry stays its own record until the device arrives")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid})
+	require.NotNil(t, m)
+	require.Equal(t, "/entry.key", m.keyfile)
+	require.EqualValues(t, 512, m.keyfileOffset, "the entry naming the key file also bounds it")
+	require.EqualValues(t, 64, m.keyfileSize)
+	require.Equal(t, 3, m.tries)
+}
+
+// Neither entry outranks the other, so what each one sets survives the merge
+// and the later entry wins only the fields it names.
+func TestCrypttabEntriesForOneDeviceAreOverlaid(t *testing.T) {
+	withLuksGlobals(t)
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	uuid, err := parseUUID(u)
+	require.NoError(t, err)
+
+	resolveSources(t, "rd.luks.uuid="+u,
+		"cryptA UUID="+u+" none luks,tries=9\ncryptB LABEL=crypt none luks,discard\n")
+
+	m := matchLuksMapping(&blkInfo{path: "/dev/sda2", format: "luks", uuid: uuid, label: "crypt"})
+	require.NotNil(t, m)
+	require.Equal(t, 9, m.tries, "the first entry's retry count survives")
+	require.Contains(t, m.options, luks.FlagAllowDiscards, "and the second entry's flag applies")
 }
