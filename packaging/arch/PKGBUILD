@@ -1,7 +1,7 @@
 # Maintainer: Anatol Pomozov
 
 pkgname=booster-git
-pkgver=0.3.r2.g1350d7a
+pkgver=r690.21c9f1f
 pkgrel=1
 pkgdesc='Fast and secure initramfs generator'
 arch=(x86_64)
@@ -20,12 +20,12 @@ backup=(etc/booster.yaml)
 provides=(booster initramfs)
 conflicts=(booster)
 replaces=(booster)
-source=(git+https://github.com/anatol/booster)
+source=('git+https://github.com/cootshk/booster.git#branch=fix/switchroot-env')
 sha512sums=('SKIP')
 
 pkgver() {
-  cd booster
-  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+  cd "$srcdir/booster"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
