@@ -20,8 +20,11 @@ import (
 )
 
 // pickFreePort asks the kernel for an unused TCP port. We close the listener
-// immediately and hand the number to QEMU; there's an inherent race but the
-// window is tiny and these tests run serially.
+// immediately and hand the number to QEMU, so there is an inherent race between
+// the close and QEMU's bind. The window is tiny, and the kernel does not hand
+// the same ephemeral port out twice in quick succession, but with tests running
+// concurrently it is no longer a theoretical concern — a bind failure here is
+// worth suspecting before anything in the test itself.
 func pickFreePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -127,6 +130,8 @@ func generateSSHKeyPair(t *testing.T) (privPEM, authKeyLine []byte, signer gossh
 // connects from the host through a QEMU port forward, sends the passphrase,
 // and verifies both the "Unlocked:" handshake and a normal boot completion.
 func TestSSHRemoteUnlock(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.img"))
 
 	tmp := t.TempDir()
@@ -224,6 +229,8 @@ func TestSSHRemoteUnlock(t *testing.T) {
 // with the same passphrase and verifies that a single SSH submission
 // unlocks both.
 func TestSSHRemoteUnlockMultiDeviceSharedPassphrase(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks1.img"))
 	require.NoError(t, checkAsset("assets/luks2.img"))
 
@@ -328,6 +335,8 @@ func TestSSHRemoteUnlockMultiDeviceSharedPassphrase(t *testing.T) {
 // when *root* is unlocked, only when *root mount succeeds*, which for
 // multi-device btrfs requires every member assembled.
 func TestSSHRemoteUnlockBtrfsRaid1SharedPassphrase(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1.img"))
 
 	tmp := t.TempDir()
@@ -438,6 +447,8 @@ func TestSSHRemoteUnlockBtrfsRaid1SharedPassphrase(t *testing.T) {
 // abandoned at switch_root and should be configured via post-boot
 // userspace crypttab instead — outside the scope of this test.
 func TestSSHRemoteUnlockBtrfsRaid1DistinctPassphrase(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.btrfs_raid1_distinct.img"))
 
 	tmp := t.TempDir()
@@ -539,6 +550,8 @@ func TestSSHRemoteUnlockBtrfsRaid1DistinctPassphrase(t *testing.T) {
 // public key isn't in authorized_keys cannot complete SSH auth — pubkey-only
 // gate has to actually reject unknown keys, not just prefer authorized ones.
 func TestSSHRemoteUnlockRejectsWrongClientKey(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.img"))
 
 	tmp := t.TempDir()
@@ -610,6 +623,8 @@ func TestSSHRemoteUnlockRejectsWrongClientKey(t *testing.T) {
 // empty submission reprompts, wrong passphrase is reported, then the
 // correct passphrase unlocks. All in a single SSH session.
 func TestSSHRemoteUnlockRetryThenUnlock(t *testing.T) {
+	t.Parallel()
+
 	require.NoError(t, checkAsset("assets/luks2.img"))
 
 	tmp := t.TempDir()
@@ -710,6 +725,8 @@ func TestSSHRemoteUnlockRetryThenUnlock(t *testing.T) {
 // behind tokenWg.Wait()) unlocks the slot and ctx-cancels the in-flight
 // FIDO2 goroutine. Hardware-independent: same fixture as TestCrypttabFido2NoDevice.
 func TestSSHRemoteUnlockFido2Pending(t *testing.T) {
+	t.Parallel()
+
 	if !fileExists(binariesDir + "/fido2plugin.so") {
 		t.Skip("fido2plugin.so not built (libfido2 may not be installed)")
 	}

@@ -2,10 +2,13 @@ package tests
 
 import (
 	"bytes"
+	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +27,137 @@ import (
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
+
+// Per-VM sizing.  A guest is sized for the suite rather than for the host: a
+// VM that claims every core bounds concurrency at two whatever the machine is,
+// and the boot these tests measure does not go faster for the extra vCPUs.
+var (
+	vmSMP = flag.Int("vm.smp", 0, "vCPUs for each test VM (0: 4, or the host's core count when it has fewer)")
+	vmMem = flag.String("vm.mem", "8G", "memory for each test VM")
+	vmMax = flag.Int("vm.max", 0, "most VMs to run at once (0: derive from available memory)")
+)
+
+// Concurrency here is bounded by memory, not by CPU.  -parallel defaults to
+// GOMAXPROCS, so on a large machine an unflagged `go test` would otherwise
+// start one VM per core, each asking for -vm.mem — far past what the host can
+// back.  Every VM takes a slot before it starts and returns it when the test
+// ends, so -parallel tunes concurrency within a limit the machine can serve.
+var (
+	vmSlots     chan struct{}
+	vmSlotsOnce sync.Once
+)
+
+// vmCPUs is how many vCPUs a test VM gets.  Four covers the only CPU-bound
+// step in these boots, the argon2 KDF of a LUKS unlock: measured sequentially
+// on a 32-core host, four is level with one-vCPU-per-core on every test and
+// ahead on most, because bringing up 32 vCPUs costs the guest more than the
+// parallelism returns, while two costs the unlock a second and a half.  A host
+// with fewer cores than that gets one VM the size of the host.
+func vmCPUs() int {
+	if *vmSMP > 0 {
+		return *vmSMP
+	}
+	if n := runtime.NumCPU(); n < 4 {
+		return n
+	}
+	return 4
+}
+
+// autoVMLimit bounds how many VMs run at once when -vm.max is not given.
+//
+// Memory seldom binds: a guest's -m is an allocation the host backs only as the
+// guest touches it, and these touch a fraction of what they are given.  CPU
+// does bind — each VM gets -vm.smp vCPUs, and a host oversubscribed several
+// times over misses console deadlines rather than running out of memory — so
+// take the lower of the two bounds, allowing 2x oversubscription.  Without the
+// CPU term, small guests multiply until they swamp the cores.
+func autoVMLimit() int {
+	per := parseMemSize(*vmMem)
+	avail := memAvailableBytes()
+	if per <= 0 || avail <= 0 {
+		return 2 // no readings to go on; stay conservative
+	}
+
+	byMemory := int((avail * 7 / 10) / per)
+
+	byCPU := 2 * runtime.NumCPU() / vmCPUs()
+
+	n := byMemory
+	if byCPU < n {
+		n = byCPU
+	}
+	// The floor is applied by the caller, which also sees an explicit -vm.max.
+	return n
+}
+
+// parseMemSize understands the qemu -m forms the tests use: a plain number of
+// megabytes, or a K/M/G suffix.
+func parseMemSize(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	mult := int64(1 << 20) // qemu treats a bare number as megabytes
+	switch s[len(s)-1] {
+	case 'K', 'k':
+		mult, s = 1<<10, s[:len(s)-1]
+	case 'M', 'm':
+		mult, s = 1<<20, s[:len(s)-1]
+	case 'G', 'g':
+		mult, s = 1<<30, s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n * mult
+}
+
+func memAvailableBytes() int64 {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "MemAvailable:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kb * 1024
+	}
+	return 0
+}
+
+// acquireVMSlot blocks until this test may start a VM, and releases the slot
+// when the test finishes.
+func acquireVMSlot(t *testing.T) {
+	vmSlotsOnce.Do(func() {
+		n := *vmMax
+		if n <= 0 {
+			n = autoVMLimit()
+		}
+		// A test may hold more than one slot at a time — TestArchLinuxHibernate
+		// takes a second for the VM that resumes, and slots are only returned
+		// when the test ends — so a limit below three can wedge it against
+		// whatever else is running.
+		if n < 3 {
+			n = 3
+		}
+		if testing.Verbose() {
+			fmt.Printf("limiting concurrent VMs to %d (-vm.max)\n", n)
+		}
+		vmSlots = make(chan struct{}, n)
+	})
+
+	vmSlots <- struct{}{}
+	t.Cleanup(func() { <-vmSlots })
+}
 
 const kernelsDir = "/usr/lib/modules"
 
@@ -57,20 +192,22 @@ func copyFile(src, dst string) (int64, error) {
 
 // Note: if you see tpm2 tests fail with "integrity check failed" error make sure you pull clevis changes from
 // https://github.com/latchset/clevis/issues/244
-func startSwtpm() (*os.Process, []string, error) {
+// startSwtpm gives each caller its own TPM state and control socket, so tests
+// that need a TPM can run concurrently.
+func startSwtpm(t *testing.T) (*os.Process, []string, error) {
 	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
 		return nil, nil, err
 	}
 
-	_ = os.Remove("assets/tpm2/.lock")
-	_ = os.Remove("assets/swtpm-sock") // sometimes process crashes and leaves this file
-	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", "assets/tpm2/tpm2-00.permall"); err != nil {
+	dir := t.TempDir()
+	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", filepath.Join(dir, "tpm2-00.permall")); err != nil {
 		return nil, nil, err
 	}
+	sock := filepath.Join(dir, "swtpm-sock")
 
-	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir=assets/tpm2", "--tpm2", "--ctrl", "type=unixio,path=assets/swtpm-sock", "--flags", "not-need-init")
+	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir="+dir, "--tpm2", "--ctrl", "type=unixio,path="+sock, "--flags", "not-need-init")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -79,12 +216,42 @@ func startSwtpm() (*os.Process, []string, error) {
 		return nil, nil, unwrapExitError(err)
 	}
 
-	// wait till swtpm really starts
-	if err := waitForFile("assets/swtpm-sock", 5*time.Second); err != nil {
+	if err := waitForFile(sock, 5*time.Second); err != nil {
+		return nil, nil, err
+	}
+	if err := waitForSwtpmReady(sock, 5*time.Second); err != nil {
 		return nil, nil, err
 	}
 
-	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=assets/swtpm-sock", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+	return cmd.Process, []string{"-chardev", "socket,id=chrtpm,path=" + sock, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"}, nil
+}
+
+// waitForSwtpmReady asks the control channel for its capabilities.  The socket
+// appearing only means swtpm bound it, and a qemu that connects to one which is
+// not answering yet still starts, leaving the guest with no TPM at all.
+func waitForSwtpmReady(sock string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", sock, time.Second)
+		if err != nil {
+			lastErr = err
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// CMD_GET_CAPABILITY, answered with an eight byte capability mask.
+		if err := binary.Write(conn, binary.BigEndian, uint32(1)); err == nil {
+			_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+			if _, err = io.ReadFull(conn, make([]byte, 8)); err == nil {
+				_ = conn.Close()
+				return nil
+			}
+		}
+		lastErr = err
+		_ = conn.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("swtpm at %v did not answer its control channel: %v", sock, lastErr)
 }
 
 func startTangd() (*tang.NativeServer, []string, error) {
@@ -142,6 +309,20 @@ func waitForFile(filename string, timeout time.Duration) error {
 	}
 }
 
+// trySSHCommand is runSSHCommand without the assertions, for callers that poll:
+// require.Eventually runs its condition in a goroutine, so a require failing in
+// there fails the test outright rather than letting the next attempt happen.
+func trySSHCommand(conn *ssh.Client, command string) (string, error) {
+	sess, err := conn.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+
+	out, err := sess.CombinedOutput(command)
+	return string(out), err
+}
+
 func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	sessAnalyze, err := conn.NewSession()
 	require.NoError(t, err)
@@ -151,6 +332,36 @@ func runSSHCommand(t *testing.T, conn *ssh.Client, command string) string {
 	require.NoError(t, err)
 
 	return string(out)
+}
+
+// writableOverlay gives a test its own copy-on-write view of an asset, for the
+// tests whose guest writes have to outlive the VM and so cannot use -snapshot.
+// Writing straight to the asset would mutate what every other test of that
+// distro reads.  A qcow2 overlay opens the asset read-only and costs a few
+// hundred kilobytes, where copying the image costs its whole size on any
+// filesystem without reflink.
+func writableOverlay(t *testing.T, asset string) string {
+	t.Helper()
+
+	// Generate the source first if it is missing: the caller passes the overlay
+	// to the VM, and a temp path would not be recognised as an asset to build.
+	require.NoError(t, checkAsset(asset))
+
+	// qemu resolves a relative backing path against the overlay's directory,
+	// which is not where the asset is.
+	backing, err := filepath.Abs(asset)
+	require.NoError(t, err)
+
+	// qemu-img ships separately from the emulator on some distributions, and
+	// only this test needs it, so skip rather than fail the run over it.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed, needed to overlay " + asset)
+	}
+
+	dst := filepath.Join(t.TempDir(), filepath.Base(asset)+".qcow2")
+	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", "raw", "-b", backing, dst).CombinedOutput()
+	require.NoError(t, err, "qemu-img create %s: %s", dst, out)
+	return dst
 }
 
 // fsUUID reads a filesystem UUID out of an image file.  Tests that attach more
@@ -371,20 +582,26 @@ func generateBoosterConfig(output string, opts Opts) error {
 }
 
 type Opts struct {
-	params               []string
-	compression          string
-	modules              string // extra modules to include into image
-	modulesForceLoad     string
-	enableNetwork        bool
-	useDhcp              bool
-	activeNetIfaces      string
-	kernelVersion        string // kernel version
-	kernelPath           string
-	modulesDirectory     string
-	kernelArgs           []string
-	disk                 string
-	disks                []vmtest.QemuDisk
-	containsESP          bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	params           []string
+	compression      string
+	modules          string // extra modules to include into image
+	modulesForceLoad string
+	enableNetwork    bool
+	useDhcp          bool
+	activeNetIfaces  string
+	kernelVersion    string // kernel version
+	kernelPath       string
+	modulesDirectory string
+	kernelArgs       []string
+	disk             string
+	disks            []vmtest.QemuDisk
+	containsESP      bool // specifies whether the disks contain ESP with bootloader/kernel/initramfs
+	// persistent keeps guest writes in the backing image instead of discarding
+	// them into a temporary overlay.  Only for a test whose writes must outlive
+	// its VM: TestArchLinuxHibernate resumes a second VM from what the first one
+	// wrote.  Left false, the image is opened read-only, so several tests can
+	// boot the same asset at once and none of them can corrupt it.
+	persistent           bool
 	asIso                bool // generate ISO file instead of *.raw
 	scriptEnvvars        []string
 	mountTimeout         int           // in seconds
@@ -460,6 +677,8 @@ func (w *testLogWriter) Write(p []byte) (int, error) {
 }
 
 func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
+	acquireVMSlot(t)
+
 	require.True(t, opts.disk == "" || len(opts.disks) == 0, "Opts.disk and Opts.disks cannot be specified together")
 	require.False(t, opts.asIso && opts.containsESP)
 
@@ -482,7 +701,7 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	initRamfs, err := generateInitRamfs(workDir, opts)
 	require.NoError(t, err)
 
-	params := []string{"-m", "8G", "-smp", strconv.Itoa(runtime.NumCPU())}
+	params := []string{"-m", *vmMem, "-smp", strconv.Itoa(vmCPUs())}
 	if os.Getenv("TEST_DISABLE_KVM") != "1" {
 		params = append(params, "-enable-kvm", "-cpu", "host")
 	}
@@ -493,6 +712,9 @@ func buildVmInstance(t *testing.T, opts Opts) (*vmtest.Qemu, error) {
 	// to enable network dump
 	// params = append(params, "-object", "filter-dump,id=f1,netdev=n1,file=network.dat")
 
+	if !opts.persistent {
+		params = append(params, "-snapshot")
+	}
 	params = append(params, opts.params...)
 
 	// provide host's directory as a guest block device

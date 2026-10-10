@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -147,6 +148,28 @@ var assetGenerators = map[string]assetGenerator{
 	"tang/key.pub":                  {"tang.sh", nil},
 }
 
+// Generating an asset is not reentrant: the generators attach loop devices,
+// create device-mapper nodes and write the image in place, so two tests asking
+// for the same missing asset at once would run the generator twice over one
+// output file.  Parallel tests make that reachable, so hold a per-asset lock
+// across the existence check and the generation.
+var (
+	assetLocksMu sync.Mutex
+	assetLocks   = map[string]*sync.Mutex{}
+)
+
+func assetLock(name string) *sync.Mutex {
+	assetLocksMu.Lock()
+	defer assetLocksMu.Unlock()
+
+	lk, ok := assetLocks[name]
+	if !ok {
+		lk = &sync.Mutex{}
+		assetLocks[name] = lk
+	}
+	return lk
+}
+
 func checkAsset(file string) error {
 	if !strings.HasPrefix(file, "assets/") {
 		fmt.Println("asset path has to start with assets/ prefix")
@@ -158,6 +181,13 @@ func checkAsset(file string) error {
 	if !ok {
 		return fmt.Errorf("no generator for asset %s", file)
 	}
+
+	lk := assetLock(name)
+	lk.Lock()
+	defer lk.Unlock()
+
+	// Re-checked under the lock: a sibling test may have generated it while we
+	// waited.
 	if exists := fileExists(file); exists {
 		return nil
 	}

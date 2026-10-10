@@ -7,6 +7,8 @@ import (
 )
 
 func TestXZImageCompression(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		compression: "xz",
 		disk:        "assets/ext4.img",
@@ -19,6 +21,8 @@ func TestXZImageCompression(t *testing.T) {
 }
 
 func TestGzipImageCompression(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		compression: "gzip",
 		disk:        "assets/ext4.img",
@@ -31,6 +35,8 @@ func TestGzipImageCompression(t *testing.T) {
 }
 
 func TestLz4ImageCompression(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		compression: "lz4",
 		disk:        "assets/ext4.img",
@@ -44,6 +50,8 @@ func TestLz4ImageCompression(t *testing.T) {
 
 // Tests for https://github.com/anatol/booster/issues/117
 func TestLargeLz4ImageCompression(t *testing.T) {
+	t.Parallel()
+
 	vm, err := buildVmInstance(t, Opts{
 		compression: "lz4",
 		// The point is bulk: issue 117 only reproduces on an image large enough
