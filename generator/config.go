@@ -75,6 +75,7 @@ type UserConfig struct {
 	EnablePlymouth         bool   `yaml:"enable_plymouth"`
 	CrypttabPath           string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
 	EnableFido2            bool   `yaml:"enable_fido2"`
+	EnableClevis           *bool  `yaml:"enable_clevis"`
 	TokenTimeout           string `yaml:"token_timeout,omitempty"` // device-level keyboard-fallback timer (e.g. 30s); applies in both modes; global default, overridable by crypttab/cmdline
 	PinDelay               string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
 	PasswordEcho           string `yaml:"password_echo,omitempty"` // ordered comma-separated list of prompt echo modes; first = startup mode, Tab cycles the list; default asterisks,silent,plaintext
@@ -276,6 +277,13 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.crypttabFile = u.CrypttabPath
 	}
 	conf.enableFido2 = u.EnableFido2
+	if u.EnableClevis != nil {
+		conf.enableClevis = *u.EnableClevis
+		conf.explicitEnableClevis = true
+	} else if conf.universal {
+		conf.enableClevis = true
+	}
+	conf.readHostClevisTokens = detectHostClevisTokens
 	if err := validatePasswordEcho(u.PasswordEcho); err != nil {
 		return nil, err
 	}
