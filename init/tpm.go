@@ -124,8 +124,6 @@ func tpm2PINAuthValue(pin, salt []byte) []byte {
 }
 
 func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte, srkHandle tpmutil.Handle) ([]byte, error) {
-	tpmAwaitReady()
-
 	dev, err := openTPM()
 	if err != nil {
 		return nil, err
