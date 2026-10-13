@@ -1317,6 +1317,12 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		}
 	}
 
+	// The TPM driver may be a module that is not loaded yet. Wait here, before
+	// the PCR 11 extend and the unseal open the TPM, and before a PIN prompt.
+	if !tpmAwaitReady() {
+		return nil, fmt.Errorf("no TPM device found")
+	}
+
 	// A PCR11-bound signed policy is signed for the enter-initrd phase, so extend
 	// it before the unseal (see ensureEnterInitrdBarrier). Fail closed.
 	if signed && slices.Contains(pubkeyPCRs, pcrKernelBoot) {
