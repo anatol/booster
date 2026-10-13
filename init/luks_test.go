@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -740,6 +745,70 @@ func TestRecoverSystemdTPM2RejectsPcrlock(t *testing.T) {
 	pcrlockTok := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-blob":"AA==","tpm2_pcrlock":true}`)}
 	_, err = recoverSystemdTPM2Password(context.Background(), pcrlockTok, "cryptroot", "")
 	require.ErrorContains(t, err, "pcrlock")
+}
+
+// TestRecoverSystemdTPM2WaitsForLateTPM pins the case where the TPM driver is
+// a module and the TPM appears after unlocking has started. A signed PCR 11
+// token extends PCR 11 with "enter-initrd" before unsealing, so it has to wait
+// for the TPM first. The unseal itself fails here (dummy blob, no signature);
+// what matters is that PCR 11 was extended.
+func TestRecoverSystemdTPM2WaitsForLateTPM(t *testing.T) {
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+	resetEnterInitrdBarrier()
+	t.Cleanup(resetEnterInitrdBarrier)
+
+	// udevListener's state before the tpmrm add uevent arrives.
+	tpmReady = sync.Once{}
+	tpmReadyWg = sync.WaitGroup{}
+	tpmReadyWg.Add(1)
+	t.Cleanup(func() { tpmReady.Do(tpmReadyWg.Done) })
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	require.NoError(t, err)
+	pubkey := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	payload := fmt.Sprintf(`{"tpm2-blob":"AAAAAA==","tpm2-pcr-bank":"sha256","tpm2_pubkey":%q,"tpm2_pubkey_pcrs":[11]}`, pubkey)
+	tok := luks.Token{Type: "systemd-tpm2", Payload: []byte(payload)}
+
+	errc := make(chan error, 1)
+	go func() {
+		_, err := recoverSystemdTPM2Password(context.Background(), tok, "cryptroot", "")
+		errc <- err
+	}()
+
+	time.Sleep(300 * time.Millisecond)
+	startSwtpmTCPForTest(t)
+	tpmReady.Do(tpmReadyWg.Done)
+
+	select {
+	case err = <-errc:
+	case <-time.After(10 * time.Second):
+		require.Fail(t, "token recovery did not return")
+	}
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "enter-initrd")
+	require.True(t, enterInitrdApplied, "enter-initrd must be extended once the TPM appears")
+}
+
+// TestRecoverSystemdTPM2NoTPM pins what happens when the TPM never appears: the
+// token fails after one wait, before any PIN prompt. Without this a machine with
+// no TPM asks for a PIN that cannot be used and waits again after each attempt.
+func TestRecoverSystemdTPM2NoTPM(t *testing.T) {
+	enableSwEmulator = true
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	// udevListener's state when no tpmrm add uevent ever arrives.
+	tpmReady = sync.Once{}
+	tpmReadyWg = sync.WaitGroup{}
+	tpmReadyWg.Add(1)
+	t.Cleanup(func() { tpmReady.Do(tpmReadyWg.Done) })
+
+	tok := luks.Token{Type: "systemd-tpm2", Payload: []byte(`{"tpm2-blob":"AAAAAA==","tpm2-policy-hash":"00","tpm2-pcrs":[7],"tpm2-pin":true}`)}
+
+	_, err := recoverSystemdTPM2Password(context.Background(), tok, "cryptroot", "")
+	require.ErrorContains(t, err, "no TPM device found")
 }
 
 // The autodiscovered root is created after resolveLuksOptions has already run,
