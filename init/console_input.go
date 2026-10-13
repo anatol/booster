@@ -9,7 +9,7 @@ package main
 //   token (TPM2 PCR-only / touchless FIDO2 / clevis) wins the unlock race
 //   while the keyboard prompt is showing, the cooked reader stays stuck in
 //   read(2): boot continues for the unlocked volume but the prompt is left
-//   dangling, inputMutex/keyboardMu stay held, and any subsequent volumes
+//   dangling, inputMutex/keyboardSem stay held, and any subsequent volumes
 //   that need keyboard entry block indefinitely. The user has to manually
 //   press Enter on the now-pointless prompt.
 //
@@ -656,7 +656,7 @@ func readPasswordLocked(ctx context.Context, prompt, postPrompt string) ([]byte,
 //     line with a newline, release inputMutex via the caller.
 //   - This is the mechanism that fixes the "dangling prompt on autounlock
 //     win" bug. Without it (cooked-mode bufio.Scanner), the read blocks in
-//     read(2) until the user manually types something — meanwhile keyboardMu
+//     read(2) until the user manually types something — meanwhile keyboardSem
 //     and inputMutex stay held, blocking subsequent volumes' prompts.
 //
 // Why 100ms specifically: trades ctx-cancel responsiveness against
