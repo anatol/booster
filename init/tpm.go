@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,8 @@ var defaultECCParams = &tpm2.ECCParams{
 
 var enableSwEmulator bool
 
+const tpmDevice = "/dev/tpmrm0"
+
 func openTPM() (io.ReadWriteCloser, error) {
 	var dev io.ReadWriteCloser
 	var err error
@@ -43,7 +46,7 @@ func openTPM() (io.ReadWriteCloser, error) {
 	if enableSwEmulator {
 		dev, err = net.Dial("tcp", ":2321") // swtpm emulator is listening at port 2321
 	} else {
-		dev, err = tpm2.OpenTPM("/dev/tpmrm0")
+		dev, err = tpm2.OpenTPM(tpmDevice)
 	}
 	if err != nil {
 		return nil, err
@@ -68,6 +71,13 @@ func tpmAvailable() bool {
 
 // Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
 func tpmAwaitReady() bool {
+	// A built-in driver registers the device before init starts listening, so
+	// no uevent ever arrives for it.
+	if !enableSwEmulator {
+		if _, err := os.Stat(tpmDevice); err == nil {
+			return true
+		}
+	}
 	timedOut := waitTimeout(&tpmReadyWg, time.Second*3)
 	if timedOut {
 		info("no tpm devices found after 3 seconds.")
