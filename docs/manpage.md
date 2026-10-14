@@ -180,6 +180,8 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  * `resume=$deviceref` device reference to suspend-to-disk device.
  
  * `zfs=$pool/$dataset` specifies what ZFS dataset needs to be used for root partition. This option is only used if ZFS config option is enabled. If ZFS filesystem is enabled then `root=` boot param is ignored.
+
+ * `systemd.tpm2_measured_os=$BOOL` sets whether booster initializes systemd's NvPCRs. Defaults to yes on a UKI boot measured by systemd-stub, otherwise no.
  
  * `booster.log` configures logging. accepts a loglevel (from most to least verbose `debug`, `info`, `warning`, `error` or `null`) optionally  `,(comma)console` to print to console in addition to the kernel kmsg buffer (accessible with `dmesg` or `journalctl -b`).
  note that enabling debug level automatically disables kmsg throttling.
@@ -424,6 +426,8 @@ The recommended, cross-distribution way to build UKIs with Booster is through bo
 Distributions that already drive kernel installation through `kernel-install` (e.g. Fedora) build the UKI automatically. others have their own methods like [pacman-hook-kernel-install](https://aur.archlinux.org/packages/pacman-hook-kernel-install) for Arch-based distributions.
 
 > The legacy Arch-only helper `/usr/lib/booster/regenerate_uki` is deprecated: it does not embed the kernel command line and is therefore vulnerable to trivial attacks.
+
+On a measured UKI boot booster also initializes the NvPCRs that systemd v262 defines in `/usr/lib/nvpcr`, which systemd only allows from the initrd. A UKI built with ukify's `SignInitrdPCRs=yes` lets systemd keep their names stable across kernel updates.
 
 ### TPM2 auto-unlock and supplantation defense
 For setups which aim to protect against hardware access, secure-boot+disk encryption setups enssure the volume key is only unsealable when a signed image is booted. but a naive setup (PCR#7 only) is suceptible to the insertion of a [malicious unlockable volume](https://oddlama.org/blog/bypassing-disk-encryption-with-tpm2-unlock/) with a system that steals the key.
