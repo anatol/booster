@@ -283,6 +283,7 @@ type volumeKeyHMACer interface {
 // bank's own hash algorithm. Extending ALL active banks is required — a policy
 // satisfiable via an un-extended bank would otherwise be bypassable.
 func measureVolumeKeyToPCR15(k volumeKeyHMACer, volumeName, luksUUID string) error {
+	awaitNvPCRSetup()
 	dev, err := openTPM()
 	if err != nil {
 		return err
@@ -384,6 +385,7 @@ func ensureEnterInitrdBarrier() error {
 // through ensureEnterInitrdBarrier (sync.Once), so it is extended at most once
 // per boot. Best-effort: a failed extend warns rather than aborting handoff.
 func applyBootPhaseForwardLock() {
+	awaitNvPCRSetup()
 	if err := ensureEnterInitrdBarrier(); err != nil {
 		// ensureEnterInitrdBarrier failed (no TPM, or the extend errored); skip the
 		// leave-initrd extend.

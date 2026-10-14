@@ -495,6 +495,7 @@ func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) (
 		payload = node.Jwe
 	}
 
+	awaitNvPCRSetup()
 	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
 	waitedForTpm := false
 	for {
@@ -1322,6 +1323,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	if !tpmAwaitReady() {
 		return nil, fmt.Errorf("no TPM device found")
 	}
+	awaitNvPCRSetup()
 
 	// A PCR11-bound signed policy is signed for the enter-initrd phase, so extend
 	// it before the unseal (see ensureEnterInitrdBarrier). Fail closed.

@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
@@ -400,6 +402,40 @@ func TestSetupNvPCRs(t *testing.T) {
 		r.pcr(pcrKernelInitrd))
 }
 
+// TPM users that run a policy session or extend a PCR wait for the NvPCR setup,
+// so an extend cannot land inside a session that the setup has open. Resume
+// waits too: it hands over to a kernel whose NvPCRs this boot must initialize.
+func TestNvPCRSetupGatesTPMUsers(t *testing.T) {
+	enableSwEmulator = true // no swtpm: the latch fails fast once it runs
+	t.Cleanup(func() { enableSwEmulator = false })
+
+	for name, run := range map[string]func(){
+		"PCR 15 latch": func() { _ = measureVolumeKeyToPCR15(nil, "root", "uuid") },
+		// A missing device makes resume fail before it writes /sys/power/resume.
+		"resume": func() { _ = resume(filepath.Join(t.TempDir(), "no-such-swap")) },
+	} {
+		nvpcrSetup.Add(1)
+		var release sync.Once
+		t.Cleanup(func() { release.Do(nvpcrSetup.Done) }) // a failure must not wedge later tests
+		done := make(chan struct{})
+		go func() {
+			run()
+			close(done)
+		}()
+		select {
+		case <-done:
+			require.Fail(t, name+" ran while the NvPCR setup was in progress")
+		case <-time.After(200 * time.Millisecond):
+		}
+		release.Do(nvpcrSetup.Done)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, name+" did not run after the NvPCR setup finished")
+		}
+	}
+}
+
 func TestNvPCRBrokenTPMMatch(t *testing.T) {
 	props := func(mf string, fw uint32) []tpm2.TPMSTaggedProperty {
 		return []tpm2.TPMSTaggedProperty{
@@ -412,4 +448,26 @@ func TestNvPCRBrokenTPMMatch(t *testing.T) {
 	require.False(t, brokenNvPCRVendor(props("STM ", 73<<16|8)))
 	require.False(t, brokenNvPCRVendor(props("IBM\x00", 73<<16|4)))
 	require.False(t, brokenNvPCRVendor(nil))
+}
+
+// A TPM that never finishes the setup must not hang the boot: the wait gives
+// up after nvpcrSetupTimeout, once, and later waiters do not wait again.
+func TestNvPCRSetupWaitIsBounded(t *testing.T) {
+	oldTimeout := nvpcrSetupTimeout
+	nvpcrSetupTimeout = 100 * time.Millisecond
+	nvpcrSetup.Add(1)
+	t.Cleanup(func() {
+		nvpcrSetup.Done()
+		nvpcrSetupTimeout = oldTimeout
+		nvpcrSetupAbandoned.Store(false)
+	})
+
+	start := time.Now()
+	awaitNvPCRSetup()
+	require.GreaterOrEqual(t, time.Since(start), 100*time.Millisecond)
+	require.True(t, nvpcrSetupAbandoned.Load())
+
+	start = time.Now()
+	awaitNvPCRSetup()
+	require.Less(t, time.Since(start), 50*time.Millisecond, "a later waiter must not wait again")
 }
