@@ -1288,7 +1288,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	// is bound to the key via PolicyAuthorize, not literal PCR values. Detected by
 	// tpm2_pubkey and routed to the signed-policy unseal in the loop below, which
 	// shares the PIN prompt/retry so signed+PIN works the same as literal+PIN.
-	verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload)
+	verifyKey, pubkeyPCRs, pubkeyRef, signed, err := parseSignedToken(t.Payload)
 	if err != nil {
 		return nil, err
 	}
@@ -1351,7 +1351,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 
 		var password []byte
 		if signed {
-			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, node.PCRs, verifyKey, uint32(srkHandle), tpm2Signature, authValue)
+			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, node.PCRs, verifyKey, pubkeyRef, uint32(srkHandle), tpm2Signature, authValue)
 		} else {
 			password, err = tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
 		}
