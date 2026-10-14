@@ -195,6 +195,9 @@ const pcrSystemIdentity = 15
 // measurement plus the "enter-initrd" phase word.
 const pcrKernelBoot = 11
 
+// pcrKernelInitrd is PCR 9, where systemd records NvPCR initialization.
+const pcrKernelInitrd = 9
+
 // Boot-phase words measured into PCR 11. enter-initrd is extended before
 // unsealing a PCR11-bound volume so the live PCR matches systemd's signed
 // policy; leave-initrd after, at switch_root, as a forward-lock that bars
@@ -319,7 +322,11 @@ func measurePhaseToPCR11(word string) error {
 		return err
 	}
 	defer dev.Close()
+	return extendPCRWord(dev, pcrKernelBoot, word)
+}
 
+// extendPCRWord extends pcr with bankHash(word) in every active bank.
+func extendPCRWord(dev io.ReadWriter, pcr int, word string) error {
 	banks, err := activePCRBanks(dev)
 	if err != nil {
 		return fmt.Errorf("reading active PCR banks: %v", err)
@@ -331,15 +338,15 @@ func measurePhaseToPCR11(word string) error {
 	for _, bank := range banks {
 		h, ok := cryptoHashForPCRBank(bank)
 		if !ok {
-			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcrKernelBoot)
+			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcr)
 		}
 		hh := h.New()
 		hh.Write([]byte(word))
-		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcrKernelBoot), bank, hh.Sum(nil), ""); err != nil {
-			return fmt.Errorf("extending PCR%d in bank %v: %v", pcrKernelBoot, bank, err)
+		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcr), bank, hh.Sum(nil), ""); err != nil {
+			return fmt.Errorf("extending PCR%d in bank %v: %v", pcr, bank, err)
 		}
 	}
-	debug("PCR%d: extended phase %q across %d active bank(s) %v", pcrKernelBoot, word, len(banks), banks)
+	debug("PCR%d: extended %q across %d active bank(s) %v", pcr, word, len(banks), banks)
 	return nil
 }
 
