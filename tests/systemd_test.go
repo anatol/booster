@@ -77,6 +77,67 @@ func TestSystemdTPM2(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestNvPCRSetupBeforeTPM2Unlock boots with the host's NvPCR definitions, which
+// the generator bundles, on a boot that counts as measured. Booster must
+// initialize them and extend the PCR 9 separator before any TPM user runs, as
+// systemd-tpm2-setup-early and systemd-pcrnvdone do in a systemd initrd: the
+// systemd-tpm2 and clevis unlocks, and resume, whose kernel uses the NvPCRs
+// this boot sets up. The swap disk holds no hibernation image, so the kernel
+// carries on booting after booster hands it the device.
+func TestNvPCRSetupBeforeTPM2Unlock(t *testing.T) {
+	t.Parallel()
+	if !hostBundlesNvPCRs() {
+		t.Skip("host systemd is older than 262")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		disks  []vmtest.QemuDisk
+		args   []string
+		before string // the TPM user that must wait for the setup
+	}{
+		{
+			name:   "systemd-tpm2",
+			disks:  []vmtest.QemuDisk{{Path: "assets/systemd-tpm2.img", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
+			before: "recovered password from systemd-tpm2 token",
+		},
+		{
+			name:   "clevis-tpm2",
+			disks:  []vmtest.QemuDisk{{Path: "assets/luks2.clevis.tpm2.img", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
+			before: "recovered password from clevis token",
+		},
+		{
+			name:   "resume",
+			disks:  []vmtest.QemuDisk{{Path: "assets/systemd-tpm2.img", Format: "raw"}, {Path: "assets/swap.raw", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f"},
+			before: "resuming device",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			swtpm, params, err := startSwtpm(t)
+			require.NoError(t, err)
+			defer swtpm.Kill()
+
+			vm, err := buildVmInstance(t, Opts{
+				disks:      tc.disks,
+				kernelArgs: append(tc.args, "systemd.tpm2_measured_os=1"),
+				params:     params,
+			})
+			require.NoError(t, err)
+			defer vm.Shutdown()
+
+			require.NoError(t, vm.ConsoleExpect("NvPCR(s) initialized"))
+			require.NoError(t, vm.ConsoleExpect(`PCR9: extended "nvpcr-separator"`))
+			require.NoError(t, vm.ConsoleExpect(tc.before))
+			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+		})
+	}
+}
+
 // TestSystemdTPM2SignedPolicy boots a volume enrolled to a signed (authorized)
 // PCR policy: a real systemd-cryptenroll --tpm2-public-key token bound to PCR 11,
 // unsealed with a real systemd-measure signature for the enter-initrd phase. This
