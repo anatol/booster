@@ -1097,6 +1097,8 @@ func boost() error {
 
 	forceLoadWg := loadModules(config.ModulesForceLoad...)
 
+	startNvPCRSetup()
+
 	if plymouthEnabled {
 		// Wait for DRM modules to finish loading before starting plymouth,
 		// otherwise plymouthd can't find a display device and exits with EX_UNAVAILABLE.

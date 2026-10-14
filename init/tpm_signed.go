@@ -40,13 +40,19 @@ func resolveSignature(opt string) (data []byte, enabled bool, err error) {
 		}
 		return data, true, nil
 	default:
-		for _, p := range pcrSignatureSearchPaths {
-			if data, err := os.ReadFile(p); err == nil {
-				return data, true, nil
-			}
-		}
-		return nil, false, nil
+		data := readFirstFile(pcrSignatureSearchPaths)
+		return data, data != nil, nil
 	}
+}
+
+// readFirstFile returns the contents of the first readable path, or nil.
+func readFirstFile(paths []string) []byte {
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			return data
+		}
+	}
+	return nil
 }
 
 // parseSignedToken extracts the signed (authorized) PCR policy fields from a
@@ -75,23 +81,30 @@ func parseSignedToken(payload []byte) (pub *rsa.PublicKey, pubkeyPCRs []int, ref
 	if err != nil {
 		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: %v", err)
 	}
-	// systemd-cryptenroll stores the public key PEM-encoded (the token field is
-	// base64 of the PEM text, decoded with PEM_read_PUBKEY); accept a raw DER
-	// body too so callers that pass DER still work.
-	der := raw
-	if block, _ := pem.Decode(raw); block != nil {
+	rsaKey, err := parseRSAPublicKey(raw)
+	if err != nil {
+		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: %v", err)
+	}
+	return rsaKey, node.PubkeyPCRs, node.PubkeyRef, true, nil
+}
+
+// parseRSAPublicKey parses a PEM or raw DER SubjectPublicKeyInfo. systemd
+// stores PEM (the token field is base64 of the PEM text, decoded with
+// PEM_read_PUBKEY), and its signed-policy verify path is RSA-only.
+func parseRSAPublicKey(data []byte) (*rsa.PublicKey, error) {
+	der := data
+	if block, _ := pem.Decode(data); block != nil {
 		der = block.Bytes
 	}
 	key, err := x509.ParsePKIXPublicKey(der)
 	if err != nil {
-		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: %v", err)
+		return nil, err
 	}
 	rsaKey, isRSA := key.(*rsa.PublicKey)
 	if !isRSA {
-		// systemd's signed-policy verify path is RSA-only.
-		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: unsupported key type %T (only RSA)", key)
+		return nil, fmt.Errorf("unsupported key type %T (only RSA)", key)
 	}
-	return rsaKey, node.PubkeyPCRs, node.PubkeyRef, true, nil
+	return rsaKey, nil
 }
 
 // pcrSignature is one entry of systemd's PCR signature JSON (produced by
