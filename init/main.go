@@ -572,6 +572,7 @@ func handleLvmBlockDevice(blk *blkInfo) error {
 }
 
 func resume(devpath string) error {
+	awaitNvPCRSetup()
 	devNo, err := deviceNo(devpath)
 	if err != nil {
 		return err

@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
@@ -40,9 +42,24 @@ var (
 	// the command that consumes the session fails it with TPM_RC_PCR_CHANGED.
 	nvpcrSetup sync.WaitGroup
 
+	// nvpcrSetupTimeout bounds that wait: a TPM that hangs in NV_Extend would
+	// otherwise hang the boot.
+	nvpcrSetupTimeout   = 30 * time.Second
+	nvpcrSetupAbandoned atomic.Bool
+
 	// cmdlineMeasuredOS is systemd.tpm2_measured_os=, nil when unset.
 	cmdlineMeasuredOS *bool
 )
+
+// awaitNvPCRSetup waits for setupNvPCRs, at most nvpcrSetupTimeout per boot.
+func awaitNvPCRSetup() {
+	if nvpcrSetupAbandoned.Load() || !waitTimeout(&nvpcrSetup, nvpcrSetupTimeout) {
+		return
+	}
+	if !nvpcrSetupAbandoned.Swap(true) {
+		warning("nvpcr: setup still running after %v, continuing without it", nvpcrSetupTimeout)
+	}
+}
 
 type nvpcrDef struct {
 	Name      string `json:"name"`
