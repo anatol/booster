@@ -104,6 +104,12 @@ func tpm2PINAuthValue(pin, salt []byte) []byte {
 	} else {
 		input = pin
 	}
+	return tpm2AuthFromPIN(input)
+}
+
+// tpm2AuthFromPIN is systemd's tpm2_auth_value_from_pin: the SHA256 of the
+// (already derived) PIN string with trailing zero bytes trimmed.
+func tpm2AuthFromPIN(input []byte) []byte {
 	h := sha256.Sum256(input)
 	auth := h[:]
 	// Trim trailing zero bytes

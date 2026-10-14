@@ -134,7 +134,7 @@ func TestReadTPM2PINAuthValueWipesPIN(t *testing.T) {
 	salt := []byte("saltsalt")
 	want := tpm2PINAuthValue([]byte("1234"), salt)
 
-	got, err := readTPM2PINAuthValue(context.Background(), "PIN:", salt)
+	got, _, err := readTPM2PINAuthValue(context.Background(), "PIN:", salt, nil)
 	require.NoError(t, err)
 	require.Equal(t, want, got) // auth value derived correctly
 	require.True(t, allZero(handed), "PIN bytes not wiped after derivation")
@@ -146,6 +146,6 @@ func TestReadTPM2PINAuthValueEmptySkips(t *testing.T) {
 	}
 	t.Cleanup(func() { askKeyboardPassword = askPasswordWithFallback })
 
-	_, err := readTPM2PINAuthValue(context.Background(), "PIN:", []byte("salt"))
+	_, _, err := readTPM2PINAuthValue(context.Background(), "PIN:", []byte("salt"), nil)
 	require.ErrorIs(t, err, errTPM2Skipped)
 }

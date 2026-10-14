@@ -1225,18 +1225,23 @@ func unmarshalTPM2Field(raw json.RawMessage) (value string, sharded bool, err er
 
 // readTPM2PINAuthValue prompts for a TPM2 PIN, derives the systemd-compatible
 // auth value, and wipes the PIN bytes before returning. An empty PIN yields
-// errTPM2Skipped so the caller falls through to the passphrase prompt.
-func readTPM2PINAuthValue(ctx context.Context, prompt string, salt []byte) ([]byte, error) {
+// errTPM2Skipped so the caller falls through to the passphrase prompt. For an
+// Argon2id token it also returns the key the unsealed secret is mixed with.
+func readTPM2PINAuthValue(ctx context.Context, prompt string, salt []byte, a2 *tpm2Argon2id) (authValue, key1 []byte, err error) {
 	pin, err := askKeyboardPassword(ctx, prompt, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(pin) == 0 {
-		return nil, errTPM2Skipped
+		return nil, nil, errTPM2Skipped
 	}
-	authValue := tpm2PINAuthValue(pin, salt)
+	if a2 != nil {
+		authValue, key1 = tpm2Argon2idPIN(pin, salt, *a2)
+	} else {
+		authValue = tpm2PINAuthValue(pin, salt)
+	}
 	wipe(pin)
-	return authValue, nil
+	return authValue, key1, nil
 }
 
 func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName string, tpm2Signature string) ([]byte, error) {
@@ -1249,6 +1254,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		Salt       string          `json:"tpm2_salt"`    // base64 random salt; systemd v255+ PIN tokens
 		Srk        string          `json:"tpm2_srk"`     // base64 IESYS bytes; systemd v252+ tokens
 		Pcrlock    bool            `json:"tpm2_pcrlock"` // sealed via PolicyAuthorizeNV; unsupported
+		tpm2Argon2idFields
 	}
 	if err := json.Unmarshal(t.Payload, &node); err != nil {
 		return nil, err
@@ -1319,6 +1325,11 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		}
 	}
 
+	a2, err := node.params(node.Salt != "")
+	if err != nil {
+		return nil, err
+	}
+
 	var salt []byte
 	if node.Salt != "" {
 		var err error
@@ -1334,10 +1345,10 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	}
 	promptPrefix := ""
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		var authValue []byte
+		var authValue, key1 []byte
 		if node.Pin {
 			prompt := promptPrefix + "Enter TPM2 PIN for " + mappingName + ":"
-			authValue, err = readTPM2PINAuthValue(ctx, prompt, salt)
+			authValue, key1, err = readTPM2PINAuthValue(ctx, prompt, salt, a2)
 			if err != nil {
 				return nil, err
 			}
@@ -1352,6 +1363,12 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		// The TPM call has consumed authValue; scrub it on every path (a
 		// wrong-PIN retry redeclares a fresh one next iteration). nil is a no-op.
 		wipe(authValue)
+		if err == nil && key1 != nil {
+			unsealed := password
+			password, err = tpm2Argon2idVolumeKey(key1, unsealed)
+			wipe(unsealed)
+		}
+		wipe(key1)
 		if err == nil {
 			// Keep only the base64 form the caller uses; scrub the raw key.
 			encoded := []byte(base64.StdEncoding.EncodeToString(password))
