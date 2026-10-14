@@ -1311,6 +1311,11 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 		}
 	}
 
+	// NvPCR first write must happen in the initrd under the same enter-initrd
+	// PCR11 state as the signed LUKS policy. Kick it from the unlock path too
+	// (sync.Once) so a fast LUKS race does not leave host systemd without .auth.
+	setupNvPCRsEarly()
+
 	// A PCR11-bound signed policy is signed for the enter-initrd phase, so extend
 	// it before the unseal (see ensureEnterInitrdBarrier). Fail closed.
 	if signed && slices.Contains(pubkeyPCRs, pcrKernelBoot) {

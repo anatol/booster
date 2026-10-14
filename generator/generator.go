@@ -179,6 +179,13 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
+	// systemd ≥ 259 NvPCR definitions must be present in the UKI/initrd so
+	// early boot can initialize the NV indexes (systemd 262+ requires the
+	// first write in the initrd). See docs/nvpcr-initrd.md.
+	if err := img.appendNvPCRDefinitions(); err != nil {
+		return err
+	}
+
 	kmod, err := NewKmod(conf)
 	if err != nil {
 		return err
@@ -429,6 +436,36 @@ func (img *Image) appendExtraFiles(binaries ...string) error {
 
 		if err := img.AppendFile(f); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// nvpcrSearchDirs is the host lookup order for NvPCR definition files.
+// Overridable in tests. Mirrors systemd's conf paths for the "nvpcr" drop-in.
+var nvpcrSearchDirs = []string{"/usr/lib/nvpcr", "/etc/nvpcr"}
+
+// appendNvPCRDefinitions copies systemd NvPCR definition files into the image
+// at their host paths. Missing directories are fine (no systemd NvPCR support).
+// Trees are kept separate so runtime lookup under /usr/lib/nvpcr and /etc/nvpcr
+// matches systemd.
+func (img *Image) appendNvPCRDefinitions() error {
+	for _, dir := range nvpcrSearchDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("nvpcr: reading %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".nvpcr") {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			if err := img.AppendFile(path); err != nil {
+				return fmt.Errorf("nvpcr: %s: %v", path, err)
+			}
 		}
 	}
 	return nil
