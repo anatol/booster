@@ -92,7 +92,10 @@ var assetGenerators = map[string]assetGenerator{
 	// is applied (no PolicyPCR call).  Regression test for the bug where an empty
 	// PCR selection still mutated the policy digest, causing auth failure.
 	"systemd-tpm2-nopcr-pin.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=d9ef7bf3-b4f8-4271-9f3c-df63d457fcc6", "FS_UUID=6abcf123-4182-452b-9c87-a769dc344e3b", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654", "CRYPTENROLL_TPM2_PCRS="}},
-	"systemd-tpm2-srk.img":       {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
+	// systemd-tpm2-argon2id-pin.img: TPM2+PIN token in systemd 262's Argon2id
+	// mode. Building it needs systemd-cryptenroll 262 or newer.
+	"systemd-tpm2-argon2id-pin.img": {"systemd_tpm2.sh", []string{"LUKS_UUID=3b1f6a2e-8c47-4d95-a0e3-6f2c9d7b14e8", "FS_UUID=9e4c2a71-5d38-4b06-8f1a-c7e3b2d95a60", "LUKS_PASSWORD=567", "CRYPTENROLL_TPM2_PIN=foo654", "CRYPTENROLL_TPM2_PIN_MODE=yes"}},
+	"systemd-tpm2-srk.img":          {"systemd_tpm2.sh", []string{"LUKS_UUID=c09debc6-6a06-4317-94f5-0916bb9ea1c8", "FS_UUID=5a6daa83-ea51-47dd-a38b-2b66d5cc8428", "LUKS_PASSWORD=567"}},
 	// systemd-tpm2-pcr15.img: TPM2 token bound to PCR15 (+10+13) — exercises the
 	// PCR15 re-unseal latch. At enroll/boot PCR15 is uninitialized (0); booster
 	// must extend it after unseal so the key can't be re-unsealed.

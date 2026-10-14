@@ -138,6 +138,34 @@ func TestSystemdTPM2WithPin(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestSystemdTPM2Argon2idPin unlocks a token enrolled with systemd 262's
+// default --tpm2-with-pin=yes, which hardens the PIN with Argon2id and mixes
+// the unsealed secret through HKDF. The wrong PIN goes first: before booster
+// understood the format, every attempt failed this way and counted toward the
+// TPM's dictionary-attack lockout.
+func TestSystemdTPM2Argon2idPin(t *testing.T) {
+	t.Parallel()
+
+	swtpm, params, err := startSwtpm(t)
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:       "assets/systemd-tpm2-argon2id-pin.img",
+		kernelArgs: []string{"rd.luks.uuid=3b1f6a2e-8c47-4d95-a0e3-6f2c9d7b14e8", "root=UUID=9e4c2a71-5d38-4b06-8f1a-c7e3b2d95a60"},
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter TPM2 PIN for"))
+	require.NoError(t, vm.ConsoleWrite("wrongpin\n"))
+	require.NoError(t, vm.ConsoleExpect("TPM2 PIN incorrect"))
+	require.NoError(t, vm.ConsoleWrite("foo654\n"))
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 // TestSystemdTPM2NoPcrPin tests unlock of a LUKS2 volume whose TPM2+PIN token
 // was enrolled without PCR binding (--tpm2-pcrs="").  The policy digest only
 // covers PolicyPassword; a previous bug caused policyPCRSession to call
