@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -152,11 +153,18 @@ func TestArchLinuxHibernate(t *testing.T) {
 			// Read the UUID from the asset, not the overlay: blkid sees a qcow2
 			// container there, not the filesystem inside it.
 			rootRef := "UUID=" + fsUUID(t, "assets/archlinux.ext4.raw")
+			// Hibernating powers the TPM off, which leaves every NvPCR unwritten:
+			// the resume boot's initrd sets them up again before the resumed
+			// system extends them. Both boots share one swtpm state.
+			tpmState := t.TempDir()
+			swtpm, tpmParams, err := startSwtpmWithState(t, tpmState)
+			require.NoError(t, err)
+			defer swtpm.Kill()
 			opts := Opts{
 				kernelVersion: ver,
 				modules:       "e1000",
 				compression:   compression,
-				params:        sshParams,
+				params:        append(append([]string{}, sshParams...), tpmParams...),
 				disks: []vmtest.QemuDisk{
 					{Path: rootDisk, Format: "qcow2", Controller: controller},
 					{Path: writableOverlay(t, "assets/swap.raw"), Format: "qcow2"},
@@ -167,7 +175,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 				// wrote, so these writes have to reach the disk rather than a
 				// discarded overlay.
 				persistent: true,
-				kernelArgs: []string{"root=" + rootRef, "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f", "rw"},
+				kernelArgs: []string{"root=" + rootRef, "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f", "rw", "systemd.tpm2_measured_os=1"},
 			}
 
 			vm, err := buildVmInstance(t, opts)
@@ -198,6 +206,7 @@ func TestArchLinuxHibernate(t *testing.T) {
 			require.NoError(t, err, string(out))
 
 			require.NoError(t, vm.ConsoleExpect("swap on /dev/sd"))
+			guestNvPCRs := hostBundlesNvPCRs() && guestNvPCRExtend(t, conn)
 
 			sess2, err := conn.NewSession()
 			require.NoError(t, err)
@@ -211,12 +220,21 @@ func TestArchLinuxHibernate(t *testing.T) {
 			// has already released it.  Kill blocks until the process is gone
 			// and is a no-op once it has.
 			vm.Kill()
+			swtpm.Kill()
+			_, _ = swtpm.Wait()
+			swtpm2, tpmParams2, err := startSwtpmWithState(t, tpmState)
+			require.NoError(t, err)
+			defer swtpm2.Kill()
+			opts.params = append(append([]string{}, sshParams...), tpmParams2...)
 
 			// wakeing it up
 			vm2, err := buildVmInstance(t, opts)
 			require.NoError(t, err)
 			defer vm2.Shutdown()
 
+			if guestNvPCRs {
+				require.NoError(t, vm2.ConsoleExpect(`PCR9: extended "nvpcr-separator"`))
+			}
 			require.NoError(t, vm2.ConsoleExpect("PM: Image loading done"))
 
 			// Image loading done only means the image is in memory: tasks are
@@ -238,6 +256,26 @@ func TestArchLinuxHibernate(t *testing.T) {
 			require.NoError(t, err, string(out))
 			require.Equal(t, "Linux "+ver, strings.TrimSpace(string(out)),
 				"resumed VM should be running the kernel it hibernated on")
+			if guestNvPCRs {
+				require.True(t, guestNvPCRExtend(t, conn), "the resumed system must still extend its NvPCRs")
+			}
 		})
 	}
+}
+
+// guestNvPCRExtend extends the login NvPCR from the guest, as systemd-pcrlogin
+// does. It returns false when the guest's systemd is older than 262, which
+// initializes NvPCRs differently.
+func guestNvPCRExtend(t *testing.T, conn *ssh.Client) bool {
+	t.Helper()
+	sess, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess.Close()
+	out, err := sess.CombinedOutput(`[ "$(systemctl --version | awk 'NR==1 {print $2}')" -ge 262 ] || exit 77; /usr/lib/systemd/systemd-pcrextend --nvpcr=login booster-test`)
+	var exit *ssh.ExitError
+	if errors.As(err, &exit) && exit.ExitStatus() == 77 {
+		return false
+	}
+	require.NoError(t, err, string(out))
+	return true
 }
