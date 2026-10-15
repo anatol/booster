@@ -274,6 +274,70 @@ func TestNvPCRInitSigned(t *testing.T) {
 	require.Equal(t, want[:], r.nvRead(testNvIndexLogin))
 }
 
+// countingTPM counts the commands written to the TPM by command code.
+type countingTPM struct {
+	io.ReadWriter
+	counts map[tpm2.TPMCC]int
+}
+
+func (c *countingTPM) Write(b []byte) (int, error) {
+	if len(b) >= 10 {
+		c.counts[tpm2.TPMCC(binary.BigEndian.Uint32(b[6:10]))]++
+	}
+	return c.ReadWriter.Write(b)
+}
+
+// The signed first write verifies the "initrd" signature once per setup and
+// reuses the ticket for every NvPCR. Each VerifySignature costs about 500 ms
+// on a Nuvoton dTPM, so verifying per index multiplies the setup time.
+func TestNvPCRInitSignedVerifiesOnce(t *testing.T) {
+	r := newNvPCRRig(t)
+	r.signInitrd()
+	defs := []nvpcrDef{
+		r.def("hardware", testNvIndexHardware, `,"priority":500`),
+		r.def("login", testNvIndexLogin, `,"priority":800`),
+	}
+	c := &countingTPM{ReadWriter: r.dev, counts: map[tpm2.TPMCC]int{}}
+
+	require.NoError(t, initNvPCRs(c, defs))
+	require.Equal(t, 1, c.counts[tpm2.TPMCCVerifySignature])
+	require.Equal(t, 2, c.counts[tpm2.TPMCCPolicyAuthorize])
+}
+
+// A reused ticket only proves the key signed the approved digest. The TPM
+// still compares that digest with the session's live PolicyPCR, so a ticket
+// taken before a PCR 11 change cannot satisfy PolicyAuthorize after it.
+func TestNvPCRSignedTicketBoundToPCR11(t *testing.T) {
+	r := newNvPCRRig(t)
+	r.signInitrd()
+	init, err := chooseNvPCRInit(r.tpm)
+	require.NoError(t, err)
+	writePolicy, err := nvpcrWritePolicy(init.digest)
+	require.NoError(t, err)
+	nv, err := defineNvPCR(r.tpm, r.def("login", testNvIndexLogin, ""), writePolicy)
+	require.NoError(t, err)
+	require.NoError(t, firstWriteNvPCR(r.tpm, nv, init))
+	require.NotEmpty(t, init.ticket.keyName.Buffer)
+
+	extendPhasePCR11(t, r.tpm, phaseLeaveInitrd)
+	sess, cleanup, err := tpm2.PolicySession(r.tpm, tpm2.TPMAlgSHA256, 16)
+	require.NoError(t, err)
+	defer func() { _ = cleanup() }()
+	_, err = (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+		Hash:      tpm2.TPMAlgSHA256,
+		PCRSelect: tpm2.PCClientCompatible.PCRs(uint(pcrKernelBoot)),
+	}}}}).Execute(r.tpm)
+	require.NoError(t, err)
+	_, err = (&tpm2.PolicyAuthorize{
+		PolicySession:  sess.Handle(),
+		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: init.ticket.approved},
+		PolicyRef:      tpm2.TPM2BDigest{Buffer: policyRefDigest(nvpcrInitPolicyRef)},
+		KeySign:        init.ticket.keyName,
+		CheckTicket:    init.ticket.validation,
+	}).Execute(r.tpm)
+	require.Error(t, err)
+}
+
 // Without an "initrd" signature the first write is bound to the current PCR 11
 // (systemd v263). The policy is lost once PCR 11 leaves the initrd value, which
 // is what keeps a booted system from initializing an NvPCR itself.

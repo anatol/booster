@@ -151,6 +151,7 @@ type nvpcrInit struct {
 	digest []byte // policy digest of the init branch, stored in the .auth file
 	key    *rsa.PublicKey
 	sigs   map[string][]pcrSignature // nil for the PCR 11 fallback
+	ticket *policyTicket
 }
 
 // pcr11PolicyDigest returns the PolicyPCR digest over the current sha256 PCR 11.
@@ -200,7 +201,7 @@ func chooseNvPCRInit(t transport.TPM) (nvpcrInit, error) {
 		if err := (&tpm2.PolicyAuthorize{KeySign: *name, PolicyRef: tpm2.TPM2BDigest{Buffer: policyRefDigest(nvpcrInitPolicyRef)}}).Update(calc); err != nil {
 			return nvpcrInit{}, err
 		}
-		return nvpcrInit{digest: calc.Hash().Digest, key: key, sigs: sigs}, nil
+		return nvpcrInit{digest: calc.Hash().Digest, key: key, sigs: sigs, ticket: &policyTicket{}}, nil
 	}
 	debug("nvpcr: no signed initrd policy, binding the first write to PCR%d", pcrKernelBoot)
 	return nvpcrInit{digest: approved}, nil
@@ -342,7 +343,7 @@ func firstWriteNvPCROnce(t transport.TPM, nv tpm2.NamedHandle, init nvpcrInit) e
 	defer func() { _ = cleanup() }()
 
 	if init.key != nil {
-		if err := policyAuthorizeSigned(t, sess.Handle(), init.sigs, "sha256", init.key, uint32(init.key.E), nvpcrInitPolicyRef, []int{pcrKernelBoot}); err != nil {
+		if err := policyAuthorizeSigned(t, sess.Handle(), init.sigs, "sha256", init.key, uint32(init.key.E), nvpcrInitPolicyRef, []int{pcrKernelBoot}, init.ticket); err != nil {
 			return err
 		}
 	} else if err := policyPCR11(t, sess.Handle()); err != nil {
