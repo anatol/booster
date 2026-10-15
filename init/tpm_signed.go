@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -257,7 +258,7 @@ func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string]
 	}
 	defer cleanup()
 
-	if err := policyAuthorizeSigned(t, sess.Handle(), sigs, bankName, verifyKey, exp, ref, pubkeyPCRs); err != nil {
+	if err := policyAuthorizeSigned(t, sess.Handle(), sigs, bankName, verifyKey, exp, ref, pubkeyPCRs, nil); err != nil {
 		return nil, err
 	}
 
@@ -295,11 +296,20 @@ func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string]
 	return unseal.OutData.Buffer, nil
 }
 
+// policyTicket is a VerifySignature result. The TPM keeps no record of a
+// ticket, so PolicyAuthorize accepts it again for the same approved digest.
+type policyTicket struct {
+	approved   []byte
+	keyName    tpm2.TPM2BName
+	validation tpm2.TPMTTKVerified
+}
+
 // policyAuthorizeSigned runs PolicyPCR over pcrs in sess, finds the signature for
 // the resulting digest and ref, and satisfies PolicyAuthorize with it. The signed
 // data is the approved digest followed by the ref digest (TPM 2.0 Part 3,
-// PolicyAuthorize; systemd tpm2_make_policy_authorize_tbs_data).
-func policyAuthorizeSigned(t transport.TPM, sess tpm2.TPMHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, pcrs []int) error {
+// PolicyAuthorize; systemd tpm2_make_policy_authorize_tbs_data). A non-nil
+// cache holding a ticket for the same digest skips the signature check.
+func policyAuthorizeSigned(t transport.TPM, sess tpm2.TPMHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, pcrs []int, cache *policyTicket) error {
 	pcrsU := make([]uint, len(pcrs))
 	for i, p := range pcrs {
 		pcrsU[i] = uint(p)
@@ -317,39 +327,54 @@ func policyAuthorizeSigned(t transport.TPM, sess tpm2.TPMHandle, sigs map[string
 		return err
 	}
 	approved := pgd.PolicyDigest.Buffer
+	refDigest := policyRefDigest(ref)
 
+	if cache == nil || !bytes.Equal(cache.approved, approved) {
+		tk, err := verifyPolicySignature(t, sigs, bankName, verifyKey, exp, ref, approved)
+		if err != nil {
+			return err
+		}
+		if cache == nil {
+			cache = &policyTicket{}
+		}
+		*cache = tk
+	}
+	if _, err := (&tpm2.PolicyAuthorize{
+		PolicySession:  sess,
+		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: approved},
+		PolicyRef:      tpm2.TPM2BDigest{Buffer: refDigest},
+		KeySign:        cache.keyName,
+		CheckTicket:    cache.validation,
+	}).Execute(t); err != nil {
+		return fmt.Errorf("PolicyAuthorize: %w", err)
+	}
+	return nil
+}
+
+// verifyPolicySignature has the TPM check the signature over approved and ref
+// and returns the ticket PolicyAuthorize takes.
+func verifyPolicySignature(t transport.TPM, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, approved []byte) (policyTicket, error) {
 	entry, err := selectSignature(sigs, bankName, verifyKey, approved, ref)
 	if err != nil {
-		return err
+		return policyTicket{}, err
 	}
 
 	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(verifyKey, exp)), Hierarchy: tpm2.TPMRHOwner}).Execute(t)
 	if err != nil {
-		return fmt.Errorf("loading verification key: %w", err)
+		return policyTicket{}, fmt.Errorf("loading verification key: %w", err)
 	}
 	defer flushHandle(t, le.ObjectHandle)
 
-	refDigest := policyRefDigest(ref)
-	h := sha256.Sum256(append(append([]byte{}, approved...), refDigest...))
+	h := sha256.Sum256(append(append([]byte{}, approved...), policyRefDigest(ref)...))
 	vs, err := (&tpm2.VerifySignature{
 		KeyHandle: le.ObjectHandle,
 		Digest:    tpm2.TPM2BDigest{Buffer: h[:]},
 		Signature: rsassaSHA256Sig(entry.Sig),
 	}).Execute(t)
 	if err != nil {
-		return fmt.Errorf("verifying PCR signature: %w", err)
+		return policyTicket{}, fmt.Errorf("verifying PCR signature: %w", err)
 	}
-
-	if _, err := (&tpm2.PolicyAuthorize{
-		PolicySession:  sess,
-		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: approved},
-		PolicyRef:      tpm2.TPM2BDigest{Buffer: refDigest},
-		KeySign:        le.Name,
-		CheckTicket:    vs.Validation,
-	}).Execute(t); err != nil {
-		return fmt.Errorf("PolicyAuthorize: %w", err)
-	}
-	return nil
+	return policyTicket{approved: approved, keyName: le.Name, validation: vs.Validation}, nil
 }
 
 // pcrBankAlgID maps a systemd tpm2-pcr-bank string to its TPM algorithm id,
