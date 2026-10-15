@@ -376,6 +376,31 @@ func TestLUKS2DetachedHeaderCmdlineRawDevice(t *testing.T) {
 // volume whose detached header lives as a file on a separate block device, specified
 // via the rd.luks.header=<UUID>=/root.hdr:UUID=<devuuid> kernel parameter.
 // This exercises the headerDeviceRef != nil path in acquireHeader (mountKeyDevice).
+// rd.luks.uuid= names nothing, so the entry supplies the name. Without that the
+// mapping kept its luks-UUID fallback, /dev/mapper/cryptroot was never created
+// and the boot waited out its root device timeout.
+func TestLUKS2CrypttabNamesTheVolume(t *testing.T) {
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.img",
+		kernelArgs: []string{
+			"rd.luks.uuid=639b8fdd-36ba-443e-be3e-e5b335935502",
+			"root=/dev/mapper/cryptroot",
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 	t.Parallel()
 
@@ -395,6 +420,38 @@ func TestLUKS2DetachedHeaderCmdlineOnDevice(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// A UUID-less rd.luks.options= is a default for devices crypttab does not
+// describe, and this device has an entry, so it must not receive the list.
+func TestLUKS2UUIDLessOptionsWithheldFromCrypttabDevice(t *testing.T) {
+	t.Parallel()
+
+	// key-slot=3 is an empty slot. It reaches the device only if the UUID-less
+	// list is wrongly applied to a device crypttab describes: the unlock would
+	// fail and the boot would never reach userspace, so a successful boot is
+	// the assertion.
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.img",
+		kernelArgs: []string{
+			"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot",
+			"rd.luks.options=key-slot=3",
+			"root=/dev/mapper/cryptroot",
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect(`booster: rd.luks.options: cryptroot: "key-slot=3" not applied`))
 	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))

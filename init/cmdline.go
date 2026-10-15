@@ -179,6 +179,9 @@ func parseParams(params string) error {
 	// is not reported as replaced.
 	var setAside []string
 	set := make(map[string]bool)
+	var globalOptionsRaw string
+	useCrypttab := true
+	optionsRaw := make(map[string]string) // per-device rd.luks.options= as written, by UUID
 	replace := func(param string, uuid UUID, old, new string) {
 		id := param + uuid.toString()
 		if set[id] && old != new {
@@ -260,10 +263,13 @@ func parseParams(params string) error {
 			if head, rest, found := strings.Cut(value, "="); found {
 				if uuid, err := parseUUID(head); err == nil {
 					m := findOrCreateLuksMapping(uuid)
-					if m.cmdlineOptions == nil {
-						opts := newLuksOptions()
-						m.cmdlineOptions = &opts
+					if prev, ok := optionsRaw[uuid.toString()]; ok && prev != rest {
+						setAside = append(setAside, fmt.Sprintf("rd.luks.options: %s: %q dropped. A later rd.luks.options= for the same device replaces it.", uuid.toString(), joinOptions(m.cmdlineOptions.appliedOptions)))
 					}
+					optionsRaw[uuid.toString()] = rest
+					// a repeat replaces the list whole, as in systemd
+					opts := newLuksOptions()
+					m.cmdlineOptions = &opts
 					skip, err := parseLuksOptions(m.cmdlineOptions, rest, "rd.luks.options: "+head)
 					if err != nil {
 						return err
@@ -278,12 +284,26 @@ func parseParams(params string) error {
 			}
 			// A list with no UUID goes through the same parser, into an
 			// option set held until every source is known.
+			if globalOptionsRaw != "" && globalOptionsRaw != value {
+				setAside = append(setAside, fmt.Sprintf("rd.luks.options: %q dropped. A later rd.luks.options= replaces it.", joinOptions(globalOptions.appliedOptions)))
+			}
+			globalOptionsRaw = value
+			globalOptions = newLuksOptions()
 			skip, err := parseLuksOptions(&globalOptions, value, "rd.luks.options")
 			if err != nil {
 				return err
 			}
 			if skip != "" {
 				warning("rd.luks.options: %q selects a volume type or opts out of unlocking, which the kernel command line cannot do; ignoring it", skip)
+			}
+		case "rd.luks.crypttab":
+			// a bare switch means yes, as in systemd
+			if value == "" {
+				useCrypttab = true
+			} else if b, ok := parseBoolean(value); ok {
+				useCrypttab = b
+			} else {
+				warning("rd.luks.crypttab=%s is not a boolean, ignoring", value)
 			}
 		case "rd.luks.name":
 			parts := strings.Split(value, "=")
@@ -408,8 +428,21 @@ func parseParams(params string) error {
 	globalLuksOptions = globalOptions
 	globalLuksKeyfile = globalKeyfile
 	cmdlineSetAside = setAside
+	readCrypttab = useCrypttab
 
 	return nil
+}
+
+// parseBoolean accepts the spellings of systemd's parse_boolean()
+// (src/basic/parse-util.c).
+func parseBoolean(s string) (value, ok bool) {
+	switch strings.ToLower(s) {
+	case "1", "yes", "y", "true", "t", "on":
+		return true, true
+	case "0", "no", "n", "false", "f", "off":
+		return false, true
+	}
+	return false, false
 }
 
 // parseTokenTimeout parses a token-timeout value from rd.luks.options.
@@ -442,4 +475,15 @@ func parseTokenTimeout(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("negative timeout %q", s)
 	}
 	return d, nil
+}
+
+// cmdlineUUID returns the UUID a per-device rd.luks.options= would name for this
+// mapping, or "" when its device reference is not a UUID.
+func (m *luksMapping) cmdlineUUID() string {
+	if m.ref != nil && m.ref.format == refFsUUID {
+		if u, ok := m.ref.data.(UUID); ok {
+			return u.toString()
+		}
+	}
+	return ""
 }

@@ -379,16 +379,6 @@ func TestMountFlagsRoRw(t *testing.T) {
 	require.NotZero(t, flags&unix.MS_RDONLY, "rw ro: ro is last, should be read-only")
 }
 
-func TestRepeatedPerDeviceListsAccumulate(t *testing.T) {
-	// The UUID-less form already accumulates across repeats; the per-device form
-	// used to let the last one silently discard the first.
-	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
-	luksMappings = nil
-	require.NoError(t, parseParamsResolved("rd.luks.name="+u+"=root rd.luks.options="+u+"=tries=5 rd.luks.options="+u+"=key-slot=2"))
-	m := luksMappings[0]
-	require.Equal(t, 5, m.tries, "the first list survives the second")
-	require.Equal(t, 2, m.keySlot)
-}
 func TestParseParamsGlobalLuksOptions(t *testing.T) {
 	const root = "ab6d7d78-b816-4495-928d-766d6607035e"
 	const data = "7843d77f-cdd6-4289-a4de-a708c4aacede"
@@ -503,4 +493,62 @@ func TestRepeatedLuksParamsAreReported(t *testing.T) {
 		`rd.luks.data: ` + u + `: "/dev/sda" dropped. A later rd.luks.data= for the same device replaces it.`,
 		`rd.luks.key: "/g1" dropped. A later rd.luks.key= replaces it.`,
 	}, logged)
+}
+
+// A repeated rd.luks.options= replaces the earlier list whole, per device and
+// UUID-less alike, as systemd's generator does, so a later list can drop an
+// option an earlier one set. The replaced list is named; a repeat of the same
+// list replaces nothing and is not.
+func TestRepeatedLuksOptionsReplace(t *testing.T) {
+	withLuksGlobals(t)
+	origGlobal := globalLuksOptions
+	t.Cleanup(func() { globalLuksOptions = origGlobal })
+
+	const u = "ab6d7d78-b816-4495-928d-766d6607035e"
+	luksMappings = nil
+	require.NoError(t, parseParams("rd.luks.options="+u+"=tries=2,discard rd.luks.options="+u+"=key-slot=1"+
+		" rd.luks.options=tries=5,discard rd.luks.options=no-read-workqueue rd.luks.options=no-read-workqueue"))
+	logged := resolveLuksOptions(nil)
+
+	require.Len(t, luksMappings, 1)
+	per := luksMappings[0].cmdlineOptions
+	require.Equal(t, 1, per.keySlot)
+	require.Equal(t, luksOptionUnset, per.tries, "the earlier list's tries= is gone")
+	require.Empty(t, per.options, "and so is its discard")
+
+	require.Equal(t, luksOptionUnset, globalLuksOptions.tries)
+	require.Equal(t, []string{luks.FlagNoReadWorkqueue}, globalLuksOptions.options)
+
+	require.Subset(t, logged, []string{
+		`rd.luks.options: ` + u + `: "tries=2,discard" dropped. A later rd.luks.options= for the same device replaces it.`,
+		`rd.luks.options: "tries=5,discard" dropped. A later rd.luks.options= replaces it.`,
+	})
+	for _, msg := range logged {
+		require.NotContains(t, msg, `"no-read-workqueue" dropped`, "a repeat of the same list replaces nothing")
+	}
+}
+
+// rd.luks.crypttab=no ignores the bundled crypttab, as systemd's generator
+// does, so an entry that stops a boot can be switched off from the boot
+// loader. rd.luks.* parameters keep working. The value is systemd's boolean.
+func TestRdLuksCrypttabSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		params string
+		read   bool
+	}{
+		{"", true},
+		{"rd.luks.crypttab=no", false},
+		{"rd.luks.crypttab=0", false},
+		{"rd.luks.crypttab=OFF", false},
+		{"rd.luks.crypttab=no rd.luks.crypttab=yes", true},
+		{"rd.luks.crypttab", true},
+		{"rd.luks.crypttab=maybe", true},
+	} {
+		t.Run(tc.params, func(t *testing.T) {
+			withLuksGlobals(t)
+			luksMappings = nil
+			require.NoError(t, parseParams(tc.params))
+			require.Equal(t, tc.read, readCrypttab)
+		})
+	}
 }

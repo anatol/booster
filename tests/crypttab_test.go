@@ -132,7 +132,10 @@ func TestCrypttabKeySlot(t *testing.T) {
 // precedence over crypttab entries for the same device. The crypttab names the
 // device "cryptroot" but the cmdline overrides it to "cmdroot"; the passphrase
 // prompt should name the device "cmdroot" confirming the crypttab entry was skipped.
-func TestCrypttabCmdlinePrecedence(t *testing.T) {
+// An entry names the volume even where rd.luks.name= proposes another, so root=
+// has to point at the entry's name and /dev/mapper/cmdroot is never created.
+// This is the breaking half of adopting systemd's precedence.
+func TestCrypttabNameOutranksCmdline(t *testing.T) {
 	t.Parallel()
 
 	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
@@ -145,13 +148,13 @@ func TestCrypttabCmdlinePrecedence(t *testing.T) {
 		crypttabFile: crypttabPath,
 		kernelArgs: []string{
 			"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cmdroot",
-			"root=/dev/mapper/cmdroot",
+			"root=/dev/mapper/cryptroot",
 		},
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
-	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cmdroot:"))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
@@ -270,10 +273,40 @@ func TestCrypttabPathEntryPairsWithCmdlineUUID(t *testing.T) {
 	defer vm.Shutdown()
 
 	require.NoError(t, vm.ConsoleExpect("LUKS device /dev/sda is described twice"))
-	// the entry named the volume and the command line did not, so the name it
-	// declared is the setting this pairing costs it
-	require.NoError(t, vm.ConsoleExpect(`"cryptroot" from crypttab entry "cryptroot" is not applied`))
-	require.NoError(t, vm.ConsoleExpect("Enter passphrase for luks-639b8fdd-36ba-443e-be3e-e5b335935502:"))
+	// the entry owns the volume name, so the command line's default is the
+	// setting this pairing costs it
+	require.NoError(t, vm.ConsoleExpect(`volume name is "cryptroot" from crypttab entry "cryptroot"`))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+	require.NoError(t, vm.ConsoleWrite("1234\n"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// A crypttab entry that stops the boot, here key-slot=3 on an empty slot, is
+// baked into the image and owns its fields, so rd.luks.crypttab=no is the way
+// past it from the boot loader. The volume then comes from the command line
+// alone: its name, and a key slot that works.
+func TestCrypttabDisabledFromCmdline(t *testing.T) {
+	t.Parallel()
+
+	crypttabPath := filepath.Join(t.TempDir(), "crypttab")
+	require.NoError(t, os.WriteFile(crypttabPath, []byte(
+		"cryptroot UUID=639b8fdd-36ba-443e-be3e-e5b335935502 none x-initrd.attach,key-slot=3\n",
+	), 0o644))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk: "assets/luks2.img",
+		kernelArgs: []string{
+			"rd.luks.crypttab=no",
+			"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cmdroot",
+			"root=/dev/mapper/cmdroot",
+		},
+		crypttabFile: crypttabPath,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("crypttab: ignored, rd.luks.crypttab=no"))
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cmdroot:"))
 	require.NoError(t, vm.ConsoleWrite("1234\n"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }

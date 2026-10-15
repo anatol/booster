@@ -16,6 +16,10 @@ import (
 // parseCrypttab reads /etc/crypttab from the image and returns LUKS mappings.
 // Silently succeeds if the file is absent.
 func parseCrypttab() ([]*luksMapping, error) {
+	if !readCrypttab {
+		info("crypttab: ignored, rd.luks.crypttab=no")
+		return nil, nil
+	}
 	f, err := os.Open("/etc/crypttab")
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -272,15 +276,6 @@ func findLuksMapping(ref *deviceRef) *luksMapping {
 // using the same device reference, then composes every record. It returns the
 // messages it logged.
 func resolveLuksOptions(ctMappings []*luksMapping) []string {
-	if globalLuksKeyfile != "" {
-		// the command line's own default, so it fills before crypttab does
-		for _, m := range luksMappings {
-			if m.keyfile == "" {
-				m.keyfile = globalLuksKeyfile
-			}
-		}
-	}
-
 	for _, cm := range ctMappings {
 		opts := cm.luksOptions
 		cm.crypttabOptions = &opts
@@ -296,6 +291,15 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 		existing.pairingConflicts = append(existing.pairingConflicts, pairCrypttabEntry(existing, cm, nil)...)
 	}
 
+	if globalLuksKeyfile != "" {
+		for _, m := range luksMappings {
+			// a default for devices no entry describes, the rule the options follow
+			if m.crypttabOptions == nil && m.keyfile == "" {
+				m.keyfile, m.keyfileFrom = globalLuksKeyfile, "rd.luks.key= carrying no UUID"
+			}
+		}
+	}
+
 	logged := reportSetAside(cmdlineSetAside)
 	for _, m := range luksMappings {
 		m.luksOptions, m.optionConflicts, m.setAside = composedOptions(m)
@@ -305,30 +309,53 @@ func resolveLuksOptions(ctMappings []*luksMapping) []string {
 	return logged
 }
 
-// pairCrypttabEntry merges a crypttab entry into m. The entry's keyfile (field 3)
-// is used when m has none, and its options (field 4) are merged option by
-// option, so a second entry overrides only the options it sets. blk is nil when
-// crypttab is read.
+// pairCrypttabEntry pairs a crypttab entry with m. The entry's name, device and
+// keyfile (fields 1 to 3) win against the command line. When two entries name
+// the same disk, the first keeps fields 1 to 3 and their options (field 4)
+// combine per option. blk is nil when crypttab is read.
 func pairCrypttabEntry(m, entry *luksMapping, blk *blkInfo) []luksConflict {
 	opts := *entry.crypttabOptions
 	from := sourceLabel(entry)
 	var conflicts []luksConflict
 
-	if entry.name != m.name {
+	first := !m.fromCrypttab && len(m.crypttabNames) == 0
+	if first {
+		if entry.name != m.name {
+			conflicts = append(conflicts, luksConflict{
+				field: "volume name", kept: entry.name, keptFrom: fmt.Sprintf("crypttab entry %q", entry.name),
+				dropped: m.name, droppedFrom: sourceLabel(m),
+			})
+		}
+		if m.keyfile != "" && withDeviceRef(entry.keyfile, entry.keyfileDeviceRef) != withDeviceRef(m.keyfile, m.keyfileDeviceRef) {
+			conflicts = append(conflicts, luksConflict{
+				field: "key file", kept: withDeviceRef(entry.keyfile, entry.keyfileDeviceRef), keptFrom: keyfileLabel(entry),
+				dropped: withDeviceRef(m.keyfile, m.keyfileDeviceRef), droppedFrom: keyfileLabel(m),
+			})
+		}
+		m.name = entry.name
+		m.keyfile, m.keyfileDeviceRef, m.keyfileFrom = entry.keyfile, entry.keyfileDeviceRef, keyfileLabel(entry)
+	} else if entry.name != m.name {
 		conflicts = append(conflicts, luksConflict{
-			field: "volume name", kept: m.name, keptFrom: sourceLabel(m),
+			field: "volume name", kept: m.name, keptFrom: crypttabLabel(m),
 			dropped: entry.name, droppedFrom: from,
 		})
 	}
 
-	// The pin and the entry may reference one disk in two forms, which only the
+	// Two references may name one disk in different forms, which only the
 	// arrived device can confirm.
-	if pin := m.dataDeviceRef; pin != nil && !deviceRefEqual(pin, entry.ref) &&
-		(blk == nil || !blk.matchesRef(pin) || !blk.matchesRef(entry.ref)) {
-		conflicts = append(conflicts, luksConflict{
-			field: "encrypted device", kept: pin.String(), keptFrom: sourceLabel(m),
-			dropped: entry.ref.String(), droppedFrom: from,
-		})
+	sameDisk := func(a, b *deviceRef) bool {
+		return deviceRefEqual(a, b) || (blk != nil && blk.matchesRef(a) && blk.matchesRef(b))
+	}
+	if pin := m.dataDeviceRef; pin != nil && !sameDisk(pin, entry.ref) {
+		c := luksConflict{field: "encrypted device", kept: pin.String(), keptFrom: sourceLabel(m), dropped: entry.ref.String(), droppedFrom: from}
+		if first {
+			c = luksConflict{field: "encrypted device", kept: entry.ref.String(), keptFrom: fmt.Sprintf("crypttab entry %q", entry.name), dropped: pin.String(), droppedFrom: sourceLabel(m)}
+		}
+		conflicts = append(conflicts, c)
+	}
+	if first {
+		// the entry's device (field 2) is the disk both references resolved to
+		m.dataDeviceRef = nil
 	}
 
 	switch {
@@ -433,11 +460,12 @@ func keyfileBoundConflicts(opts *luksOptions, from, replacedBy string) []luksCon
 	return out
 }
 
-// composedOptions folds a device's sources into the options it is unlocked
-// with, lowest priority first, so the order of these overlays is the precedence
-// rule:
+// composedOptions returns the options a device is unlocked with, as systemd
+// chooses them. Priority rises to the right. A crypttab entry or a per-device
+// list replaces the lists to its left rather than adding to them; only
+// rd.luks.header= stays under a per-device list:
 //
-//	crypttab  ->  rd.luks.options=  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
+//	rd.luks.options=  ->  crypttab  ->  rd.luks.header=  ->  rd.luks.options=$UUID=
 //
 // It reports nothing: a device with two records is composed a second time.
 func composedOptions(m *luksMapping) (opts luksOptions, conflicts []luksConflict, setAside []string) {
@@ -471,9 +499,14 @@ func composedOptions(m *luksMapping) (opts luksOptions, conflicts []luksConflict
 		}
 	}
 
-	global := globalLuksOptions
-	global.header, global.headerDeviceRef = "", nil
-	apply(&global, "rd.luks.options= carrying no UUID")
+	// systemd applies a list carrying no UUID only to "any UUIDs not specified
+	// elsewhere, and without an entry in /etc/crypttab".
+	if m.crypttabOptions == nil && m.cmdlineOptions == nil {
+		global := globalDeviceOptions()
+		apply(&global, "rd.luks.options= carrying no UUID")
+	} else if msg := globalOptionsWithheldMessage(m); msg != "" {
+		setAside = append(setAside, msg)
+	}
 
 	if h := m.deprecatedHeader; h != nil {
 		apply(h, "rd.luks.header=")
@@ -576,11 +609,35 @@ func deviceRefEqual(a, b *deviceRef) bool {
 	}
 }
 
-// applyGlobalOptions overlays the rd.luks.options= list that carried no UUID.
-// A global header= was warned about while parsing; it is dropped here so it
-// cannot reach a device.
+// globalDeviceOptions returns the UUID-less rd.luks.options= list as a device
+// receives it, without the header= that parsing already warned about.
+func globalDeviceOptions() luksOptions {
+	o := globalLuksOptions
+	o.header, o.headerDeviceRef = "", nil
+	o.appliedOptions = slices.DeleteFunc(slices.Clone(o.appliedOptions), func(opt string) bool {
+		key, _, _ := strings.Cut(opt, "=")
+		return key == "header"
+	})
+	return o
+}
+
 func applyGlobalOptions(dst *luksOptions) {
-	global := globalLuksOptions
-	global.header, global.headerDeviceRef = "", nil
+	global := globalDeviceOptions()
 	overlay(dst, &global)
+}
+
+// globalOptionsWithheldMessage says which source kept the UUID-less list off
+// this device, or returns "" when there is nothing to report.
+func globalOptionsWithheldMessage(m *luksMapping) string {
+	applied := joinOptions(globalDeviceOptions().appliedOptions)
+	if applied == "" {
+		return ""
+	}
+	if m.cmdlineOptions != nil {
+		return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices nothing else describes, and a per-device list names this one. Add to that list any of these still needed.", m.name, applied)
+	}
+	if uuid := m.cmdlineUUID(); uuid != "" {
+		return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices with no crypttab entry. Use rd.luks.options=%s=%s to override the entry.", m.name, applied, uuid, applied)
+	}
+	return fmt.Sprintf("rd.luks.options: %s: %q not applied. A list without a UUID is only a default for devices with no crypttab entry; change the entry's own options to alter this device.", m.name, applied)
 }

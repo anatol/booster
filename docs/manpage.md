@@ -169,11 +169,13 @@ Some parts of booster boot functionality can be modified with kernel boot parame
  
  * `rd.luks.header=$UUID=$PATH` **deprecated**, use `rd.luks.options=$UUID=header=$PATH` instead. Detached LUKS header for LUKS volume with UUID.`$PATH` can be an absolute path in the initramfs (to file included via `extra_files:`/block device) or a `$path:$deviceref` which will temporarely mount the device as read-only.
  
+ * `rd.luks.crypttab=no` ignores the [crypttab](#crypttab) bundled into the image. `rd.luks.*` parameters still apply. Takes a boolean and defaults to yes.
+
  * `rd.luks.data=$UUID=$deviceref` data device for the LUKS volume with UUID as the device itself does not hold it.
  
- * `rd.luks.options=opt1,opt2` global options that apply to all LUKS devices. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.
+ * `rd.luks.options=opt1,opt2` global options for LUKS devices that have no [crypttab](#crypttab) entry or `rd.luks.options=$UUID=` list. `header=` is not accepted here, as it describes a single volume. See [CRYPTTAB](#crypttab) for the options booster treats differently.
  
- * `rd.luks.options=$UUID=opt1,opt2` device specific LUKS options overwrite options specified by `rd.luks.options=` and replace all [crypttab](#crypttab) options for the same device.
+ * `rd.luks.options=$UUID=opt1,opt2` device specific LUKS options. They replace the UUID-less `rd.luks.options=` list and the [crypttab](#crypttab) entry's options for the same device.
  
  * `rd.modules_force_load` a comma-separated list of extra kernel modules which should be force loaded.
  
@@ -262,18 +264,13 @@ the file by either being ran as root, or by being passed
 > this warning is irrelevant with x-initrd.attach
 
 
-Crypttab entries and `rd.luks.*` parameters with the same LUKS UUID are
-merged, with cmdline parameters taking precedence and unspecified options
-being added from crypttab.
-
-A per-device `rd.luks.options=$UUID=` is the exception: it *replaces* that
-entry's options instead of adding to them, so the command line can remove
-an option and not only add one. This is what makes it usable to boot past a
-wrong crypttab entry, and it matches systemd-cryptsetup. The entry's first
-three fields are unaffected — the device and its keyfile survive — but
-`keyfile-offset=`, `keyfile-size=` and `keyfile-timeout=` are options, so
-repeat them on the command line if the keyfile needs them. Booster reports
-what was dropped.
+When a crypttab entry and `rd.luks.*` parameters describe the same LUKS UUID,
+the entry takes precedence, as in systemd-cryptsetup-generator: its volume
+name, device and key file are used over `rd.luks.name=`, `rd.luks.data=` and
+`rd.luks.key=`.
+The exception is a per-device `rd.luks.options=$UUID=`, which replaces the
+entry's options. Repeat `keyfile-offset=`, `keyfile-size=` and
+`keyfile-timeout=` there if the entry's key file needs them.
 
 Booster-specific behaviour for selected options:
 
