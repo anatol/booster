@@ -55,11 +55,22 @@ PCRS_FLAG="--tpm2-pcrs=${CRYPTENROLL_TPM2_PCRS:-10+13}"
 if [ "${CRYPTENROLL_TPM2_PIN}" != "" ]; then
   # cryptenroll.new-tpm2-pin is the credential name for setting a new PIN during enrollment
   printf '%s' "${CRYPTENROLL_TPM2_PIN}" > assets/cryptenroll.new-tpm2-pin
+  # systemd 262 made --tpm2-with-pin=yes mean Argon2id and added "direct" for
+  # the older PBKDF2 PIN. Default to "direct" there so the existing PIN images
+  # keep covering that path; CRYPTENROLL_TPM2_PIN_MODE=yes selects Argon2id,
+  # with a small cost so the test boots stay fast.
+  PIN_FLAGS=(--tpm2-with-pin=true)
+  if [ "$(systemd-cryptenroll --version | awk 'NR==1 {print $2}')" -ge 262 ]; then
+    PIN_FLAGS=(--tpm2-with-pin="${CRYPTENROLL_TPM2_PIN_MODE:-direct}")
+  fi
+  if [ "${CRYPTENROLL_TPM2_PIN_MODE}" = "yes" ]; then
+    PIN_FLAGS+=(--tpm2-argon2id-memory=1M --tpm2-argon2id-iterations=2 --tpm2-argon2id-parallelism=2)
+  fi
   # Use sudo env so CREDENTIALS_DIRECTORY survives sudo's env_reset.
   # Pass the full TCTI string directly so cryptenroll cannot fall back to /dev/tpm0.
   sudo env CREDENTIALS_DIRECTORY="$(pwd)/assets" \
     systemd-cryptenroll --tpm2-device="swtpm:host=localhost,port=2321" \
-    "${PCRS_FLAG}" --tpm2-with-pin=true "${lodev}"
+    "${PCRS_FLAG}" "${PIN_FLAGS[@]}" "${lodev}"
 else
   sudo env CREDENTIALS_DIRECTORY="$(pwd)/assets" \
     systemd-cryptenroll --tpm2-device="swtpm:host=localhost,port=2321" \
