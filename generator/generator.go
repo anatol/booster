@@ -179,6 +179,10 @@ func generateInitRamfs(conf *generatorConfig) error {
 		return err
 	}
 
+	if err := img.appendNvPCRDefinitions(nvpcrDirs); err != nil {
+		return fmt.Errorf("nvpcr: %v", err)
+	}
+
 	kmod, err := NewKmod(conf)
 	if err != nil {
 		return err

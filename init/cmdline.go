@@ -388,6 +388,13 @@ func parseParams(params string) error {
 			m.dataDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
+		case "systemd.tpm2_measured_os":
+			b, err := parseSystemdBool(value)
+			if err != nil {
+				warning("systemd.tpm2_measured_os: %v", err)
+				continue
+			}
+			cmdlineMeasuredOS = &b
 		default:
 			if dot := strings.IndexByte(key, '.'); value != "" && dot != -1 {
 				// this param looks like a module options
@@ -410,6 +417,16 @@ func parseParams(params string) error {
 	cmdlineSetAside = setAside
 
 	return nil
+}
+
+func parseSystemdBool(s string) (bool, error) {
+	switch strings.ToLower(s) {
+	case "1", "yes", "y", "true", "t", "on":
+		return true, nil
+	case "0", "no", "n", "false", "f", "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid boolean %q", s)
 }
 
 // parseTokenTimeout parses a token-timeout value from rd.luks.options.

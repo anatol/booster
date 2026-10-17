@@ -194,20 +194,39 @@ func copyFile(src, dst string) (int64, error) {
 // https://github.com/latchset/clevis/issues/244
 // startSwtpm gives each caller its own TPM state and control socket, so tests
 // that need a TPM can run concurrently.
+// hostBundlesNvPCRs reports whether the generator bundles the host's NvPCR
+// definitions into test images, which it does for systemd 262 and later.
+func hostBundlesNvPCRs() bool {
+	out, err := exec.Command("systemctl", "--version").Output()
+	var version int
+	if err == nil {
+		_, _ = fmt.Sscanf(string(out), "systemd %d", &version)
+	}
+	return version >= 262
+}
+
 func startSwtpm(t *testing.T) (*os.Process, []string, error) {
+	return startSwtpmWithState(t, t.TempDir())
+}
+
+// startSwtpmWithState runs swtpm on stateDir, starting from the pristine state
+// when the dir has none. Restarting it on the same dir is a power cycle that
+// keeps NV contents, as a hibernate followed by a resume boot does.
+func startSwtpmWithState(t *testing.T, stateDir string) (*os.Process, []string, error) {
 	_ = os.Mkdir("assets", 0o755)
 
 	if err := checkAsset("assets/tpm2/tpm2-00.permall.pristine"); err != nil {
 		return nil, nil, err
 	}
 
-	dir := t.TempDir()
-	if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", filepath.Join(dir, "tpm2-00.permall")); err != nil {
-		return nil, nil, err
+	if _, err := os.Stat(filepath.Join(stateDir, "tpm2-00.permall")); os.IsNotExist(err) {
+		if _, err := copyFile("assets/tpm2/tpm2-00.permall.pristine", filepath.Join(stateDir, "tpm2-00.permall")); err != nil {
+			return nil, nil, err
+		}
 	}
-	sock := filepath.Join(dir, "swtpm-sock")
+	sock := filepath.Join(t.TempDir(), "swtpm-sock")
 
-	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir="+dir, "--tpm2", "--ctrl", "type=unixio,path="+sock, "--flags", "not-need-init")
+	cmd := exec.Command("swtpm", "socket", "--tpmstate", "dir="+stateDir, "--tpm2", "--ctrl", "type=unixio,path="+sock, "--flags", "not-need-init")
 	if testing.Verbose() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
