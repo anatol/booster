@@ -1093,11 +1093,12 @@ func boost() error {
 
 	rootMounted.Add(1)
 
+	// Before udev: a device event can start a TPM user, which must see setup held.
+	startNvPCRSetup()
+
 	go func() { check(udevListener()) }()
 
 	forceLoadWg := loadModules(config.ModulesForceLoad...)
-
-	startNvPCRSetup()
 
 	if plymouthEnabled {
 		// Wait for DRM modules to finish loading before starting plymouth,

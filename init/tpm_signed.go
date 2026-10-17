@@ -166,8 +166,8 @@ func policyRefDigest(ref string) []byte {
 // matching how systemd loads the signed-policy public key: SHA256 name algorithm,
 // NULL scheme and symmetric, sign+decrypt+userWithAuth. The TPM derives the key
 // Name from these exact fields, and that Name feeds the PolicyAuthorize digest, so
-// it must byte-match systemd's. The RSA exponent is encoded ambiguously across TPM
-// implementations: callers try 0x10001, then 0, because the Name differs between them.
+// it must byte-match systemd's. Unseal callers try exponent 0x10001, then 0,
+// because the Name differs between them.
 func rsaPublicArea(pub *rsa.PublicKey, exponent uint32) tpm2.TPMTPublic {
 	return tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgRSA,
@@ -232,8 +232,9 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	defer flushHandle(t, loadRsp.ObjectHandle)
 	obj := tpm2.NamedHandle{Handle: loadRsp.ObjectHandle, Name: loadRsp.Name}
 
-	// The RSA exponent is encoded ambiguously across TPM implementations and it
-	// feeds the key Name that PolicyAuthorize checks, so try 0x10001 then 0.
+	// Some systemd versions enrolled the default RSA exponent as 0 (systemd bug
+	// 30546) and it feeds the key Name that PolicyAuthorize checks, so try
+	// 0x10001 then 0, as systemd's unseal does.
 	var lastErr error
 	for _, exp := range []uint32{0x10001, 0} {
 		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, ref, pubkeyPCRs, literalPCRs, pin)
