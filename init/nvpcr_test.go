@@ -446,6 +446,8 @@ func TestSetupNvPCRs(t *testing.T) {
 	resetEnterInitrdBarrier()
 	t.Cleanup(resetEnterInitrdBarrier)
 	t.Cleanup(func() { cmdlineMeasuredOS = nil })
+	plymouthInitDone = make(chan struct{})
+	close(plymouthInitDone) // the setup waits for plymouth to start before it waits for the TPM
 	r.close()
 
 	no := false

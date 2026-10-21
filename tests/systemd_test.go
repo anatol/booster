@@ -219,6 +219,53 @@ func TestSystemdTPM2SignedPolicyModularTPM(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestNvPCRSetupModularTPMPlymouth pins the NvPCR setup on a kernel whose TPM
+// driver is a module, with plymouth enabled. tpm_tis is requested only after
+// plymouth has started, and plymouth waits up to 5 seconds for a GPU this VM
+// never gets. A setup whose 3 second TPM wait started at boot ran out before
+// the driver was requested, gave up, and the boot went on with the NvPCRs
+// never initialized.
+func TestNvPCRSetupModularTPMPlymouth(t *testing.T) {
+	t.Parallel()
+	if !hostBundlesNvPCRs() {
+		t.Skip("host systemd is older than 262")
+	}
+
+	require.NoError(t, checkAsset("assets/voidlinux.img")) // it will generate vmlinuz-version needed later
+	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
+	require.NoError(t, err)
+
+	swtpm, params, err := startSwtpm(t)
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	sigPath, err := filepath.Abs("assets/systemd-tpm2-signed.pcrsig.json")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		modulesDirectory: "assets/voidlinux/modules",
+		kernelPath:       "assets/voidlinux/vmlinuz",
+		kernelVersion:    string(voidlinuxKernelVersion),
+		modules:          "tpm_tis",
+		disks:            []vmtest.QemuDisk{{Path: "assets/systemd-tpm2-signed.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+		kernelArgs: []string{
+			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
+			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
+			"rd.luks.options=tpm2-signature=" + sigPath,
+			"systemd.tpm2_measured_os=1",
+			"splash",
+		},
+		extraFiles:     sigPath,
+		params:         params,
+		enablePlymouth: true,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("NvPCR(s) initialized"))
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 func TestSystemdTPM2WithPin(t *testing.T) {
 	t.Parallel()
 

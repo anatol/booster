@@ -549,6 +549,7 @@ type GeneratorConfig struct {
 	ZfsImportParams      string         `yaml:"zfs_import_params"`
 	ZfsCachePath         string         `yaml:"zfs_cache_path"`
 	EnableFido2          bool           `yaml:"enable_fido2"`
+	EnablePlymouth       bool           `yaml:"enable_plymouth,omitempty"`
 }
 
 func generateBoosterConfig(output string, opts Opts) error {
@@ -587,6 +588,7 @@ func generateBoosterConfig(output string, opts Opts) error {
 	conf.ZfsImportParams = opts.zfsImportParams
 	conf.ZfsCachePath = opts.zfsCachePath
 	conf.EnableFido2 = opts.enableFido2
+	conf.EnablePlymouth = opts.enablePlymouth
 	conf.Modules = opts.modules
 	conf.ModulesForceLoad = opts.modulesForceLoad
 
@@ -637,6 +639,7 @@ type Opts struct {
 	zfsCachePath         string // TODO: do we need any of these parameters?
 	crypttabFile         string // path to host crypttab to bundle; overrides /etc/crypttab
 	enableFido2          bool
+	enablePlymouth       bool
 
 	// SSH remote-unlock options. Paths are passed through to the generator,
 	// which embeds the file contents into the initramfs config.
