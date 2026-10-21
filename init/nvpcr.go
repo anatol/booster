@@ -388,7 +388,9 @@ func setupNvPCRs() {
 		debug("nvpcr: not a measured boot, skipping NvPCR setup")
 		return
 	}
+	<-plymouthInitDone
 	if !tpmAwaitReady() {
+		warning("nvpcr: no TPM found, NvPCRs not initialized")
 		return
 	}
 	if err := ensureEnterInitrdBarrier(); err != nil {
