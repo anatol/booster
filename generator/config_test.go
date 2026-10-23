@@ -122,42 +122,6 @@ network:
 	require.Contains(t, err.Error(), "ssh_host_key and network.ssh_authorized_keys must both be set")
 }
 
-func TestReadConfigReadsDhcp6(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "booster.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-network:
-  dhcp: true
-  dhcp6: true
-`), 0o644))
-
-	c, err := readGeneratorConfig(cfgPath)
-	require.NoError(t, err)
-	require.Equal(t, netDhcp, c.networkConfigType)
-	require.True(t, c.networkDhcp6)
-}
-
-func TestReadConfigAcceptsSshWithDhcp6Only(t *testing.T) {
-	t.Parallel()
-	hostKey, authKeys := writeSshFixtures(t)
-
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "booster.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-network:
-  dhcp6: true
-  ssh_host_key: `+hostKey+`
-  ssh_authorized_keys: `+authKeys+`
-`), 0o644))
-
-	c, err := readGeneratorConfig(cfgPath)
-	require.NoError(t, err)
-	require.True(t, c.networkDhcp6)
-	require.NotEmpty(t, c.sshHostKey)
-}
-
 func TestReadConfigRejectsSshWithoutNetwork(t *testing.T) {
 	t.Parallel()
 	hostKey, authKeys := writeSshFixtures(t)
@@ -172,7 +136,7 @@ network:
 
 	_, err := readGeneratorConfig(cfgPath)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "network.ssh_* requires network.dhcp, network.dhcp6 or network.ip")
+	require.Contains(t, err.Error(), "network.ssh_* requires network.dhcp or network.ip")
 }
 
 func TestReadConfigRejectsMissingSshHostKeyFile(t *testing.T) {

@@ -20,7 +20,6 @@ type generatorConfig struct {
 	networkConfigType       netConfigType
 	networkStaticConfig     *networkStaticConfig
 	networkActiveInterfaces []net.HardwareAddr
-	networkDhcp6            bool
 	universal               bool
 	modules                 []string // extra modules to add
 	modulesForceLoad        []string // extra modules to load at the boot time
@@ -536,9 +535,6 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	}
 	if conf.networkActiveInterfaces != nil {
 		initConfig.Network.Interfaces = conf.networkActiveInterfaces
-	}
-	if conf.networkDhcp6 && initConfig.Network != nil {
-		initConfig.Network.Dhcp6 = true
 	}
 	if conf.sshHostKey != "" && initConfig.Network != nil {
 		initConfig.Network.SshHostKey = conf.sshHostKey

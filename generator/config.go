@@ -41,8 +41,7 @@ type UserConfig struct {
 	Network *struct {
 		Interfaces string `yaml:",omitempty"` // comma-separated list of interfaces to initialize at early-userspace
 
-		Dhcp  bool `yaml:",omitempty"`
-		Dhcp6 bool `yaml:"dhcp6,omitempty"`
+		Dhcp bool `yaml:",omitempty"`
 
 		IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
@@ -151,8 +150,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 				if n.SshHostKey == "" || n.SshAuthorizedKeys == "" {
 					return nil, fmt.Errorf("config: network.ssh_host_key and network.ssh_authorized_keys must both be set")
 				}
-				if !n.Dhcp && !n.Dhcp6 && n.IP == "" {
-					return nil, fmt.Errorf("config: network.ssh_* requires network.dhcp, network.dhcp6 or network.ip")
+				if !n.Dhcp && n.IP == "" {
+					return nil, fmt.Errorf("config: network.ssh_* requires network.dhcp or network.ip")
 				}
 			}
 		}
@@ -162,7 +161,6 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 
 	// copy user config to generator
 	if n := u.Network; n != nil {
-		conf.networkDhcp6 = n.Dhcp6
 		if n.Dhcp {
 			conf.networkConfigType = netDhcp
 		} else {

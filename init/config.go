@@ -5,8 +5,7 @@ import "net"
 type InitNetworkConfig struct {
 	Interfaces []net.HardwareAddr `yaml:",omitempty"` // list of active interfaces to use
 
-	Dhcp  bool `yaml:",omitempty"`
-	Dhcp6 bool `yaml:"dhcp6,omitempty"`
+	Dhcp bool `yaml:",omitempty"`
 
 	IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 	Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255

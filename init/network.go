@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -103,7 +104,7 @@ func runDhcp(ifname string) error {
 
 	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
 	if dnsServers != nil {
-		if err := writeResolvConf(dnsServers); err != nil {
+		if err := addDNSServers(dnsServers); err != nil {
 			return err
 		}
 	}
@@ -113,10 +114,11 @@ func runDhcp(ifname string) error {
 
 func runDhcp6(ifname string) error {
 	var reply *dhcpv6.Message
-	for range 40 {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
 		client, err := nclient6.New(ifname)
 		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			var advertise *dhcpv6.Message
 			if advertise, err = client.Solicit(ctx); err == nil {
 				reply, err = client.Request(ctx, advertise)
@@ -152,13 +154,9 @@ func runDhcp6(ifname string) error {
 		return err
 	}
 
-	dnsServers := reply.Options.DNS()
-	if dnsServers != nil && !config.Network.Dhcp && config.Network.DNSServers == "" {
-		if err := writeResolvConf(dnsServers); err != nil {
-			return err
-		}
+	if dnsServers := reply.Options.DNS(); dnsServers != nil {
+		return addDNSServers(dnsServers)
 	}
-
 	return nil
 }
 
@@ -229,8 +227,19 @@ linkReadinessLoop:
 	c := config.Network
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
-		if err := runDhcp(ifname); err != nil {
-			return err
+		var err6 error
+		var wg sync.WaitGroup
+		wg.Go(func() { err6 = runDhcp6(ifname) })
+
+		err4 := runDhcp(ifname)
+		wg.Wait()
+		switch {
+		case err4 != nil && err6 != nil:
+			return errors.Join(err4, err6)
+		case err4 != nil:
+			info("%s: no DHCPv4 lease, using DHCPv6: %v", ifname, err4)
+		case err6 != nil:
+			debug("%s: no DHCPv6 lease: %v", ifname, err6)
 		}
 	} else {
 		// static address
@@ -266,14 +275,29 @@ linkReadinessLoop:
 		}
 	}
 
-	if c.Dhcp6 {
-		debug("%s: run DHCPv6", ifname)
-		if err := runDhcp6(ifname); err != nil {
-			return err
+	return nil
+}
+
+var leasedDNSServers struct {
+	sync.Mutex
+	ipv4, ipv6 []net.IP
+}
+
+func addDNSServers(servers []net.IP) error {
+	leasedDNSServers.Lock()
+	defer leasedDNSServers.Unlock()
+
+	for _, ip := range servers {
+		list := &leasedDNSServers.ipv6
+		if ip.To4() != nil {
+			list = &leasedDNSServers.ipv4
+		}
+		if !slices.ContainsFunc(*list, ip.Equal) {
+			*list = append(*list, ip)
 		}
 	}
 
-	return nil
+	return writeResolvConf(slices.Concat(leasedDNSServers.ipv4, leasedDNSServers.ipv6))
 }
 
 func writeResolvConf(servers []net.IP) error {
