@@ -60,6 +60,10 @@ type generatorConfig struct {
 	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
 	enableFido2  bool
 
+	enableBluetooth  bool
+	bluetoothDevices []string // canonical addresses from bluetooth_devices; empty = every paired, trusted keyboard
+	bluetoothDir     string   // BlueZ state directory, /var/lib/bluetooth
+
 	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
 	tokenTimeout    int  // device-level keyboard-fallback timer (seconds); 0 = unset
 	pinDelay        int  // concurrent-mode PIN-prompt pre-delay (seconds); 0 = off

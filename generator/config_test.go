@@ -298,3 +298,45 @@ func TestReadConfigRejectsInvalidPasswordEcho(t *testing.T) {
 		require.ErrorContains(t, err, "password_echo", "value %q must be rejected", val)
 	}
 }
+
+func TestReadConfigBluetooth(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+enable_bluetooth: true
+bluetooth_devices: " 2a:3b:4c:5d:6e:7f, , 12:34:56:78:9A:BC "
+`), 0o644))
+
+	c, err := readGeneratorConfig(cfgPath)
+	require.NoError(t, err)
+	require.True(t, c.enableBluetooth)
+	require.Equal(t, []string{"2A:3B:4C:5D:6E:7F", "12:34:56:78:9A:BC"}, c.bluetoothDevices)
+	require.Equal(t, "/var/lib/bluetooth", c.bluetoothDir)
+}
+
+func TestReadConfigRejectsInvalidBluetoothDevice(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+enable_bluetooth: true
+bluetooth_devices: 2a:3b:4c:5d:6e
+`), 0o644))
+
+	_, err := readGeneratorConfig(cfgPath)
+	require.ErrorContains(t, err, `bluetooth_devices: "2a:3b:4c:5d:6e" is not a Bluetooth address`)
+}
+
+func TestReadConfigRejectsBluetoothDevicesWithoutEnable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("bluetooth_devices: 2A:3B:4C:5D:6E:7F\n"), 0o644))
+
+	_, err := readGeneratorConfig(cfgPath)
+	require.ErrorContains(t, err, "bluetooth_devices requires enable_bluetooth")
+}
