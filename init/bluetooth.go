@@ -7,7 +7,8 @@ package main
 // crypto and HID over BR/EDR. What is left is bluetoothd's part: configure
 // the controller through the management interface (bluetooth_mgmt.go), and
 // hand the keyboards to the HID subsystem, through the kernel's HIDP for a
-// BR/EDR keyboard (bluetooth_hidp.go).
+// BR/EDR keyboard (bluetooth_hidp.go) and through uhid for an LE one, whose
+// HID-over-GATT profile has no kernel driver (bluetooth_hogp.go).
 //
 // Nothing pairs here. The keyboards reconnect with the bonds BlueZ made, and
 // a keyboard asking to pair is turned down: anyone could ask, and a new bond
@@ -302,6 +303,8 @@ type btLE struct {
 	ediv                     uint16
 	rand                     uint64
 	irk                      *[16]byte
+
+	services []*hogpService // found on the first connection and reused for the others
 }
 
 func (k *btClassic) String() string { return keyboardName(k.name, k.addr) }
@@ -628,6 +631,9 @@ func (s *btStack) setUpController(index uint16) {
 		if k.hostReconnects() {
 			btGo(func() { k.reconnectLoop(ad.addr) })
 		}
+	}
+	for _, k := range ad.le {
+		btGo(func() { k.run(ad.addr) })
 	}
 }
 
