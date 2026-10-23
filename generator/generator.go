@@ -64,6 +64,9 @@ type generatorConfig struct {
 	bluetoothDevices []string // canonical addresses from bluetooth_devices; empty = every paired, trusted keyboard
 	bluetoothDir     string   // BlueZ state directory, /var/lib/bluetooth
 
+	bluetoothSysfsDir string                 // /sys/class/bluetooth, the host's controllers
+	readKernelLog     func() ([]byte, error) // where the controllers' drivers name the firmware they loaded
+
 	bluetooth *InitBluetoothConfig // keyboards found under bluetoothDir; nil = none, Bluetooth left out of the image
 
 	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
@@ -335,6 +338,20 @@ func generateInitRamfs(conf *generatorConfig) error {
 			} else {
 				return err
 			}
+		}
+	}
+
+	if conf.bluetooth != nil {
+		forceLoad, err := kmod.activateBluetoothModules()
+		if err != nil {
+			return err
+		}
+		conf.modulesForceLoad = append(conf.modulesForceLoad, forceLoad...)
+		if !conf.universal && len(hostBluetoothControllers(conf.bluetoothSysfsDir)) == 0 {
+			warning("enable_bluetooth: this host has no Bluetooth controller up, so the image gets no controller driver; bring the controller up and rebuild the image")
+		}
+		if err := img.appendBluetoothFirmware(conf); err != nil {
+			return err
 		}
 	}
 

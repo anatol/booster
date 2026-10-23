@@ -283,6 +283,8 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.enableFido2 = u.EnableFido2
 	conf.enableBluetooth = u.EnableBluetooth
 	conf.bluetoothDir = "/var/lib/bluetooth"
+	conf.bluetoothSysfsDir = "/sys/class/bluetooth"
+	conf.readKernelLog = readKernelLog
 	for _, d := range parseCommaList(u.BluetoothDevices) {
 		addr, err := parseBluetoothAddress(d)
 		if err != nil {

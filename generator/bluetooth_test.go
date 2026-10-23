@@ -387,3 +387,103 @@ func TestImageWithoutBluetoothStaysReadable(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o644), fi.Mode().Perm())
 }
+
+func TestBluetoothModules(t *testing.T) {
+	opts := options{
+		bluetoothDir: writeBluezState(t),
+		prepareModulesAt: []string{
+			"kernel/net/bluetooth/bluetooth.ko",
+			"kernel/net/bluetooth/hidp/hidp.ko",
+			"kernel/drivers/hid/uhid.ko",
+			"kernel/drivers/bluetooth/btusb.ko",
+			"kernel/drivers/bluetooth/hci_vhci.ko",
+			"kernel/crypto/ecdh_generic.ko",
+		},
+		// in host mode the driver of the host's controller is kept, and the
+		// stack's own modules are added whether or not the host loaded them
+		hostModules: []string{"btusb"},
+		unpackImage: true,
+	}
+	createTestInitRamfs(t, &opts)
+
+	checkDirListing(t, opts.workDir+"/image.unpacked/usr/lib/modules/",
+		"bluetooth.ko", "hidp.ko", "uhid.ko", "btusb.ko", "ecdh_generic.ko", "booster.alias")
+	cfg := readGeneratedInitConfig(t, opts.workDir)
+	require.Equal(t, []string{"bluetooth", "hidp", "uhid"}, cfg.ModulesForceLoad)
+	// SMP asks the crypto API for ECDH when a controller registers, which
+	// cannot happen before bluetooth is loaded
+	require.Contains(t, cfg.ModuleDependencies["bluetooth"], "ecdh_generic")
+}
+
+func TestBluetoothFirmwareFromLog(t *testing.T) {
+	t.Parallel()
+
+	log := `Bluetooth: Core ver 2.22
+Bluetooth: hci0: Found device firmware: intel/ibt-0040-0041.sfi
+Bluetooth: hci0: Boot Address: 0x100800
+Bluetooth: hci0: Found Intel DDC parameters: intel/ibt-0040-0041.ddc
+Bluetooth: hci1: RTL: loading rtl_bt/rtl8761bu_fw.bin
+Bluetooth: hci1: RTL: loading rtl_bt/rtl8761bu_config.bin
+Bluetooth: hci2: QCA Downloading qca/rampatch_00130302.bin
+Bluetooth: hci3: BCM20702A1 'brcm/BCM20702A1-0a5c-21e8.hcd' Patch
+Bluetooth: hci0: Found device firmware: intel/ibt-0040-0041.sfi
+Bluetooth: hci4: RTL: loading ../../etc/shadow
+Bluetooth: hci4: RTL: loading /etc/shadow
+iwlwifi 0000:00:14.3: Found device firmware: iwlwifi-so-a0-gf-a0-89.ucode
+`
+	require.Equal(t, []string{
+		"intel/ibt-0040-0041.sfi",
+		"intel/ibt-0040-0041.ddc",
+		"rtl_bt/rtl8761bu_fw.bin",
+		"rtl_bt/rtl8761bu_config.bin",
+		"qca/rampatch_00130302.bin",
+		"brcm/BCM20702A1-0a5c-21e8.hcd",
+	}, bluetoothFirmwareFromLog([]byte(log)))
+	require.Nil(t, bluetoothFirmwareFromLog(nil))
+}
+
+func TestHostBluetoothControllers(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mkdir := func(p string) string {
+		p = filepath.Join(root, p)
+		require.NoError(t, os.MkdirAll(p, 0o755))
+		return p
+	}
+	write := func(p, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(root, p), []byte(content), 0o644))
+	}
+	class := mkdir("class/bluetooth")
+	// controller adds itself to the class, with device pointing at what it sits on
+	addController := func(name, dev string) {
+		hci := mkdir(filepath.Join(dev, "bluetooth", name))
+		require.NoError(t, os.Symlink("../..", filepath.Join(hci, "device")))
+		require.NoError(t, os.Symlink(hci, filepath.Join(class, name)))
+	}
+
+	require.Empty(t, hostBluetoothControllers(class))
+	require.False(t, hostHasIntelBluetooth(class))
+
+	// a Realtek controller on USB: the device is interface 1-2:1.0 of USB device 1-2
+	mkdir("devices/usb1/1-2/1-2:1.0")
+	write("devices/usb1/1-2/idVendor", "0bda\n")
+	addController("hci0", "devices/usb1/1-2/1-2:1.0")
+	require.NoError(t, os.Symlink(filepath.Join(class, "hci0"), filepath.Join(class, "hci0:256"))) // a connection
+	require.Len(t, hostBluetoothControllers(class), 1)
+	require.False(t, hostHasIntelBluetooth(class))
+
+	// an Intel one on USB
+	mkdir("devices/usb3/3-10/3-10:1.0")
+	write("devices/usb3/3-10/idVendor", "8087\n")
+	addController("hci1", "devices/usb3/3-10/3-10:1.0")
+	require.True(t, hostHasIntelBluetooth(class))
+
+	// an Intel one on PCIe
+	require.NoError(t, os.Remove(filepath.Join(class, "hci1")))
+	mkdir("devices/pci0000:00/0000:00:14.3")
+	write("devices/pci0000:00/0000:00:14.3/vendor", "0x8086\n")
+	addController("hci2", "devices/pci0000:00/0000:00:14.3")
+	require.True(t, hostHasIntelBluetooth(class))
+	require.Len(t, hostBluetoothControllers(class), 2)
+}

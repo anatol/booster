@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // Bluetooth keyboards are reconnected by init before any disk is unlocked,
@@ -27,6 +32,190 @@ const (
 
 	appearanceKeyboard = 0x03c1
 )
+
+// bluetoothModules are what init's stack needs besides the controller driver.
+// hidp loads only once a BR/EDR keyboard connects, and uhid once an LE one
+// does, so a host that has not had a keyboard connect since it booted does
+// not have them loaded and host mode would leave them out.
+var bluetoothModules = []string{"bluetooth", "hidp", "uhid", "hid_generic"}
+
+// bluetoothCryptoModules are the crypto algorithms the bluetooth module asks
+// the crypto API for when a controller registers, ECDH for LE Secure
+// Connections and, on older kernels, AES-CMAC for LE pairing. The kernel
+// would have modprobe load them, and nothing in the initramfs answers that.
+var bluetoothCryptoModules = []string{"ecdh_generic", "cmac"}
+
+// activateBluetoothModules adds the modules init's Bluetooth stack needs and
+// returns the ones to load at boot, which are not loaded by modalias.
+func (k *Kmod) activateBluetoothModules() ([]string, error) {
+	// the controller drivers; host mode keeps the ones the host has loaded
+	if err := k.activateModules(true, false, "kernel/drivers/bluetooth/"); err != nil {
+		return nil, err
+	}
+	if err := k.activateModules(false, false, bluetoothModules...); err != nil {
+		return nil, err
+	}
+	for _, m := range bluetoothCryptoModules {
+		if _, ok := k.nameToPathMapping.forward[m]; !ok {
+			continue // built in, or not in this kernel
+		}
+		if err := k.activateModules(false, false, m); err != nil {
+			return nil, err
+		}
+		// a dependency is loaded before the module, and the controller
+		// driver cannot register a controller before bluetooth is loaded
+		k.addExtraDep("bluetooth", m)
+	}
+
+	var forceLoad []string
+	for _, m := range []string{"bluetooth", "hidp", "uhid"} {
+		if k.requiredModules[m] {
+			forceLoad = append(forceLoad, m)
+		}
+	}
+	return forceLoad, nil
+}
+
+// bluetoothFirmwareLog matches the kernel log lines in which a Bluetooth
+// driver names the firmware file it loaded. Most drivers also list their
+// files in modinfo, which booster adds along with the module, but Intel's
+// lists only a few early ones.
+var bluetoothFirmwareLog = []*regexp.Regexp{
+	regexp.MustCompile(`Bluetooth: hci\d+: Found device firmware: (\S+)`),      // Intel
+	regexp.MustCompile(`Bluetooth: hci\d+: Found Intel DDC parameters: (\S+)`), // Intel
+	regexp.MustCompile(`Bluetooth: hci\d+: RTL: loading (\S+)`),                // Realtek
+	regexp.MustCompile(`Bluetooth: hci\d+: QCA Downloading (\S+)`),             // Qualcomm
+	regexp.MustCompile(`Bluetooth: hci\d+: \S+ '(brcm/[^']+)' Patch`),          // Broadcom
+}
+
+// bluetoothFirmwareFromLog returns the firmware files the kernel log says
+// the host's Bluetooth controllers loaded.
+func bluetoothFirmwareFromLog(log []byte) []string {
+	var fws []string
+	for line := range bytes.Lines(log) {
+		for _, re := range bluetoothFirmwareLog {
+			m := re.FindSubmatch(line)
+			if m == nil {
+				continue
+			}
+			fw := string(m[1])
+			if filepath.IsAbs(fw) || strings.Contains(fw, "..") || slices.Contains(fws, fw) {
+				continue
+			}
+			fws = append(fws, fw)
+		}
+	}
+	return fws
+}
+
+// appendBluetoothFirmware adds the firmware the host's controllers loaded
+// beyond what their drivers list in modinfo. An Intel controller does not
+// come up without its firmware.
+func (img *Image) appendBluetoothFirmware(conf *generatorConfig) error {
+	log, err := conf.readKernelLog()
+	if err != nil {
+		debug("bluetooth: reading the kernel log: %v", err)
+	}
+	fws := bluetoothFirmwareFromLog(log)
+	debug("bluetooth: the kernel log names firmware %v", fws)
+	if err := img.appendFirmwareFiles("bluetooth", fws); err != nil {
+		return err
+	}
+
+	if slices.ContainsFunc(fws, func(fw string) bool { return strings.HasPrefix(fw, "intel/") }) ||
+		!hostHasIntelBluetooth(conf.bluetoothSysfsDir) {
+		return nil
+	}
+	// The log has rotated, or the controller came up before it was read:
+	// which of Intel's files the controller needs depends on its hardware
+	// revision, so add them all.
+	files, err := filepath.Glob(filepath.Join(firmwareDir, "intel", "ibt-*"))
+	if err != nil {
+		return err
+	}
+	var size int64
+	for _, f := range files {
+		if err := img.AppendFile(f); err != nil {
+			return err
+		}
+		if fi, err := os.Stat(f); err == nil {
+			size += fi.Size()
+		}
+	}
+	warning("enable_bluetooth: the kernel log does not say which firmware the Intel Bluetooth controller loaded, adding all %d intel/ibt-* files (%d KiB); rebuild the image after a reboot to add only the one it uses",
+		len(files), size/1024)
+	return nil
+}
+
+// hostBluetoothControllers returns the sysfs devices behind the host's
+// Bluetooth controllers.
+func hostBluetoothControllers(sysfsDir string) []string {
+	entries, _ := os.ReadDir(sysfsDir)
+	var devs []string
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ":") {
+			continue // hci0:12 and the like are connections, not controllers
+		}
+		if dev, err := filepath.EvalSymlinks(filepath.Join(sysfsDir, e.Name(), "device")); err == nil {
+			devs = append(devs, dev)
+		}
+	}
+	return devs
+}
+
+// hostHasIntelBluetooth reports whether one of the host's Bluetooth
+// controllers is Intel's, by the USB or PCI vendor of the device behind it.
+func hostHasIntelBluetooth(sysfsDir string) bool {
+	for _, dev := range hostBluetoothControllers(sysfsDir) {
+		// a USB controller's device is the interface, under the USB device
+		for _, vendor := range []string{
+			filepath.Join(dev, "..", "idVendor"),
+			filepath.Join(dev, "vendor"),
+		} {
+			b, err := os.ReadFile(vendor)
+			if err != nil {
+				continue
+			}
+			switch strings.TrimSpace(string(b)) {
+			case "8087", "0x8086":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// readKernelLog returns the messages in the kernel's ring buffer. Reading it
+// takes root when kernel.dmesg_restrict is set.
+func readKernelLog() ([]byte, error) {
+	fd, err := unix.Open("/dev/kmsg", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(fd)
+
+	var log bytes.Buffer
+	buf := make([]byte, 8192) // a read returns one whole record, and fails if it does not fit
+	for {
+		n, err := unix.Read(fd, buf)
+		if errors.Is(err, unix.EAGAIN) {
+			return log.Bytes(), nil
+		} else if errors.Is(err, unix.EPIPE) {
+			continue // the record was overwritten before we got to it
+		} else if err != nil {
+			return log.Bytes(), err
+		}
+		// "<prefix>;<message>\n" and then lines of " KEY=value" metadata
+		rec := buf[:n]
+		if i := bytes.IndexByte(rec, ';'); i >= 0 {
+			rec = rec[i+1:]
+		}
+		if i := bytes.IndexByte(rec, '\n'); i >= 0 {
+			rec = rec[:i+1]
+		}
+		log.Write(rec)
+	}
+}
 
 // parseBluetoothAddress checks that s is a Bluetooth device address written
 // the way BlueZ and bluetoothctl write it, six colon-separated hex octets, and
