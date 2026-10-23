@@ -58,7 +58,7 @@ func parseDNSServers(raw string) ([]net.IP, error) {
 	return ips, nil
 }
 
-func runDhcp(ifname string) error {
+func runDhcp(ifname string) ([]net.IP, error) {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
 	for range 40 {
@@ -78,12 +78,12 @@ func runDhcp(ifname string) error {
 		}
 	}
 	if ack == nil {
-		return fmt.Errorf("%s: no DHCP ACK received", ifname)
+		return nil, fmt.Errorf("%s: no DHCP ACK received", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	addr := netlink.Addr{IPNet: &net.IPNet{
@@ -91,34 +91,34 @@ func runDhcp(ifname string) error {
 		Mask: ack.SubnetMask(),
 	}}
 	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return err
+		return nil, err
 	}
 
 	gateway := dhcpv4.GetIP(dhcpv4.OptionRouter, ack.Options)
 	if gateway != nil {
 		defaultRoute := netlink.Route{Gw: gateway}
 		if err := netlink.RouteAdd(&defaultRoute); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
-	if dnsServers != nil {
-		if err := addDNSServers(dnsServers); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options), nil
 }
 
-func runDhcp6(ifname string) error {
+const (
+	// how long DHCPv6 keeps trying
+	dhcp6Timeout = 30 * time.Second
+	// how long each DHCPv6 exchange waits for a reply
+	dhcp6ExchangeTimeout = 5 * time.Second
+)
+
+func runDhcp6(ifname string) ([]net.IP, error) {
 	var reply *dhcpv6.Message
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(dhcp6Timeout)
 	for time.Now().Before(deadline) {
 		client, err := nclient6.New(ifname)
 		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), dhcp6ExchangeTimeout)
 			var advertise *dhcpv6.Message
 			if advertise, err = client.Solicit(ctx); err == nil {
 				reply, err = client.Request(ctx, advertise)
@@ -133,17 +133,17 @@ func runDhcp6(ifname string) error {
 		time.Sleep(time.Second)
 	}
 	if reply == nil {
-		return fmt.Errorf("%s: no DHCPv6 reply received", ifname)
+		return nil, fmt.Errorf("%s: no DHCPv6 reply received", ifname)
 	}
 
 	iana := reply.Options.OneIANA()
 	if iana == nil || len(iana.Options.Addresses()) == 0 {
-		return fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
+		return nil, fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	addr := netlink.Addr{IPNet: &net.IPNet{
@@ -151,13 +151,10 @@ func runDhcp6(ifname string) error {
 		Mask: net.CIDRMask(128, 128),
 	}}
 	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return err
+		return nil, err
 	}
 
-	if dnsServers := reply.Options.DNS(); dnsServers != nil {
-		return addDNSServers(dnsServers)
-	}
-	return nil
+	return reply.Options.DNS(), nil
 }
 
 func shutdownNetwork() {
@@ -227,11 +224,17 @@ linkReadinessLoop:
 	c := config.Network
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
+		var dns6 []net.IP
 		var err6 error
 		var wg sync.WaitGroup
-		wg.Go(func() { err6 = runDhcp6(ifname) })
+		wg.Go(func() { dns6, err6 = runDhcp6(ifname) })
 
-		err4 := runDhcp(ifname)
+		dns4, err4 := runDhcp(ifname)
+		if dns4 != nil {
+			if err := writeResolvConf(dns4); err != nil {
+				return err
+			}
+		}
 		wg.Wait()
 		switch {
 		case err4 != nil && err6 != nil:
@@ -240,6 +243,11 @@ linkReadinessLoop:
 			info("%s: no DHCPv4 lease, using DHCPv6: %v", ifname, err4)
 		case err6 != nil:
 			debug("%s: no DHCPv6 lease: %v", ifname, err6)
+		}
+		if dns6 != nil {
+			if err := writeResolvConf(slices.Concat(dns4, dns6)); err != nil {
+				return err
+			}
 		}
 	} else {
 		// static address
@@ -276,28 +284,6 @@ linkReadinessLoop:
 	}
 
 	return nil
-}
-
-var leasedDNSServers struct {
-	sync.Mutex
-	ipv4, ipv6 []net.IP
-}
-
-func addDNSServers(servers []net.IP) error {
-	leasedDNSServers.Lock()
-	defer leasedDNSServers.Unlock()
-
-	for _, ip := range servers {
-		list := &leasedDNSServers.ipv6
-		if ip.To4() != nil {
-			list = &leasedDNSServers.ipv4
-		}
-		if !slices.ContainsFunc(*list, ip.Equal) {
-			*list = append(*list, ip)
-		}
-	}
-
-	return writeResolvConf(slices.Concat(leasedDNSServers.ipv4, leasedDNSServers.ipv6))
 }
 
 func writeResolvConf(servers []net.IP) error {
