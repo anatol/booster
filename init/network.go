@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/client4"
+	"github.com/insomniacslk/dhcp/dhcpv6"
+	"github.com/insomniacslk/dhcp/dhcpv6/nclient6"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -54,10 +58,17 @@ func parseDNSServers(raw string) ([]net.IP, error) {
 	return ips, nil
 }
 
-func runDhcp(ifname string) error {
+const (
+	// attempts DHCPv4 and DHCPv6 each make before giving up, a second apart
+	dhcpAttempts = 40
+	// how long each DHCPv6 exchange waits for a reply
+	dhcp6ExchangeTimeout = 3 * time.Second
+)
+
+func runDhcp(ifname string) ([]net.IP, error) {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
-	for range 40 {
+	for range dhcpAttempts {
 		var err error
 		conversation, err = dhcp.Exchange(ifname)
 		if err == nil {
@@ -74,12 +85,12 @@ func runDhcp(ifname string) error {
 		}
 	}
 	if ack == nil {
-		return fmt.Errorf("%s: no DHCP ACK received", ifname)
+		return nil, fmt.Errorf("%s: no DHCP ACK received", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	addr := netlink.Addr{IPNet: &net.IPNet{
@@ -87,25 +98,62 @@ func runDhcp(ifname string) error {
 		Mask: ack.SubnetMask(),
 	}}
 	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return err
+		return nil, err
 	}
 
 	gateway := dhcpv4.GetIP(dhcpv4.OptionRouter, ack.Options)
 	if gateway != nil {
 		defaultRoute := netlink.Route{Gw: gateway}
 		if err := netlink.RouteAdd(&defaultRoute); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
-	if dnsServers != nil {
-		if err := writeResolvConf(dnsServers); err != nil {
-			return err
+	return dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options), nil
+}
+
+func runDhcp6(ifname string) ([]net.IP, error) {
+	var reply *dhcpv6.Message
+	for range dhcpAttempts {
+		client, err := nclient6.New(ifname)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), dhcp6ExchangeTimeout)
+			var advertise *dhcpv6.Message
+			if advertise, err = client.Solicit(ctx); err == nil {
+				reply, err = client.Request(ctx, advertise)
+			}
+			cancel()
+			client.Close()
 		}
+		if err == nil {
+			break
+		}
+		debug("%s got error from DHCPv6 exchange: %v", ifname, err)
+		time.Sleep(time.Second)
+	}
+	if reply == nil {
+		return nil, fmt.Errorf("%s: no DHCPv6 reply received", ifname)
 	}
 
-	return nil
+	iana := reply.Options.OneIANA()
+	if iana == nil || len(iana.Options.Addresses()) == 0 {
+		return nil, fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
+	}
+
+	link, err := netlink.LinkByName(ifname)
+	if err != nil {
+		return nil, err
+	}
+
+	addr := netlink.Addr{IPNet: &net.IPNet{
+		IP:   iana.Options.Addresses()[0].IPv6Addr,
+		Mask: net.CIDRMask(128, 128),
+	}}
+	if err := netlink.AddrAdd(link, &addr); err != nil {
+		return nil, err
+	}
+
+	return reply.Options.DNS(), nil
 }
 
 func shutdownNetwork() {
@@ -175,8 +223,30 @@ linkReadinessLoop:
 	c := config.Network
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
-		if err := runDhcp(ifname); err != nil {
-			return err
+		var dns6 []net.IP
+		var err6 error
+		var wg sync.WaitGroup
+		wg.Go(func() { dns6, err6 = runDhcp6(ifname) })
+
+		dns4, err4 := runDhcp(ifname)
+		if dns4 != nil {
+			if err := writeResolvConf(dns4); err != nil {
+				return err
+			}
+		}
+		wg.Wait()
+		switch {
+		case err4 != nil && err6 != nil:
+			return errors.Join(err4, err6)
+		case err4 != nil:
+			info("%s: no DHCPv4 lease, using DHCPv6: %v", ifname, err4)
+		case err6 != nil:
+			debug("%s: no DHCPv6 lease: %v", ifname, err6)
+		}
+		if dns6 != nil {
+			if err := writeResolvConf(slices.Concat(dns4, dns6)); err != nil {
+				return err
+			}
 		}
 	} else {
 		// static address
