@@ -79,6 +79,11 @@ type UserConfig struct {
 	PinDelay               string `yaml:"pin_delay,omitempty"`     // concurrent-mode only: hold an interactive PIN prompt (TPM2-PIN/FIDO2-PIN) this long (e.g. 3s) so a parallel non-interactive token can win first; default unset (off)
 	PasswordEcho           string `yaml:"password_echo,omitempty"` // ordered comma-separated list of prompt echo modes; first = startup mode, Tab cycles the list; default asterisks,silent,plaintext
 
+	// Bluetooth keyboards that init reconnects before any disk is unlocked,
+	// read from BlueZ's pairings under /var/lib/bluetooth.
+	EnableBluetooth  bool   `yaml:"enable_bluetooth"`
+	BluetoothDevices string `yaml:"bluetooth_devices,omitempty"` // comma-separated addresses of the keyboards to include; default every paired and trusted keyboard
+
 	// SerializeTokens opts out of booster's token concurrency: tokens are
 	// tried one at a time in ID order. The per-type timeouts are scoped here
 	// because they only take effect in serialize mode.
@@ -276,6 +281,20 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 		conf.crypttabFile = u.CrypttabPath
 	}
 	conf.enableFido2 = u.EnableFido2
+	conf.enableBluetooth = u.EnableBluetooth
+	conf.bluetoothDir = "/var/lib/bluetooth"
+	conf.bluetoothSysfsDir = "/sys/class/bluetooth"
+	conf.readKernelLog = readKernelLog
+	for _, d := range parseCommaList(u.BluetoothDevices) {
+		addr, err := parseBluetoothAddress(d)
+		if err != nil {
+			return nil, fmt.Errorf("config: bluetooth_devices: %v", err)
+		}
+		conf.bluetoothDevices = append(conf.bluetoothDevices, addr)
+	}
+	if len(conf.bluetoothDevices) > 0 && !conf.enableBluetooth {
+		return nil, fmt.Errorf("config: bluetooth_devices requires enable_bluetooth")
+	}
 	if err := validatePasswordEcho(u.PasswordEcho); err != nil {
 		return nil, err
 	}

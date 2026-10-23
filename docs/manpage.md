@@ -35,6 +35,7 @@ extra_files: vim,/usr/share/vim/vim82/,fsck,fsck.ext4
 vconsole: true
 enable_lvm: true
 enable_mdraid: true
+enable_bluetooth: true
 token_timeout: 30s
 pin_delay: 5s
 password_echo: silent,asterisks,plaintext
@@ -94,6 +95,10 @@ printf 'your-password' | argon2 "$(head -c16 /dev/urandom)" -id -t 3 -m 16 -p 4 
  * `enable_plymouth` is a flag that enables Plymouth boot splash support. When enabled, booster bundles the Plymouth daemon, plugins, theme, and fonts into the initramfs. GPU driver must be included in `modules_force_load`. The `quiet splash` kernel parameters are also required. Note that `booster.log=console` conflicts with Plymouth's graphical display; when console logging is active, Plymouth reverts to the details plugin (text-based fallback).
 
  * `enable_fido2` is a boolean flag that enables FIDO2 hardware token support.
+
+ * `enable_bluetooth` is a boolean flag that reconnects the Bluetooth keyboards paired with the running system at boot, so that a passphrase can be typed on one. The generator reads the pairings from BlueZ's `/var/lib/bluetooth`, which takes root. See [BLUETOOTH KEYBOARDS](#bluetooth-keyboards) below.
+
+ * `bluetooth_devices` is a comma-separated list of Bluetooth addresses, written as `bluetoothctl` prints them (e.g. `F1:2A:3B:4C:5D:6E`), that narrows `enable_bluetooth` to the devices listed. A device listed here is included even when it does not identify as a keyboard. Requires `enable_bluetooth`.
 
  * `serialize_tokens` makes booster try a device's LUKS tokens one at a time in ascending token-ID order instead of racing them concurrently (default off). A non-interactive token (TPM2 PCR-only, touchless FIDO2, clevis) enrolled before a PIN token then unlocks the device before the PIN prompt is reached. Each non-interactive token is bounded by a per-type timeout so a stuck one cannot hang the boot; on expiry booster moves to the next. PIN tokens are not bounded (empty-Enter already skips them). Keys:
 
@@ -363,6 +368,67 @@ Security notes:
 
  * The session is restricted to the passphrase prompt — no shell, no
    command execution, no port forwarding, no PAM, no PTY allocation.
+
+## BLUETOOTH KEYBOARDS
+
+With `enable_bluetooth: true`, booster reconnects the Bluetooth
+keyboards paired with the running system before any disk is unlocked,
+so the passphrase can be typed on one. BR/EDR ("classic") and Bluetooth
+Low Energy keyboards both work. Booster brings them up with a small
+stack of its own on top of the kernel's Bluetooth support; BlueZ is not
+part of the image.
+
+Pair and trust the keyboard in the running system, then rebuild the
+image:
+
+    $ bluetoothctl pair F1:2A:3B:4C:5D:6E
+    $ bluetoothctl trust F1:2A:3B:4C:5D:6E
+    $ sudo /usr/lib/booster/regenerate_images
+
+The generator reads BlueZ's state under `/var/lib/bluetooth` and
+includes every device that is paired, trusted, not blocked, offers HID,
+and is a keyboard by its class of device or its appearance.
+`bluetooth_devices` narrows that to the addresses listed, and includes
+a listed device even when it does not say it is a keyboard, as some
+keyboards with a touchpad do not. When there is nothing to include, the
+generator warns and builds the image without Bluetooth rather than
+failing: what BlueZ has paired is not configuration, and a failed build
+would also fail the kernel upgrade that ran it.
+
+The image carries each keyboard's bond: the link key of a BR/EDR
+keyboard, with the HID record BlueZ cached for it, or the long term key
+and identity resolving key of an LE one. It also gets the controller's
+driver and the firmware the controller loaded, which the generator
+finds in the kernel log. When the log no longer says which firmware an
+Intel controller loaded, every `intel/ibt-*` file is added; rebuilding
+the image after a reboot adds only the one in use.
+
+At boot, booster brings the controller up with the bonds loaded and
+waits for the keyboards. A BR/EDR keyboard connects to the host once a
+key is pressed; booster connects to an LE keyboard as soon as it
+advertises. Booster does not pair: a keyboard that asks to is turned
+down, and a keyboard paired again after the image was built does not
+reconnect until the image is rebuilt. Before switching to the real
+root, booster disconnects the keyboards and powers the controller off,
+so that bluetoothd starts from a clean state and the keyboards
+reconnect to it.
+
+Security notes:
+
+ * Whoever holds a bond key can decrypt what the keyboard sends,
+   the passphrase typed at boot included, from a radio capture. An
+   image with bond keys is created readable by root only, but anyone
+   who can read `/boot` with another operating system or physical
+   access can extract them. A wired keyboard does not have this
+   exposure.
+
+ * Only the keyboards in the image may connect, and only over a link
+   encrypted with their bond's key, so a device that claims a
+   keyboard's address but does not have the key cannot type.
+
+ * A controller attached over a UART (`hci_uart`) rather than USB or
+   PCIe also needs the driver of that UART, added with `modules` if
+   it is not built into the kernel.
 
 ## NOTES
 
