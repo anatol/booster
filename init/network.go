@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/client4"
+	"github.com/insomniacslk/dhcp/dhcpv6"
+	"github.com/insomniacslk/dhcp/dhcpv6/nclient6"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -100,6 +103,57 @@ func runDhcp(ifname string) error {
 
 	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
 	if dnsServers != nil {
+		if err := writeResolvConf(dnsServers); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func runDhcp6(ifname string) error {
+	var reply *dhcpv6.Message
+	for range 40 {
+		client, err := nclient6.New(ifname)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			var advertise *dhcpv6.Message
+			if advertise, err = client.Solicit(ctx); err == nil {
+				reply, err = client.Request(ctx, advertise)
+			}
+			cancel()
+			client.Close()
+		}
+		if err == nil {
+			break
+		}
+		debug("%s got error from DHCPv6 exchange: %v", ifname, err)
+		time.Sleep(time.Second)
+	}
+	if reply == nil {
+		return fmt.Errorf("%s: no DHCPv6 reply received", ifname)
+	}
+
+	iana := reply.Options.OneIANA()
+	if iana == nil || len(iana.Options.Addresses()) == 0 {
+		return fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
+	}
+
+	link, err := netlink.LinkByName(ifname)
+	if err != nil {
+		return err
+	}
+
+	addr := netlink.Addr{IPNet: &net.IPNet{
+		IP:   iana.Options.Addresses()[0].IPv6Addr,
+		Mask: net.CIDRMask(128, 128),
+	}}
+	if err := netlink.AddrAdd(link, &addr); err != nil {
+		return err
+	}
+
+	dnsServers := reply.Options.DNS()
+	if dnsServers != nil && !config.Network.Dhcp && config.Network.DNSServers == "" {
 		if err := writeResolvConf(dnsServers); err != nil {
 			return err
 		}
@@ -209,6 +263,13 @@ linkReadinessLoop:
 			if err := writeResolvConf(ips); err != nil {
 				return err
 			}
+		}
+	}
+
+	if c.Dhcp6 {
+		debug("%s: run DHCPv6", ifname)
+		if err := runDhcp6(ifname); err != nil {
+			return err
 		}
 	}
 

@@ -19,6 +19,7 @@ Booster advantages:
 network:
   interfaces: enp0s31f2,2e:1d:61:30:a3:63
   dhcp: on
+  dhcp6: on
   # either dhcp above or static configuration below can be used
   ip: 10.0.2.15/24
   gateway: 10.0.2.255
@@ -45,10 +46,11 @@ serialize_tokens:
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
     In the latter case the config allows to specify `ip` - the machine IP address and its network mask, `gateway` - default gateway, `dns_servers` - comma-separated list of DNS servers.
+    Setting `dhcp6` to `on` also leases an IPv6 address with DHCPv6, for networks that only hand IPv6 addresses out that way. It works alongside `dhcp` or a static `ip`, or on its own. The address is added as a /128 and the default IPv6 route comes from the router advertisements the kernel accepts on the link. DNS servers from the DHCPv6 reply are used only when neither `dhcp` nor `dns_servers` is set.
     The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
     Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
     If `interfaces` node is not specified then all the interfaces are activated at boot.
-    The `network` node also accepts `ssh_host_key`, `ssh_authorized_keys`, and `ssh_listen` to enable remote LUKS unlock over SSH. `ssh_host_key` is a path to an OpenSSH- or PEM-encoded SSH host private key, `ssh_authorized_keys` is a path to an authorized_keys file, and `ssh_listen` is the listen address (default `:22`). Both `ssh_host_key` and `ssh_authorized_keys` must be set together, and SSH requires `dhcp: true` or a static `ip`. See [REMOTE UNLOCK](#remote-unlock) below.
+    The `network` node also accepts `ssh_host_key`, `ssh_authorized_keys`, and `ssh_listen` to enable remote LUKS unlock over SSH. `ssh_host_key` is a path to an OpenSSH- or PEM-encoded SSH host private key, `ssh_authorized_keys` is a path to an authorized_keys file, and `ssh_listen` is the listen address (default `:22`). Both `ssh_host_key` and `ssh_authorized_keys` must be set together, and SSH requires `dhcp: true`, `dhcp6: true` or a static `ip`. See [REMOTE UNLOCK](#remote-unlock) below.
 
  * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 
