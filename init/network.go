@@ -58,10 +58,17 @@ func parseDNSServers(raw string) ([]net.IP, error) {
 	return ips, nil
 }
 
+const (
+	// attempts DHCPv4 and DHCPv6 each make before giving up, a second apart
+	dhcpAttempts = 40
+	// how long each DHCPv6 exchange waits for a reply
+	dhcp6ExchangeTimeout = 3 * time.Second
+)
+
 func runDhcp(ifname string) ([]net.IP, error) {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
-	for range 40 {
+	for range dhcpAttempts {
 		var err error
 		conversation, err = dhcp.Exchange(ifname)
 		if err == nil {
@@ -105,17 +112,9 @@ func runDhcp(ifname string) ([]net.IP, error) {
 	return dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options), nil
 }
 
-const (
-	// how long DHCPv6 keeps trying
-	dhcp6Timeout = 30 * time.Second
-	// how long each DHCPv6 exchange waits for a reply
-	dhcp6ExchangeTimeout = 5 * time.Second
-)
-
 func runDhcp6(ifname string) ([]net.IP, error) {
 	var reply *dhcpv6.Message
-	deadline := time.Now().Add(dhcp6Timeout)
-	for time.Now().Before(deadline) {
+	for range dhcpAttempts {
 		client, err := nclient6.New(ifname)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), dhcp6ExchangeTimeout)
