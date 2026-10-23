@@ -6,7 +6,8 @@ package main
 // booster's own. The kernel does the protocol work, HCI, L2CAP, the pairing
 // crypto and HID over BR/EDR. What is left is bluetoothd's part: configure
 // the controller through the management interface (bluetooth_mgmt.go), and
-// hand the keyboards to the HID subsystem.
+// hand the keyboards to the HID subsystem, through the kernel's HIDP for a
+// BR/EDR keyboard (bluetooth_hidp.go).
 //
 // Nothing pairs here. The keyboards reconnect with the bonds BlueZ made, and
 // a keyboard asking to pair is turned down: anyone could ask, and a new bond
@@ -18,11 +19,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // btGo runs fn on a goroutine of its own. A panic in any goroutine takes
@@ -95,6 +100,180 @@ func parseKey(s string) (k [16]byte, err error) {
 	return k, nil
 }
 
+const (
+	l2capPSMSDP          = 0x0001
+	l2capPSMHIDControl   = 0x0011
+	l2capPSMHIDInterrupt = 0x0013
+	l2capCIDATT          = 0x0004
+
+	// the security level a socket asks the kernel for, from <bluetooth/bluetooth.h>
+	btSecurityOpt    = 4
+	btSecurityLow    = 1 // no encryption, as SDP needs none
+	btSecurityMedium = 2 // encrypted with the bond's key; nothing a keyboard sends is trusted without that
+)
+
+// l2capAddr is struct sockaddr_l2. x/sys/unix converts it with the address
+// reversed one way and not the other, so booster does its own conversion.
+type l2capAddr struct {
+	psm      uint16
+	cid      uint16
+	addr     bdaddr
+	addrType uint8 // BDADDR_BREDR, BDADDR_LE_PUBLIC or BDADDR_LE_RANDOM, the same values as mgmt's
+}
+
+func (a l2capAddr) raw() (rsa unix.RawSockaddrL2) {
+	rsa.Family = unix.AF_BLUETOOTH
+	binary.LittleEndian.PutUint16((*[2]byte)(unsafe.Pointer(&rsa.Psm))[:], a.psm)
+	rsa.Bdaddr = a.addr.wire()
+	binary.LittleEndian.PutUint16((*[2]byte)(unsafe.Pointer(&rsa.Cid))[:], a.cid)
+	rsa.Bdaddr_type = a.addrType
+	return rsa
+}
+
+func l2capAddrFromRaw(rsa *unix.RawSockaddrL2) l2capAddr {
+	return l2capAddr{
+		psm:      binary.LittleEndian.Uint16((*[2]byte)(unsafe.Pointer(&rsa.Psm))[:]),
+		cid:      binary.LittleEndian.Uint16((*[2]byte)(unsafe.Pointer(&rsa.Cid))[:]),
+		addr:     bdaddrFromWire(rsa.Bdaddr[:]),
+		addrType: rsa.Bdaddr_type,
+	}
+}
+
+// withFd runs fn with f's descriptor, which stays open while fn runs. Unlike
+// f.Fd(), it leaves the descriptor non-blocking.
+func withFd(f *os.File, fn func(fd int) error) error {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var fnErr error
+	if err := rc.Control(func(fd uintptr) { fnErr = fn(int(fd)) }); err != nil {
+		return err
+	}
+	return fnErr
+}
+
+// l2capSocket returns a new L2CAP socket that asks for the given security
+// level. It is non-blocking and known to the runtime poller, so a goroutine
+// blocked on it returns once it is closed.
+func l2capSocket(security uint8) (*os.File, error) {
+	fd, err := unix.Socket(unix.AF_BLUETOOTH, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.BTPROTO_L2CAP)
+	if err != nil {
+		return nil, fmt.Errorf("L2CAP socket: %v", err)
+	}
+	// struct bt_security: the level, and a key size the kernel ignores here
+	if err := unix.SetsockoptString(fd, unix.SOL_BLUETOOTH, btSecurityOpt, string([]byte{security, 0})); err != nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("L2CAP security: %v", err)
+	}
+	return os.NewFile(uintptr(fd), "l2cap"), nil
+}
+
+func l2capBind(f *os.File, a l2capAddr) error {
+	rsa := a.raw()
+	return withFd(f, func(fd int) error {
+		_, _, errno := unix.Syscall(unix.SYS_BIND, uintptr(fd), uintptr(unsafe.Pointer(&rsa)), unsafe.Sizeof(rsa))
+		if errno != 0 {
+			return errno
+		}
+		return nil
+	})
+}
+
+func l2capListen(f *os.File) error {
+	return withFd(f, func(fd int) error { return unix.Listen(fd, 4) })
+}
+
+// l2capConnect connects f to a and waits for the channel to be up, with the
+// security f asked for in place. A zero timeout leaves it to the kernel to
+// give up.
+func l2capConnect(f *os.File, a l2capAddr, timeout time.Duration) error {
+	rsa := a.raw()
+	err := withFd(f, func(fd int) error {
+		_, _, errno := unix.Syscall(unix.SYS_CONNECT, uintptr(fd), uintptr(unsafe.Pointer(&rsa)), unsafe.Sizeof(rsa))
+		if errno != 0 {
+			return errno
+		}
+		return nil
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, unix.EINPROGRESS) {
+		return err
+	}
+
+	if timeout > 0 {
+		if err := f.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		defer func() { _ = f.SetWriteDeadline(time.Time{}) }()
+	}
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var connErr error
+	err = rc.Write(func(fd uintptr) bool {
+		// called right away and then each time the socket changes state,
+		// so check it is done before asking how it went
+		pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
+		if n, err := unix.Poll(pfd, 0); err != nil || n == 0 {
+			return false
+		}
+		v, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_ERROR)
+		if err != nil {
+			connErr = err
+		} else if v != 0 {
+			connErr = unix.Errno(v)
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	return connErr
+}
+
+// l2capAccept waits for a connection on listening socket f and returns it
+// with the address of the controller it came in on and of the peer.
+func l2capAccept(f *os.File) (*os.File, l2capAddr, l2capAddr, error) {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return nil, l2capAddr{}, l2capAddr{}, err
+	}
+	var nfd int
+	var peer unix.RawSockaddrL2
+	var acceptErr error
+	err = rc.Read(func(fd uintptr) bool {
+		size := uint32(unsafe.Sizeof(peer))
+		r, _, errno := unix.Syscall6(unix.SYS_ACCEPT4, fd, uintptr(unsafe.Pointer(&peer)), uintptr(unsafe.Pointer(&size)),
+			unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0, 0)
+		if errno == unix.EAGAIN {
+			return false
+		}
+		nfd, acceptErr = int(r), nil
+		if errno != 0 {
+			acceptErr = errno
+		}
+		return true
+	})
+	if err != nil {
+		return nil, l2capAddr{}, l2capAddr{}, err
+	}
+	if acceptErr != nil {
+		return nil, l2capAddr{}, l2capAddr{}, acceptErr
+	}
+
+	var local unix.RawSockaddrL2
+	size := uint32(unsafe.Sizeof(local))
+	if _, _, errno := unix.Syscall(unix.SYS_GETSOCKNAME, uintptr(nfd), uintptr(unsafe.Pointer(&local)), uintptr(unsafe.Pointer(&size))); errno != 0 {
+		_ = unix.Close(nfd)
+		return nil, l2capAddr{}, l2capAddr{}, errno
+	}
+	return os.NewFile(uintptr(nfd), "l2cap"), l2capAddrFromRaw(&local), l2capAddrFromRaw(&peer), nil
+}
+
 // btClassic is a keyboard bonded over BR/EDR.
 type btClassic struct {
 	stack                    *btStack
@@ -103,6 +282,12 @@ type btClassic struct {
 	vendor, product, version uint16
 	linkKey                  [16]byte
 	linkKeyType, pinLength   uint8
+
+	mu        sync.Mutex
+	record    *hidRecord // from BlueZ's cache or else from the keyboard, once it has connected
+	ctrl      *os.File   // a control channel waiting for its interrupt channel
+	connected bool
+	changed   chan struct{} // closed and replaced whenever connected changes
 }
 
 // btLE is a keyboard bonded over LE.
@@ -138,15 +323,17 @@ type btAdapter struct {
 
 type btStack struct {
 	adapters []*btAdapter
+	classic  map[bdaddr]*btClassic
 
 	mgmt *mgmtConn
 
-	mu      sync.Mutex
-	closed  bool
-	done    chan struct{} // closed on shutdown
-	claimed map[uint16]bool
-	powered []uint16           // controllers this stack powered on, to power off again
-	closers map[io.Closer]bool // sockets and devices to close on shutdown
+	mu        sync.Mutex
+	closed    bool
+	done      chan struct{} // closed on shutdown
+	claimed   map[uint16]bool
+	powered   []uint16 // controllers this stack powered on, to power off again
+	listening bool
+	closers   map[io.Closer]bool // sockets and devices to close on shutdown
 }
 
 // newBtStack turns the generator's config into the stack's keyboards,
@@ -154,6 +341,7 @@ type btStack struct {
 // keyboard is left.
 func newBtStack(cfg *InitBluetoothConfig) *btStack {
 	s := &btStack{
+		classic: make(map[bdaddr]*btClassic),
 		done:    make(chan struct{}),
 		claimed: make(map[uint16]bool),
 		closers: make(map[io.Closer]bool),
@@ -191,11 +379,24 @@ func (s *btStack) addKeyboard(ad *btAdapter, d BluetoothDevice) error {
 			stack: s, addr: addr, name: d.Name,
 			vendor: d.Vendor, product: d.Product, version: d.Version,
 			linkKeyType: d.Classic.LinkKeyType, pinLength: d.Classic.PINLength,
+			changed: make(chan struct{}),
 		}
 		if k.linkKey, err = parseKey(d.Classic.LinkKey); err != nil {
 			return fmt.Errorf("link key: %v", err)
 		}
+		var records [][]byte
+		for _, r := range d.Classic.SDPRecords {
+			if b, err := hex.DecodeString(r); err == nil {
+				records = append(records, b)
+			}
+		}
+		if len(records) > 0 {
+			if k.record, err = findHIDRecord(records); err != nil {
+				debug("bluetooth: %s: the cached SDP records have no usable HID record: %v", k, err)
+			}
+		}
 		ad.classic = append(ad.classic, k)
+		s.classic[addr] = k
 	case d.LE != nil:
 		k := &btLE{
 			stack: s, addr: addr, name: d.Name,
@@ -312,6 +513,9 @@ func (s *btStack) close() {
 	for c := range closers {
 		_ = c.Close()
 	}
+	for _, k := range s.classic {
+		k.disconnect()
+	}
 	for _, index := range powered {
 		if _, err := s.mgmt.commandTimeout(index, mgmtOpSetPowered, []byte{0}, 2*time.Second); err != nil {
 			debug("bluetooth: powering hci%d off: %v", index, err)
@@ -374,7 +578,11 @@ func (s *btStack) handleEvent(ev mgmtPacket) {
 		}
 	case mgmtEvDeviceDisconnected:
 		if len(ev.data) >= 8 {
-			debug("bluetooth: hci%d: %s disconnected, reason 0x%02x", ev.index, bdaddrFromWire(ev.data), ev.data[7])
+			addr := bdaddrFromWire(ev.data)
+			debug("bluetooth: hci%d: %s disconnected, reason 0x%02x", ev.index, addr, ev.data[7])
+			if k := s.classic[addr]; k != nil && ev.data[6] == mgmtAddrBREDR {
+				k.setConnected(false)
+			}
 		}
 	case mgmtEvPinCodeRequest, mgmtEvUserConfirmRequest, mgmtEvUserPasskeyRequest:
 		if len(ev.data) < 7 {
@@ -407,9 +615,20 @@ func (s *btStack) handleEvent(ev mgmtPacket) {
 }
 
 // setUpController brings controller index up for the keyboards bonded to
-// it.
+// it and starts waiting for them.
 func (s *btStack) setUpController(index uint16) {
-	s.configureController(index)
+	ad := s.configureController(index)
+	if ad == nil {
+		return
+	}
+	if len(ad.classic) > 0 {
+		s.listenClassic()
+	}
+	for _, k := range ad.classic {
+		if k.hostReconnects() {
+			btGo(func() { k.reconnectLoop(ad.addr) })
+		}
+	}
 }
 
 // configureController configures controller index for the keyboards bonded

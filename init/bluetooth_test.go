@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -68,6 +69,26 @@ func TestBdaddr(t *testing.T) {
 	}
 }
 
+func TestL2capAddrRaw(t *testing.T) {
+	t.Parallel()
+
+	addr, err := parseBdaddr("F1:2A:3B:4C:5D:6E")
+	require.NoError(t, err)
+	a := l2capAddr{psm: l2capPSMHIDControl, cid: l2capCIDATT, addr: addr, addrType: mgmtAddrLERandom}
+	rsa := a.raw()
+
+	// struct sockaddr_l2 as the kernel reads it: family, psm (LE), bdaddr
+	// (LE), cid (LE), bdaddr_type
+	b := (*[unix.SizeofSockaddrL2]byte)(unsafe.Pointer(&rsa))[:]
+	require.Equal(t, uint16(unix.AF_BLUETOOTH), binary.NativeEndian.Uint16(b))
+	require.Equal(t, []byte{0x11, 0x00}, b[2:4])
+	require.Equal(t, []byte{0x6e, 0x5d, 0x4c, 0x3b, 0x2a, 0xf1}, b[4:10])
+	require.Equal(t, []byte{0x04, 0x00}, b[10:12])
+	require.Equal(t, byte(mgmtAddrLERandom), b[12])
+
+	require.Equal(t, a, l2capAddrFromRaw(&rsa))
+}
+
 const testKey = "00112233445566778899AABBCCDDEEFF"
 
 func testBluetoothConfig() *InitBluetoothConfig {
@@ -110,6 +131,9 @@ func TestNewBtStack(t *testing.T) {
 	k := ad.classic[0]
 	require.Equal(t, `"Example Keyboard" (12:34:56:78:9A:BC)`, k.String())
 	require.Equal(t, uint8(4), k.linkKeyType)
+	require.Equal(t, k, s.classic[k.addr])
+	require.Nil(t, k.record)
+	require.False(t, k.hostReconnects())
 
 	require.Len(t, ad.le, 1)
 	le := ad.le[0]
@@ -407,6 +431,33 @@ func TestPairingIsTurnedDown(t *testing.T) {
 			t.Fatalf("event 0x%04x was not answered", tc.event)
 		}
 	}
+}
+
+func TestClassicConnectionState(t *testing.T) {
+	t.Parallel()
+
+	s := newBtStack(testBluetoothConfig())
+	m, kernel := newFakeKernel(t)
+	s.mgmt = m
+	btGo(s.eventLoop)
+
+	k := s.adapters[0].classic[0]
+	k.setConnected(true)
+	k.mu.Lock()
+	changed := k.changed
+	k.mu.Unlock()
+
+	// the kernel reporting the link down ends the session
+	w := k.addr.wire()
+	kernel.event(mgmtEvDeviceDisconnected, 0, append(w[:], mgmtAddrBREDR, 0x13))
+	select {
+	case <-changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the disconnection was not noticed")
+	}
+	k.mu.Lock()
+	require.False(t, k.connected)
+	k.mu.Unlock()
 }
 
 func TestTrackClosesOnShutdown(t *testing.T) {
