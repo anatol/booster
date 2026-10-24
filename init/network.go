@@ -17,6 +17,7 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4/client4"
 	"github.com/insomniacslk/dhcp/dhcpv6"
 	"github.com/insomniacslk/dhcp/dhcpv6/nclient6"
+	"github.com/insomniacslk/dhcp/iana"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -147,6 +148,15 @@ func runDhcp(ifname string) error {
 	return addDNSServers(dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options))
 }
 
+// dhcp6ClientID returns the DUID DHCPv6 identifies the machine by on the
+// interface with MAC hwaddr.  nclient6 otherwise sends a DUID-LLT, which
+// carries the time it was made and so changes every boot, leaving a server
+// to hand out a fresh address each time while the last boot's lease still
+// holds the old one.  A DUID-LL from the MAC is the same on every boot.
+func dhcp6ClientID(hwaddr net.HardwareAddr) dhcpv6.DUID {
+	return &dhcpv6.DUIDLL{HWType: iana.HWTypeEthernet, LinkLayerAddr: hwaddr}
+}
+
 func runDhcp6(ifname string) error {
 	var reply *dhcpv6.Message
 	for range dhcpAttempts {
@@ -154,7 +164,7 @@ func runDhcp6(ifname string) error {
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), dhcp6ExchangeTimeout)
 			var advertise *dhcpv6.Message
-			if advertise, err = client.Solicit(ctx); err == nil {
+			if advertise, err = client.Solicit(ctx, dhcpv6.WithClientID(dhcp6ClientID(client.InterfaceAddr()))); err == nil {
 				reply, err = client.Request(ctx, advertise)
 			}
 			cancel()

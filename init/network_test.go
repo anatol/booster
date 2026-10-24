@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/insomniacslk/dhcp/dhcpv6"
 	"github.com/stretchr/testify/require"
 )
 
@@ -112,6 +114,31 @@ func TestAddDNSServersIgnoresFamilyInterleaving(t *testing.T) {
 			require.Equal(t, want, string(data))
 		})
 	}
+}
+
+// TestDhcp6ClientIDStable builds Solicits the way nclient6 does, a second
+// apart, and checks they carry the same MAC-based DUID-LL instead of the
+// time-based DUID-LLT NewSolicit puts in by default.
+func TestDhcp6ClientIDStable(t *testing.T) {
+	t.Parallel()
+
+	hwaddr := net.HardwareAddr{0x52, 0x54, 0x00, 0x12, 0x34, 0x56}
+
+	solicit := func() dhcpv6.DUID {
+		msg, err := dhcpv6.NewSolicit(hwaddr, dhcpv6.WithClientID(dhcp6ClientID(hwaddr)))
+		require.NoError(t, err)
+		require.Len(t, msg.Options.Get(dhcpv6.OptionClientID), 1)
+		return msg.Options.ClientID()
+	}
+
+	first := solicit()
+	// DUID-LLT counts seconds, so a second apart it would differ
+	time.Sleep(1100 * time.Millisecond)
+	second := solicit()
+
+	require.Equal(t, dhcpv6.DUID_LL, first.DUIDType())
+	require.Equal(t, first.ToBytes(), second.ToBytes())
+	require.Equal(t, []byte(hwaddr), []byte(first.(*dhcpv6.DUIDLL).LinkLayerAddr))
 }
 
 func TestWriteResolvConfReplacesFile(t *testing.T) {
