@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -65,7 +66,41 @@ const (
 	dhcp6ExchangeTimeout = 3 * time.Second
 )
 
-func runDhcp(ifname string) ([]net.IP, error) {
+// leasedDNSServers holds the DNS servers every lease so far has handed out,
+// across all interfaces, without duplicates.  resolv.conf lists the IPv4
+// ones first, so its contents do not depend on whether the DHCPv4 or the
+// DHCPv6 leases arrived first.
+var leasedDNSServers struct {
+	sync.Mutex
+	ipv4, ipv6 []net.IP
+}
+
+// addDNSServers adds a lease's DNS servers and rewrites resolv.conf, so a
+// lease's servers are usable as soon as it arrives.  A lease that adds no
+// new server leaves the file alone.
+func addDNSServers(servers []net.IP) error {
+	leasedDNSServers.Lock()
+	defer leasedDNSServers.Unlock()
+
+	added := false
+	for _, ip := range servers {
+		list := &leasedDNSServers.ipv6
+		if ip.To4() != nil {
+			list = &leasedDNSServers.ipv4
+		}
+		if !slices.ContainsFunc(*list, ip.Equal) {
+			*list = append(*list, ip)
+			added = true
+		}
+	}
+	if !added {
+		return nil
+	}
+
+	return writeResolvConf(slices.Concat(leasedDNSServers.ipv4, leasedDNSServers.ipv6))
+}
+
+func runDhcp(ifname string) error {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
 	for range dhcpAttempts {
@@ -85,12 +120,12 @@ func runDhcp(ifname string) ([]net.IP, error) {
 		}
 	}
 	if ack == nil {
-		return nil, fmt.Errorf("%s: no DHCP ACK received", ifname)
+		return fmt.Errorf("%s: no DHCP ACK received", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	addr := netlink.Addr{IPNet: &net.IPNet{
@@ -98,21 +133,21 @@ func runDhcp(ifname string) ([]net.IP, error) {
 		Mask: ack.SubnetMask(),
 	}}
 	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return nil, err
+		return err
 	}
 
 	gateway := dhcpv4.GetIP(dhcpv4.OptionRouter, ack.Options)
 	if gateway != nil {
 		defaultRoute := netlink.Route{Gw: gateway}
 		if err := netlink.RouteAdd(&defaultRoute); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options), nil
+	return addDNSServers(dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options))
 }
 
-func runDhcp6(ifname string) ([]net.IP, error) {
+func runDhcp6(ifname string) error {
 	var reply *dhcpv6.Message
 	for range dhcpAttempts {
 		client, err := nclient6.New(ifname)
@@ -132,17 +167,17 @@ func runDhcp6(ifname string) ([]net.IP, error) {
 		time.Sleep(time.Second)
 	}
 	if reply == nil {
-		return nil, fmt.Errorf("%s: no DHCPv6 reply received", ifname)
+		return fmt.Errorf("%s: no DHCPv6 reply received", ifname)
 	}
 
 	iana := reply.Options.OneIANA()
 	if iana == nil || len(iana.Options.Addresses()) == 0 {
-		return nil, fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
+		return fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
 	}
 
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	addr := netlink.Addr{IPNet: &net.IPNet{
@@ -150,10 +185,10 @@ func runDhcp6(ifname string) ([]net.IP, error) {
 		Mask: net.CIDRMask(128, 128),
 	}}
 	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return nil, err
+		return err
 	}
 
-	return reply.Options.DNS(), nil
+	return addDNSServers(reply.Options.DNS())
 }
 
 func shutdownNetwork() {
@@ -223,17 +258,11 @@ linkReadinessLoop:
 	c := config.Network
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
-		var dns6 []net.IP
 		var err6 error
 		var wg sync.WaitGroup
-		wg.Go(func() { dns6, err6 = runDhcp6(ifname) })
+		wg.Go(func() { err6 = runDhcp6(ifname) })
 
-		dns4, err4 := runDhcp(ifname)
-		if dns4 != nil {
-			if err := writeResolvConf(dns4); err != nil {
-				return err
-			}
-		}
+		err4 := runDhcp(ifname)
 		wg.Wait()
 		switch {
 		case err4 != nil && err6 != nil:
@@ -242,11 +271,6 @@ linkReadinessLoop:
 			info("%s: no DHCPv4 lease, using DHCPv6: %v", ifname, err4)
 		case err6 != nil:
 			debug("%s: no DHCPv6 lease: %v", ifname, err6)
-		}
-		if dns6 != nil {
-			if err := writeResolvConf(slices.Concat(dns4, dns6)); err != nil {
-				return err
-			}
 		}
 	} else {
 		// static address
@@ -285,6 +309,10 @@ linkReadinessLoop:
 	return nil
 }
 
+var resolvConfPath = "/etc/resolv.conf"
+
+// writeResolvConf replaces resolv.conf by renaming a new file over it, so a
+// resolver reading it never sees it truncated or half written.
 func writeResolvConf(servers []net.IP) error {
 	var resolvConf bytes.Buffer
 	for _, ip := range servers {
@@ -294,5 +322,21 @@ func writeResolvConf(servers []net.IP) error {
 	}
 	resolvConf.WriteString("search .\n")
 
-	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(resolvConfPath), ".resolv.conf.*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	_, err = tmp.Write(resolvConf.Bytes())
+	if err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), resolvConfPath)
 }
