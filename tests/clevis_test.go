@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anatol/tang.go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,6 +90,31 @@ func TestLUKS2ClevisTangDHCP(t *testing.T) {
 		useDhcp:         true,
 		activeNetIfaces: "52-54-00-12-34-53,52:54:00:12:34:56,52:54:00:12:34:57", // 52:54:00:12:34:56 is QEMU's NIC address
 		kernelArgs:      []string{"rd.luks.uuid=f2473f71-9a68-4b16-ae54-8f942b2daf50", "root=UUID=7acb3a9e-9b50-4aa2-9965-e41ae8467d8a"},
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+func TestLUKS2ClevisTangDHCPv6(t *testing.T) {
+	t.Parallel()
+
+	params, _ := startDhcp6Net(t)
+
+	require.NoError(t, checkAsset("assets/tang/key.pub"))
+	tangd, err := tang.NewNativeServer("assets/tang", 5697)
+	require.NoError(t, err)
+	defer tangd.Stop()
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:          "assets/luks2.clevis.tang6.img",
+		modules:       "e1000",
+		params:        params,
+		enableNetwork: true,
+		useDhcp:       true,
+		kernelArgs:    []string{"rd.luks.uuid=dea52129-9028-46ec-86b4-e7a44b8a6899", "root=UUID=0c6f92ba-613d-4e1d-a349-480a5a9e9771"},
+		vmTimeout:     120 * time.Second,
 	})
 	require.NoError(t, err)
 	defer vm.Shutdown()
