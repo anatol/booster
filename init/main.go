@@ -573,6 +573,7 @@ func handleLvmBlockDevice(blk *blkInfo) error {
 }
 
 func resume(devpath string) error {
+	awaitNvPCRSetup()
 	devNo, err := deviceNo(devpath)
 	if err != nil {
 		return err
@@ -1092,6 +1093,11 @@ func boost() error {
 	}
 
 	rootMounted.Add(1)
+
+	// Before udev: a device event can start a TPM user, which must see setup held,
+	// and setup itself may wait for a TPM that udevListener reports.
+	tpmReadyWg.Add(1)
+	startNvPCRSetup()
 
 	go func() { check(udevListener()) }()
 

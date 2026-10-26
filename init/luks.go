@@ -495,6 +495,7 @@ func recoverClevisPassword(ctx context.Context, t luks.Token, luksVersion int) (
 		payload = node.Jwe
 	}
 
+	awaitNvPCRSetup()
 	deadline := time.Now().Add(60 * time.Second) // wait for network readiness for 60 seconds max
 	waitedForTpm := false
 	for {
@@ -1294,7 +1295,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 	// is bound to the key via PolicyAuthorize, not literal PCR values. Detected by
 	// tpm2_pubkey and routed to the signed-policy unseal in the loop below, which
 	// shares the PIN prompt/retry so signed+PIN works the same as literal+PIN.
-	verifyKey, pubkeyPCRs, signed, err := parseSignedToken(t.Payload)
+	verifyKey, pubkeyPCRs, pubkeyRef, signed, err := parseSignedToken(t.Payload)
 	if err != nil {
 		return nil, err
 	}
@@ -1316,6 +1317,13 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 			return nil, err
 		}
 	}
+
+	// The TPM driver may be a module that is not loaded yet. Wait here, before
+	// the PCR 11 extend and the unseal open the TPM, and before a PIN prompt.
+	if !tpmAwaitReady() {
+		return nil, fmt.Errorf("no TPM device found")
+	}
+	awaitNvPCRSetup()
 
 	// A PCR11-bound signed policy is signed for the enter-initrd phase, so extend
 	// it before the unseal (see ensureEnterInitrdBarrier). Fail closed.
@@ -1356,7 +1364,7 @@ func recoverSystemdTPM2Password(ctx context.Context, t luks.Token, mappingName s
 
 		var password []byte
 		if signed {
-			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, node.PCRs, verifyKey, uint32(srkHandle), tpm2Signature, authValue)
+			password, err = recoverSignedTPM2Password(public, private, node.PCRBank, pubkeyPCRs, node.PCRs, verifyKey, pubkeyRef, uint32(srkHandle), tpm2Signature, authValue)
 		} else {
 			password, err = tpm2Unseal(public, private, node.PCRs, bank, policyHash, authValue, srkHandle)
 		}

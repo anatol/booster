@@ -408,6 +408,13 @@ func parseParams(params string) error {
 			m.dataDeviceRef = ref
 		case "zfs":
 			zfsDataset = value
+		case "systemd.tpm2_measured_os":
+			b, ok := parseBoolean(value)
+			if !ok {
+				warning("systemd.tpm2_measured_os=%s is not a boolean, ignoring", value)
+				continue
+			}
+			cmdlineMeasuredOS = &b
 		default:
 			if dot := strings.IndexByte(key, '.'); value != "" && dot != -1 {
 				// this param looks like a module options
