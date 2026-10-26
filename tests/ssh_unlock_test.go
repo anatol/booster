@@ -825,6 +825,115 @@ func TestSSHRemoteUnlockFido2Pending(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// bootSSHUnlockVM boots assets/luks2.img with SSH unlock on guest port 2222
+// and the given NICs, and returns the VM with a client config whose key the
+// guest accepts.
+func bootSSHUnlockVM(t *testing.T, params []string) (*vmtest.Qemu, *gossh.ClientConfig) {
+	t.Helper()
+
+	require.NoError(t, checkAsset("assets/luks2.img"))
+
+	tmp := t.TempDir()
+	hostPriv, _, _ := generateSSHKeyPair(t)
+	_, clientAuthLine, clientSigner := generateSSHKeyPair(t)
+
+	hostKeyPath := filepath.Join(tmp, "host_ed25519")
+	require.NoError(t, os.WriteFile(hostKeyPath, hostPriv, 0o600))
+	authKeysPath := filepath.Join(tmp, "authorized_keys")
+	require.NoError(t, os.WriteFile(authKeysPath, clientAuthLine, 0o600))
+
+	vm, err := buildVmInstance(t, Opts{
+		disk:                  "assets/luks2.img",
+		modules:               "e1000",
+		enableNetwork:         true,
+		useDhcp:               true,
+		params:                params,
+		sshHostKeyPath:        hostKeyPath,
+		sshAuthorizedKeysPath: authKeysPath,
+		sshListen:             ":2222",
+		kernelArgs: []string{
+			"rd.luks.name=639b8fdd-36ba-443e-be3e-e5b335935502=cryptroot",
+			"root=/dev/mapper/cryptroot",
+		},
+		vmTimeout: 120 * time.Second,
+	})
+	require.NoError(t, err)
+
+	return vm, &gossh.ClientConfig{
+		User:            "root",
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(clientSigner)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+}
+
+// sendSSHPassphrase answers the unlock prompt for cryptroot over conn.
+func sendSSHPassphrase(t *testing.T, conn *gossh.Client) {
+	t.Helper()
+
+	sess, err := conn.NewSession()
+	require.NoError(t, err)
+	defer sess.Close()
+
+	stdin, err := sess.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := sess.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, sess.Shell())
+
+	br := bufio.NewReader(stdout)
+	require.NoError(t, readUntil(br, "Enter passphrase for ", 15*time.Second))
+	_, err = io.WriteString(stdin, "1234\n")
+	require.NoError(t, err)
+	require.NoError(t, readUntil(br, "Unlocked: cryptroot", 15*time.Second))
+}
+
+// TestSSHRemoteUnlockDHCPv6Only boots with a single NIC on a network that runs
+// DHCPv6 and no DHCPv4.  DHCPv4 failing must not stop the DHCPv6 lease from
+// configuring the interface.  passt forwards the unlock to the guest over IPv6,
+// so it only arrives once the leased address is configured.
+func TestSSHRemoteUnlockDHCPv6Only(t *testing.T) {
+	t.Parallel()
+
+	params, sshAddr := startDhcp6Net(t)
+	vm, clientCfg := bootSSHUnlockVM(t, params)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+
+	conn := dialSSHWithRetry(t, sshAddr, clientCfg, 60*time.Second)
+	defer conn.Close()
+	sendSSHPassphrase(t, conn)
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSSHRemoteUnlockDualStack boots with one NIC on QEMU's user network,
+// which leases only over DHCPv4, and one on passt, which leases only over
+// DHCPv6.  Both NICs run both protocols at once; each must end up configured
+// by the one its network answers, so sshd is reachable over IPv4 and IPv6
+// together.
+func TestSSHRemoteUnlockDualStack(t *testing.T) {
+	t.Parallel()
+
+	hostPort := strconv.Itoa(pickFreePort(t))
+	params6, sshAddr6 := startDhcp6Net(t)
+	params := append([]string{"-nic", "user,id=n1,hostfwd=tcp:127.0.0.1:" + hostPort + "-:2222"}, params6...)
+	vm, clientCfg := bootSSHUnlockVM(t, params)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Enter passphrase for cryptroot:"))
+
+	conn4 := dialSSHWithRetry(t, "127.0.0.1:"+hostPort, clientCfg, 60*time.Second)
+	require.NoError(t, conn4.Close())
+
+	conn6 := dialSSHWithRetry(t, sshAddr6, clientCfg, 60*time.Second)
+	defer conn6.Close()
+	sendSSHPassphrase(t, conn6)
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
 // readUntil drains the reader byte-by-byte until the needle appears as a
 // substring, or until the timeout fires. The SSH channel may pack the
 // prompt and response into the same read, so we can't rely on

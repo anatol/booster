@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +15,9 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/client4"
+	"github.com/insomniacslk/dhcp/dhcpv6"
+	"github.com/insomniacslk/dhcp/dhcpv6/nclient6"
+	"github.com/insomniacslk/dhcp/iana"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -54,10 +60,51 @@ func parseDNSServers(raw string) ([]net.IP, error) {
 	return ips, nil
 }
 
+const (
+	// attempts DHCPv4 and DHCPv6 each make before giving up, a second apart
+	dhcpAttempts = 40
+	// how long each DHCPv6 exchange waits for a reply
+	dhcp6ExchangeTimeout = 3 * time.Second
+)
+
+// leasedDNSServers holds the DNS servers every lease so far has handed out,
+// across all interfaces, without duplicates.  resolv.conf lists the IPv4
+// ones first, so its contents do not depend on whether the DHCPv4 or the
+// DHCPv6 leases arrived first.
+var leasedDNSServers struct {
+	sync.Mutex
+	ipv4, ipv6 []net.IP
+}
+
+// addDNSServers adds a lease's DNS servers and rewrites resolv.conf, so a
+// lease's servers are usable as soon as it arrives.  A lease that adds no
+// new server leaves the file alone.
+func addDNSServers(servers []net.IP) error {
+	leasedDNSServers.Lock()
+	defer leasedDNSServers.Unlock()
+
+	added := false
+	for _, ip := range servers {
+		list := &leasedDNSServers.ipv6
+		if ip.To4() != nil {
+			list = &leasedDNSServers.ipv4
+		}
+		if !slices.ContainsFunc(*list, ip.Equal) {
+			*list = append(*list, ip)
+			added = true
+		}
+	}
+	if !added {
+		return nil
+	}
+
+	return writeResolvConf(slices.Concat(leasedDNSServers.ipv4, leasedDNSServers.ipv6))
+}
+
 func runDhcp(ifname string) error {
 	dhcp := client4.NewClient()
 	var conversation []*dhcpv4.DHCPv4
-	for range 40 {
+	for range dhcpAttempts {
 		var err error
 		conversation, err = dhcp.Exchange(ifname)
 		if err == nil {
@@ -98,14 +145,60 @@ func runDhcp(ifname string) error {
 		}
 	}
 
-	dnsServers := dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options)
-	if dnsServers != nil {
-		if err := writeResolvConf(dnsServers); err != nil {
-			return err
+	return addDNSServers(dhcpv4.GetIPs(dhcpv4.OptionDomainNameServer, ack.Options))
+}
+
+// dhcp6ClientID returns the DUID DHCPv6 identifies the machine by on the
+// interface with MAC hwaddr.  nclient6 otherwise sends a DUID-LLT, which
+// carries the time it was made and so changes every boot, leaving a server
+// to hand out a fresh address each time while the last boot's lease still
+// holds the old one.  A DUID-LL from the MAC is the same on every boot.
+func dhcp6ClientID(hwaddr net.HardwareAddr) dhcpv6.DUID {
+	return &dhcpv6.DUIDLL{HWType: iana.HWTypeEthernet, LinkLayerAddr: hwaddr}
+}
+
+func runDhcp6(ifname string) error {
+	var reply *dhcpv6.Message
+	for range dhcpAttempts {
+		client, err := nclient6.New(ifname)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), dhcp6ExchangeTimeout)
+			var advertise *dhcpv6.Message
+			if advertise, err = client.Solicit(ctx, dhcpv6.WithClientID(dhcp6ClientID(client.InterfaceAddr()))); err == nil {
+				reply, err = client.Request(ctx, advertise)
+			}
+			cancel()
+			client.Close()
 		}
+		if err == nil {
+			break
+		}
+		debug("%s got error from DHCPv6 exchange: %v", ifname, err)
+		time.Sleep(time.Second)
+	}
+	if reply == nil {
+		return fmt.Errorf("%s: no DHCPv6 reply received", ifname)
 	}
 
-	return nil
+	iana := reply.Options.OneIANA()
+	if iana == nil || len(iana.Options.Addresses()) == 0 {
+		return fmt.Errorf("%s: DHCPv6 reply has no address", ifname)
+	}
+
+	link, err := netlink.LinkByName(ifname)
+	if err != nil {
+		return err
+	}
+
+	addr := netlink.Addr{IPNet: &net.IPNet{
+		IP:   iana.Options.Addresses()[0].IPv6Addr,
+		Mask: net.CIDRMask(128, 128),
+	}}
+	if err := netlink.AddrAdd(link, &addr); err != nil {
+		return err
+	}
+
+	return addDNSServers(reply.Options.DNS())
 }
 
 func shutdownNetwork() {
@@ -175,8 +268,19 @@ linkReadinessLoop:
 	c := config.Network
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
-		if err := runDhcp(ifname); err != nil {
-			return err
+		var err6 error
+		var wg sync.WaitGroup
+		wg.Go(func() { err6 = runDhcp6(ifname) })
+
+		err4 := runDhcp(ifname)
+		wg.Wait()
+		switch {
+		case err4 != nil && err6 != nil:
+			return errors.Join(err4, err6)
+		case err4 != nil:
+			info("%s: no DHCPv4 lease, using DHCPv6: %v", ifname, err4)
+		case err6 != nil:
+			debug("%s: no DHCPv6 lease: %v", ifname, err6)
 		}
 	} else {
 		// static address
@@ -215,6 +319,10 @@ linkReadinessLoop:
 	return nil
 }
 
+var resolvConfPath = "/etc/resolv.conf"
+
+// writeResolvConf replaces resolv.conf by renaming a new file over it, so a
+// resolver reading it never sees it truncated or half written.
 func writeResolvConf(servers []net.IP) error {
 	var resolvConf bytes.Buffer
 	for _, ip := range servers {
@@ -224,5 +332,21 @@ func writeResolvConf(servers []net.IP) error {
 	}
 	resolvConf.WriteString("search .\n")
 
-	return os.WriteFile("/etc/resolv.conf", resolvConf.Bytes(), 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(resolvConfPath), ".resolv.conf.*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	_, err = tmp.Write(resolvConf.Bytes())
+	if err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), resolvConfPath)
 }

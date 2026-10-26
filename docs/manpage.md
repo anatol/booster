@@ -43,7 +43,7 @@ serialize_tokens:
   clevis_timeout: 45s
 ```
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
-    The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
+    The network can be either configured dynamically with DHCP or statically within this config. In the former case `dhcp` is set to `on`.
     In the latter case the config allows to specify `ip` - the machine IP address and its network mask, `gateway` - default gateway, `dns_servers` - comma-separated list of DNS servers.
     The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
     Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
