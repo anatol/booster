@@ -1093,46 +1093,51 @@ func boost() error {
 
 	rootMounted.Add(1)
 
-	go func() { check(udevListener()) }()
+		go func() { check(udevListener()) }()
 
-	forceLoadWg := loadModules(config.ModulesForceLoad...)
+		forceLoadWg := loadModules(config.ModulesForceLoad...)
 
-	if plymouthEnabled {
-		// Wait for DRM modules to finish loading before starting plymouth,
-		// otherwise plymouthd can't find a display device and exits with EX_UNAVAILABLE.
-		forceLoadWg.Wait()
-		initPlymouth()
-	}
-	// Signal that plymouth init is complete (or was skipped). This unblocks
-	// any goroutines waiting in waitForPlymouthInit() — e.g. LUKS password
-	// prompts that arrived via udev before plymouthd was ready.
-	close(plymouthInitDone)
+		if plymouthEnabled {
+			// Wait for DRM modules to finish loading before starting plymouth,
+			// otherwise plymouthd can't find a display device and exits with EX_UNAVAILABLE.
+			forceLoadWg.Wait()
+			initPlymouth()
+		}
+		// Signal that plymouth init is complete (or was skipped). This unblocks
+		// any goroutines waiting in waitForPlymouthInit() — e.g. LUKS password
+		// prompts that arrived via udev before plymouthd was ready.
+		close(plymouthInitDone)
 
-	if err := configureVirtualConsole(); err != nil {
-		return err
-	}
-
-	diskBy := []string{"id", "partuuid", "path", "uuid"}
-	for _, by := range diskBy {
-		if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
+		if err := configureVirtualConsole(); err != nil {
 			return err
 		}
-	}
 
-	if config.Network != nil && config.Network.SshAuthorizedKeys != "" {
-		go sshRun(config.Network)
-	}
-
-	go func() { check(scanSysModaliases()) }()
-	go func() { check(scanSysBlock()) }()
-
-	if config.EnableZfs {
-		if err := mountZfsRoot(); err != nil {
-			return err
+		diskBy := []string{"id", "partuuid", "path", "uuid"}
+		for _, by := range diskBy {
+			if err := os.MkdirAll("/dev/disk/by-"+by, 0o755); err != nil {
+				return err
+			}
 		}
-	}
 
-	if config.MountTimeout != 0 {
+		if config.Network != nil && config.Network.SshAuthorizedKeys != "" {
+			go sshRun(config.Network)
+		}
+
+		go func() { check(scanSysModaliases()) }()
+		go func() { check(scanSysBlock()) }()
+
+		// systemd-tpm2-setup --early: after udev + module loads are kicked off so
+		// /dev/tpmrm0 can appear. Sync so switch_root cannot race past an unfinished
+		// first write. The LUKS TPM unlock path also calls this (sync.Once).
+		setupNvPCRsEarly()
+
+		if config.EnableZfs {
+			if err := mountZfsRoot(); err != nil {
+				return err
+			}
+		}
+
+		if config.MountTimeout != 0 {
 		// TODO: cancellable, timeout context?
 		timeout := waitTimeout(&rootMounted, time.Duration(config.MountTimeout)*time.Second)
 		if timeout {
