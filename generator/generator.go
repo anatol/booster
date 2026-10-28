@@ -60,6 +60,15 @@ type generatorConfig struct {
 	crypttabFile string // path to host crypttab; empty = use /etc/crypttab
 	enableFido2  bool
 
+	enableBluetooth  bool
+	bluetoothDevices []string // canonical addresses from bluetooth_devices; empty = every paired, trusted keyboard
+	bluetoothDir     string   // BlueZ state directory, /var/lib/bluetooth
+
+	bluetoothSysfsDir string                 // /sys/class/bluetooth, the host's controllers
+	readKernelLog     func() ([]byte, error) // where the controllers' drivers name the firmware they loaded
+
+	bluetooth *InitBluetoothConfig // keyboards found under bluetoothDir; nil = none, Bluetooth left out of the image
+
 	serializeTokens bool // dispatch LUKS tokens serially instead of concurrently; default false
 	tokenTimeout    int  // device-level keyboard-fallback timer (seconds); 0 = unset
 	pinDelay        int  // concurrent-mode PIN-prompt pre-delay (seconds); 0 = off
@@ -177,6 +186,21 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
 		return err
+	}
+
+	if conf.enableBluetooth {
+		conf.bluetooth, err = readBluetoothKeyboards(conf.bluetoothDir, conf.bluetoothDevices)
+		if err != nil {
+			return fmt.Errorf("enable_bluetooth: %v", err)
+		}
+		if conf.bluetooth != nil {
+			// The image now carries the keyboards' bond keys, and whoever reads
+			// them can decrypt what the keyboards send, the LUKS passphrase
+			// included. Keep the image readable by root only.
+			if err := img.restrictPermissions(); err != nil {
+				return err
+			}
+		}
 	}
 
 	kmod, err := NewKmod(conf)
@@ -314,6 +338,20 @@ func generateInitRamfs(conf *generatorConfig) error {
 			} else {
 				return err
 			}
+		}
+	}
+
+	if conf.bluetooth != nil {
+		forceLoad, err := kmod.activateBluetoothModules()
+		if err != nil {
+			return err
+		}
+		conf.modulesForceLoad = append(conf.modulesForceLoad, forceLoad...)
+		if !conf.universal && len(hostBluetoothControllers(conf.bluetoothSysfsDir)) == 0 {
+			warning("enable_bluetooth: this host has no Bluetooth controller up, so the image gets no controller driver; bring the controller up and rebuild the image")
+		}
+		if err := img.appendBluetoothFirmware(conf); err != nil {
+			return err
 		}
 	}
 
@@ -523,6 +561,7 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.Fido2Timeout = conf.fido2Timeout
 	initConfig.PasswordEcho = conf.passwordEcho
 	initConfig.EmergencyShellPassword = conf.emergencyShellPassword
+	initConfig.Bluetooth = conf.bluetooth
 
 	if conf.networkConfigType == netDhcp {
 		initConfig.Network = &InitNetworkConfig{}

@@ -43,6 +43,7 @@ Supported unlock styles include:
 * `systemd-cryptenroll` TPM2 and FIDO2 tokens.
 * Clevis-style bindings for TPM2, Tang, and other supported policies.
 * SSH-based remote passphrase unlock for systems you cannot physically reach.
+* Passphrases typed on a paired Bluetooth keyboard, BR/EDR or LE.
 
 ### Hardware Tokens Without Rough Edges
 
@@ -229,6 +230,12 @@ serialize_tokens:
   fido2_timeout: 30s
 ```
 
+To type the passphrase on a Bluetooth keyboard paired with the running system:
+
+```yaml
+enable_bluetooth: true
+```
+
 For Plymouth splash support:
 
 ```yaml
@@ -248,6 +255,7 @@ It covers:
 * LUKS, FIDO2, TPM2, Clevis, keyfile, and detached-header setup.
 * `/etc/crypttab` integration.
 * Remote unlock over SSH.
+* Bluetooth keyboards at the passphrase prompt.
 * GPT root autodiscovery.
 * Unified Kernel Image generation.
 * Debugging and recovery.

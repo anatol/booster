@@ -925,6 +925,7 @@ func cleanup() {
 	close(udevQuitLoop)
 	udevConn.Close()
 	sshShutdown()
+	bluetoothShutdown()
 	shutdownNetwork()
 	wipeSecretCache() // scrub cached passphrases before exec-to-systemd
 }
@@ -1096,6 +1097,12 @@ func boost() error {
 	go func() { check(udevListener()) }()
 
 	forceLoadWg := loadModules(config.ModulesForceLoad...)
+
+	if config.Bluetooth != nil {
+		// started before anything waits for a disk, so that a keyboard can
+		// connect while the passphrase prompt is still to come
+		go bluetoothRun(config.Bluetooth)
+	}
 
 	if plymouthEnabled {
 		// Wait for DRM modules to finish loading before starting plymouth,
