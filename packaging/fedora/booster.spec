@@ -53,13 +53,17 @@ CGO_CPPFLAGS="%{optflags}" CGO_LDFLAGS="%{build_ldflags}" \
         -ldflags "-linkmode external -extldflags \"%{build_ldflags}\""
 popd
 
-# init loads the FIDO2 plugin through Go's plugin package, which requires cgo.
+# init loads plugins through Go's plugin package, which requires cgo.
 pushd init
 CGO_ENABLED=1 go build
-pushd fido2plugin
-CGO_ENABLED=1 CGO_CPPFLAGS="%{optflags}" CGO_LDFLAGS="%{build_ldflags}" \
-    go build -buildmode=plugin -o ../fido2plugin.so .
-popd
+for plugin_dir in fido2plugin clevisplugin; do
+    if [ -d "$plugin_dir" ]; then
+        pushd "$plugin_dir"
+        CGO_ENABLED=1 CGO_CPPFLAGS="%{optflags}" CGO_LDFLAGS="%{build_ldflags}" \
+            go build -buildmode=plugin -o "../${plugin_dir}.so" .
+        popd
+    fi
+done
 popd
 
 ronn docs/manpage.md
@@ -67,7 +71,9 @@ ronn docs/manpage.md
 %install
 install -Dpm 0755 generator/generator %{buildroot}%{_bindir}/%{name}
 install -Dpm 0755 init/init %{buildroot}%{_prefix}/lib/%{name}/init
-install -Dpm 0755 init/fido2plugin.so %{buildroot}%{_prefix}/lib/%{name}/fido2plugin.so
+for p in init/*.so; do
+    [ -f "$p" ] && install -Dpm 0755 "$p" "%{buildroot}%{_prefix}/lib/%{name}/$(basename "$p")"
+done
 
 # The kernel-install plugin. Named 60- so it runs after 50-depmod.install and
 # before 60-ukify.install, which collects the initrd from the staging area.
@@ -87,7 +93,7 @@ install -Dpm 0644 /dev/null %{buildroot}%{_sysconfdir}/%{name}.yaml
 %{_bindir}/%{name}
 %dir %{_prefix}/lib/%{name}
 %{_prefix}/lib/%{name}/init
-%{_prefix}/lib/%{name}/fido2plugin.so
+%{_prefix}/lib/%{name}/*.so
 %{_prefix}/lib/kernel/install.d/60-%{name}.install
 %{_mandir}/man1/%{name}.1*
 %{_datadir}/bash-completion/completions/%{name}

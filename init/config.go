@@ -43,6 +43,7 @@ type InitConfig struct {
 	EnableZfs              bool                `yaml:",omitempty"`
 	ZfsImportParams        string              `yaml:",omitempty"` // TODO: remove it
 	EnablePlymouth         bool                `yaml:",omitempty"`
+	EnableClevis           bool                `yaml:",omitempty"`
 	SerializeTokens        bool                `yaml:",omitempty"`                         // dispatch LUKS tokens serially instead of concurrently; default false
 	TokenTimeout           int                 `yaml:",omitempty"`                         // device-level keyboard-fallback timer in seconds; 0 = unset (crypttab/cmdline or derived default applies)
 	PinDelay               int                 `yaml:",omitempty"`                         // concurrent-mode PIN-prompt pre-delay in seconds so a parallel non-interactive token can win first; 0 = off

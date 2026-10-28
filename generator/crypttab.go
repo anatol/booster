@@ -22,12 +22,12 @@ func isKeyfileOnDevice(kf string) bool {
 // appendCrypttab reads path, filters entries marked with x-initrd.attach,
 // and bundles the filtered content plus any referenced keyfiles into the image as
 // /etc/crypttab.  Returns hasFido2=true if any kept entry has fido2-device= set
-// (so the caller can auto-enable the fido2 plugin).  Returns nil error if path
-// does not exist.
-func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
+// (so the caller can auto-enable the fido2 plugin) and hasClevis=true if any kept
+// entry has clevis/tang options set. Returns nil error if path does not exist.
+func (img *Image) appendCrypttab(path string) (hasFido2, hasClevis bool, err error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	type entry struct {
@@ -95,7 +95,7 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 	}
 
 	if len(kept) == 0 {
-		return false, nil
+		return false, false, nil
 	}
 
 	// write filtered crypttab into image
@@ -105,7 +105,7 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 		buf.WriteByte('\n')
 	}
 	if err := img.AppendContent("/etc/crypttab", 0o600, []byte(buf.String())); err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	// bundle referenced assets for each kept entry
@@ -121,6 +121,9 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 			if strings.HasPrefix(opt, "fido2-device=") {
 				hasFido2 = true
 			}
+			if opt == "clevis" || strings.HasPrefix(opt, "clevis-") || strings.HasPrefix(opt, "tang=") || opt == "tang" {
+				hasClevis = true
+			}
 		}
 		if skip {
 			continue
@@ -132,7 +135,7 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 			if isKeyfileOnDevice(kf) {
 				// keyfile lives on a separate runtime device — nothing to bundle
 			} else if err := img.AppendFile(kf); err != nil {
-				return false, fmt.Errorf("crypttab: keyfile %s: %v", kf, err)
+				return false, false, fmt.Errorf("crypttab: keyfile %s: %v", kf, err)
 			}
 		}
 
@@ -155,11 +158,11 @@ func (img *Image) appendCrypttab(path string) (hasFido2 bool, err error) {
 				break
 			}
 			if err := img.AppendFile(hdr); err != nil {
-				return false, fmt.Errorf("crypttab: header %s: %v", hdr, err)
+				return false, false, fmt.Errorf("crypttab: header %s: %v", hdr, err)
 			}
 			break
 		}
 	}
 
-	return hasFido2, nil
+	return hasFido2, hasClevis, nil
 }
