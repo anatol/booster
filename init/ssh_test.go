@@ -159,7 +159,7 @@ func TestSshPromptLoopDisconnectsAfterMaxAttempts(t *testing.T) {
 	ch := &fakeChannel{in: &input}
 
 	addr := &fakeAddr{}
-	sshPromptLoop(ch, addr)
+	sshPromptLoop(ch, nil, addr)
 
 	got := ch.out.String()
 	gotPrompts := bytes.Count([]byte(got), []byte("Enter passphrase for cap-test: "))
