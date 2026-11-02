@@ -47,7 +47,7 @@ type UserConfig struct {
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
 
-		// SSH-based remote LUKS unlock. Both SshHostKey and SshAuthorizedKeys
+		// SSH-based remote LUKS/ZFS unlock. Both SshHostKey and SshAuthorizedKeys
 		// must point to readable files at build time; their contents are
 		// embedded into the initramfs config. Setting SshAuthorizedKeys
 		// enables the SSH server during early boot.
