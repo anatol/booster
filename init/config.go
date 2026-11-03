@@ -20,6 +20,49 @@ type InitNetworkConfig struct {
 	SshListen         string `yaml:"ssh_listen,omitempty"`
 }
 
+// InitBluetoothConfig lists the paired keyboards init reconnects before any
+// disk is unlocked, grouped by the controller they are bonded to. Keys and
+// SDP records are hex strings in the byte order BlueZ stores them in.
+type InitBluetoothConfig struct {
+	Adapters []BluetoothAdapter `yaml:",omitempty"`
+}
+
+type BluetoothAdapter struct {
+	Address string            `yaml:",omitempty"` // controller's public address, e.g. 00:1A:7D:DA:71:13
+	Devices []BluetoothDevice `yaml:",omitempty"`
+}
+
+type BluetoothDevice struct {
+	Address string `yaml:",omitempty"` // identity address of the keyboard
+	Name    string `yaml:",omitempty"`
+	Vendor  uint16 `yaml:",omitempty"` // BlueZ's [DeviceID]; zero when it has none
+	Product uint16 `yaml:",omitempty"`
+	Version uint16 `yaml:",omitempty"`
+
+	// Exactly one of the two is set: the transport the keyboard is bonded over.
+	Classic *BluetoothClassic `yaml:",omitempty"`
+	LE      *BluetoothLE      `yaml:"le,omitempty"`
+}
+
+// BluetoothClassic is a keyboard bonded over BR/EDR, driven by the kernel's HIDP.
+type BluetoothClassic struct {
+	LinkKey     string   `yaml:"link_key"`
+	LinkKeyType uint8    `yaml:"link_key_type"`
+	PINLength   uint8    `yaml:"pin_length,omitempty"`
+	SDPRecords  []string `yaml:"sdp_records,omitempty"` // BlueZ's cached SDP records; none means init asks the keyboard
+}
+
+// BluetoothLE is a keyboard bonded over LE, driven by booster's HID-over-GATT client.
+type BluetoothLE struct {
+	AddressType          string `yaml:"address_type"`                     // public or static
+	LongTermKey          string `yaml:"long_term_key"`                    // the key this host encrypts with as central
+	Authenticated        uint8  `yaml:"authenticated,omitempty"`          // BlueZ's Authenticated=, which is the mgmt LTK type
+	EncSize              uint8  `yaml:"enc_size"`                         // encryption key size in bytes
+	EDiv                 uint16 `yaml:"ediv,omitempty"`                   // legacy pairing only, zero for LE Secure Connections
+	Rand                 uint64 `yaml:"rand,omitempty"`                   // legacy pairing only, zero for LE Secure Connections
+	IdentityResolvingKey string `yaml:"identity_resolving_key,omitempty"` // resolves the keyboard's private addresses
+}
+
 type VirtualConsole struct {
 	KeymapFile      string `yaml:",omitempty"`
 	Utf             bool   `yaml:",omitempty"`
@@ -51,6 +94,8 @@ type InitConfig struct {
 	Fido2Timeout           int                 `yaml:",omitempty"`                         // serialize-mode per-token bound for non-PIN systemd-fido2 tokens in seconds; 0 = default 30
 	PasswordEcho           string              `yaml:"password_echo,omitempty"`            // ordered comma-separated echo-mode cycle; first entry = startup mode; validated by the generator
 	EmergencyShellPassword string              `yaml:"emergency_shell_password,omitempty"` // argon2id PHC; gates the emergency shell
+
+	Bluetooth *InitBluetoothConfig `yaml:",omitempty"` // paired keyboards to reconnect before any disk is unlocked
 }
 
 const initConfigPath = "/etc/booster.init.yaml"

@@ -68,6 +68,8 @@ type options struct {
 	enableMdraid                 bool
 	mdraidConfigPath             string
 	enableFido2                  bool
+	bluetoothDir                 string // enables Bluetooth with this as BlueZ's state directory
+	kernelLog                    string // what the generator reads from /dev/kmsg
 }
 
 func generateAliasesFile(aliases []alias) []byte {
@@ -203,6 +205,10 @@ func createTestInitRamfs(t *testing.T, o *options) {
 		mdraidConfigPath:    o.mdraidConfigPath,
 		enableFido2:         o.enableFido2,
 		crypttabFile:        "/dev/null", // tests run without root; avoid reading /etc/crypttab
+		enableBluetooth:     o.bluetoothDir != "",
+		bluetoothDir:        o.bluetoothDir,
+		bluetoothSysfsDir:   wd + "/sys/class/bluetooth",
+		readKernelLog:       func() ([]byte, error) { return []byte(o.kernelLog), nil },
 	}
 	if o.vConsoleConfig != "" {
 		conf.enableVirtualConsole = true

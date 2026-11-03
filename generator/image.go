@@ -74,6 +74,12 @@ func NewImage(path string, compression string, stripBinaries bool) (*Image, erro
 	}, nil
 }
 
+// restrictPermissions makes the image readable by its owner only, for an
+// image that carries secrets.
+func (img *Image) restrictPermissions() error {
+	return img.file.Chmod(0o600)
+}
+
 func (img *Image) Cleanup() {
 	_ = img.out.Close()
 	if img.compressor != img.file {

@@ -1,6 +1,11 @@
 Booster - fast and secure initramfs generator
 
 Release 0.11 (TBD)
+  * Adds the `enable_bluetooth` config option: the Bluetooth keyboards paired with BlueZ reconnect at
+    boot, before any disk is unlocked, so the passphrase can be typed on one. BR/EDR and LE keyboards
+    both work, through a small stack of booster's own on the kernel's Bluetooth support, as bluetoothd
+    needs D-Bus. `bluetooth_devices` narrows it to the keyboards listed. An image that carries Bluetooth
+    bond keys is created readable by root only
   * Adds the `password_echo` config option: an ordered list of passphrase/PIN prompt echo modes
     (`asterisks`, `silent`, `plaintext`). The prompt starts in the first listed mode and Tab
     cycles through the list — a single entry pins the prompt, and omitting `plaintext` keeps the
