@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,46 @@ func TestSystemdTPM2SignedPolicy(t *testing.T) {
 
 	vm, err := buildVmInstance(t, Opts{
 		disk: "assets/systemd-tpm2-signed.img",
+		kernelArgs: []string{
+			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
+			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
+			"rd.luks.options=tpm2-signature=" + sigPath,
+		},
+		extraFiles: sigPath,
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSystemdTPM2SignedPolicyModularTPM pins the signed PCR 11 unlock on a
+// kernel whose TPM driver is a module. Void's kernel has tpm_tis as a module
+// and NVMe built in, so the LUKS device is found before the TPM exists. If
+// booster does not wait for the TPM, the token fails and the boot stops at the
+// passphrase prompt. A virtio-scsi disk does not show this: its driver is a
+// module too and loads at the same time as tpm_tis.
+func TestSystemdTPM2SignedPolicyModularTPM(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, checkAsset("assets/voidlinux.img")) // it will generate vmlinuz-version needed later
+	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
+	require.NoError(t, err)
+
+	swtpm, params, err := startSwtpm(t)
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	sigPath, err := filepath.Abs("assets/systemd-tpm2-signed.pcrsig.json")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		modulesDirectory: "assets/voidlinux/modules",
+		kernelPath:       "assets/voidlinux/vmlinuz",
+		kernelVersion:    string(voidlinuxKernelVersion),
+		modules:          "tpm_tis",
+		disks:            []vmtest.QemuDisk{{Path: "assets/systemd-tpm2-signed.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
 		kernelArgs: []string{
 			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
 			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
