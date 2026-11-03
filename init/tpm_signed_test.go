@@ -59,7 +59,7 @@ func TestParseSignedToken(t *testing.T) {
 	// case a real on-disk token exercises.
 	pemB64 := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: spki}))
 	signed := []byte(`{"tpm2_pubkey":"` + pemB64 + `","tpm2_pubkey_pcrs":[11]}`)
-	pub, pcrs, ok, err := parseSignedToken(signed)
+	pub, pcrs, _, ok, err := parseSignedToken(signed)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, []int{11}, pcrs)
@@ -68,19 +68,19 @@ func TestParseSignedToken(t *testing.T) {
 
 	// Robustness: a raw-DER body (no PEM wrapper) is also accepted.
 	derB64 := base64.StdEncoding.EncodeToString(spki)
-	pub2, _, ok2, err := parseSignedToken([]byte(`{"tpm2_pubkey":"` + derB64 + `","tpm2_pubkey_pcrs":[11]}`))
+	pub2, _, _, ok2, err := parseSignedToken([]byte(`{"tpm2_pubkey":"` + derB64 + `","tpm2_pubkey_pcrs":[11]}`))
 	require.NoError(t, err)
 	require.True(t, ok2)
 	require.Equal(t, key.PublicKey.N, pub2.N)
 
 	// Literal-PCR token: no tpm2_pubkey -> not signed (handled by the legacy path).
 	literal := []byte(`{"tpm2-pcrs":[7]}`)
-	_, _, ok, err = parseSignedToken(literal)
+	_, _, _, ok, err = parseSignedToken(literal)
 	require.NoError(t, err)
 	require.False(t, ok)
 
 	// Malformed base64 pubkey -> error.
-	_, _, _, err = parseSignedToken([]byte(`{"tpm2_pubkey":"!!notb64!!"}`))
+	_, _, _, _, err = parseSignedToken([]byte(`{"tpm2_pubkey":"!!notb64!!"}`))
 	require.Error(t, err)
 }
 
@@ -97,7 +97,7 @@ func TestParseRealSystemdArtifacts(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1. the real token is recognized as signed and bound to PCR 11.
-	pub, pubkeyPCRs, ok, err := parseSignedToken(tokenJSON)
+	pub, pubkeyPCRs, _, ok, err := parseSignedToken(tokenJSON)
 	require.NoError(t, err, "real systemd tpm2_pubkey (base64 of PEM) must parse")
 	require.True(t, ok)
 	require.Equal(t, []int{11}, pubkeyPCRs)
@@ -122,7 +122,7 @@ func TestParseRealSystemdArtifacts(t *testing.T) {
 	// 4. selectSignature finds the real entry for the real key + its policy digest.
 	pol, err := hex.DecodeString(sigs["sha256"][0].Pol)
 	require.NoError(t, err)
-	entry, err := selectSignature(sigs, "sha256", pub, pol)
+	entry, err := selectSignature(sigs, "sha256", pub, pol, "")
 	require.NoError(t, err)
 	require.Equal(t, []int{11}, entry.PCRs)
 	require.NotEmpty(t, entry.Sig)
@@ -140,19 +140,31 @@ func TestSelectSignature(t *testing.T) {
 	sigs, err := parseSignatureJSON(js)
 	require.NoError(t, err)
 
-	e, err := selectSignature(sigs, "sha256", &key.PublicKey, pol[:])
+	e, err := selectSignature(sigs, "sha256", &key.PublicKey, pol[:], "")
 	require.NoError(t, err)
 	require.Equal(t, []int{11}, e.PCRs)
 	require.Equal(t, []byte("abc"), e.Sig)
 
 	// Wrong policy digest -> no match.
 	other := sha256.Sum256([]byte("other"))
-	_, err = selectSignature(sigs, "sha256", &key.PublicKey, other[:])
+	_, err = selectSignature(sigs, "sha256", &key.PublicKey, other[:], "")
 	require.Error(t, err)
 
 	// Wrong bank -> no match.
-	_, err = selectSignature(sigs, "sha384", &key.PublicKey, pol[:])
+	_, err = selectSignature(sigs, "sha384", &key.PublicKey, pol[:], "")
 	require.Error(t, err)
+
+	// An entry carries a policy reference that must match too: systemd signs the
+	// "initrd" entry over the policy plus the ref, so it never stands in for an
+	// entry without one, nor the other way round.
+	js = []byte(`{"sha256":[{"pcrs":[11],"pkfp":"` + fp + `","pol":"` + polHex + `","ref":"initrd","sig":"YWJj"}]}`)
+	sigs, err = parseSignatureJSON(js)
+	require.NoError(t, err)
+	_, err = selectSignature(sigs, "sha256", &key.PublicKey, pol[:], "")
+	require.Error(t, err)
+	e, err = selectSignature(sigs, "sha256", &key.PublicKey, pol[:], "initrd")
+	require.NoError(t, err)
+	require.Equal(t, "initrd", e.Ref)
 }
 
 func TestResolveSignature(t *testing.T) {
@@ -310,9 +322,26 @@ func (r *signedRig) signPolicy(approved []byte) []byte {
 	return sig
 }
 
+// signPolicyRef signs approved under a policy reference: systemd-measure
+// --policyref signs SHA256(approved || SHA256(ref)).
+func (r *signedRig) signPolicyRef(approved []byte, ref string) []byte {
+	hh := sha256.Sum256(append(append([]byte{}, approved...), policyRefDigest(ref)...))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, r.priv, crypto.SHA256, hh[:])
+	require.NoError(r.t, err)
+	return sig
+}
+
+func (r *signedRig) sigEntry(pcr int, approved, sig []byte, ref string) string {
+	refField := ""
+	if ref != "" {
+		refField = fmt.Sprintf(`"ref":"%s",`, ref)
+	}
+	return fmt.Sprintf(`{"pcrs":[%d],"pkfp":"%s","pol":"%s",%s"sig":"%s"}`,
+		pcr, rsaPublicKeyFingerprint(r.pub()), hex.EncodeToString(approved), refField, base64.StdEncoding.EncodeToString(sig))
+}
+
 func (r *signedRig) sigJSON(pcr int, approved, sig []byte) []byte {
-	return []byte(fmt.Sprintf(`{"sha256":[{"pcrs":[%d],"pkfp":"%s","pol":"%s","sig":"%s"}]}`,
-		pcr, rsaPublicKeyFingerprint(r.pub()), hex.EncodeToString(approved), base64.StdEncoding.EncodeToString(sig)))
+	return []byte(`{"sha256":[` + r.sigEntry(pcr, approved, sig, "") + `]}`)
 }
 
 // TestSignedUnsealSurvivesPCRChange is the headline proof: a blob whose authPolicy
@@ -328,7 +357,7 @@ func TestSignedUnsealSurvivesPCRChange(t *testing.T) {
 
 	// 1. Unseal at the current PCR state.
 	pol1 := r.policyPCRDigest(debugPCR)
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol1, r.signPolicy(pol1)), nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol1, r.signPolicy(pol1)), nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out)
 
@@ -342,15 +371,48 @@ func TestSignedUnsealSurvivesPCRChange(t *testing.T) {
 	require.NoError(t, err)
 	pol2 := r.policyPCRDigest(debugPCR)
 	require.NotEqual(t, pol1, pol2, "extending the bound PCR must change the policy")
-	out, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol2, r.signPolicy(pol2)), nil)
+	out, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol2, r.signPolicy(pol2)), nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out, "same blob must unseal after the PCR change with a fresh signature")
 
 	// 3. A tampered signature must not unseal.
 	bad := r.signPolicy(pol2)
 	bad[0] ^= 0xff
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol2, bad), nil)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", r.sigJSON(debugPCR, pol2, bad), nil)
 	require.Error(t, err, "a tampered signature must not unseal")
+}
+
+// TestSignedUnsealPolicyRef pins the policy reference handling. A UKI built with
+// SignInitrdPCRs=yes carries an "initrd" entry with the same policy digest as the
+// plain enter-initrd entry; a token enrolled without a ref must still pick the
+// plain one wherever the "initrd" entry sits in the file. A token enrolled with
+// --tpm2-public-key-policyref is sealed to PolicyAuthorize with that ref and
+// unseals only with the matching entry.
+func TestSignedUnsealPolicyRef(t *testing.T) {
+	r := newSignedRig(t)
+	const debugPCR = 16
+	pubkeyPCRs := []int{debugPCR}
+	pol := r.policyPCRDigest(debugPCR)
+	both := []byte(`{"sha256":[` +
+		r.sigEntry(debugPCR, pol, r.signPolicyRef(pol, "initrd"), "initrd") + "," +
+		r.sigEntry(debugPCR, pol, r.signPolicy(pol), "") + `]}`)
+
+	pub, priv := r.seal(r.authorizePolicy(), nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", both, nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte(signedTestSecret), out)
+
+	refPol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+	require.NoError(t, err)
+	require.NoError(t, (&tpm2.PolicyAuthorize{KeySign: r.keyName, PolicyRef: tpm2.TPM2BDigest{Buffer: policyRefDigest("initrd")}}).Update(refPol))
+	pubRef, privRef := r.seal(refPol.Hash().Digest, nil)
+	out, err = signedTPM2Unseal(r.tpm, r.srk, pubRef, privRef, r.pub(), "initrd", pubkeyPCRs, nil, "sha256", both, nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte(signedTestSecret), out)
+
+	plainOnly := r.sigJSON(debugPCR, pol, r.signPolicy(pol))
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pubRef, privRef, r.pub(), "initrd", pubkeyPCRs, nil, "sha256", plainOnly, nil)
+	require.Error(t, err, "a ref'd token must not unseal with an unreferenced signature")
 }
 
 // TestSignedUnsealWithPIN covers a signed policy combined with a PIN
@@ -372,12 +434,12 @@ func TestSignedUnsealWithPIN(t *testing.T) {
 	sig := r.sigJSON(debugPCR, approved, r.signPolicy(approved))
 
 	// Correct PIN unseals.
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", sig, pin)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", sig, pin)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out)
 
 	// Wrong PIN does not.
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", sig, []byte("9999"))
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", sig, []byte("9999"))
 	require.Error(t, err, "a wrong PIN must not unseal")
 }
 
@@ -435,7 +497,7 @@ func TestLeaveInitrdForwardLockDefeatedByDefaultPhaseSignature(t *testing.T) {
 	// Default-phase signature (E and L both signed): the post-pivot init at L finds
 	// the leave-initrd entry, so the key UNSEALS — the forward-lock is defeated.
 	defaultSig := sigJSONEntries(r.pub(), pcrKernelBoot, [][2][]byte{{polE, sigE}, {polL, sigL}})
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", defaultSig, nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", defaultSig, nil)
 	require.NoError(t, err,
 		"default full-phase signature signs the leave-initrd state, so advancing PCR11 to L does NOT deny the key")
 	require.Equal(t, []byte(signedTestSecret), out, "key leaks at L when leave-initrd is among the signed phases")
@@ -443,7 +505,7 @@ func TestLeaveInitrdForwardLockDefeatedByDefaultPhaseSignature(t *testing.T) {
 	// enter-initrd-restricted signature (only E signed): at L no signature matches
 	// the live PCR11, so the key is DENIED — the forward-lock actually locks.
 	restrictedSig := sigJSONEntries(r.pub(), pcrKernelBoot, [][2][]byte{{polE, sigE}})
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", restrictedSig, nil)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", restrictedSig, nil)
 	require.Error(t, err,
 		"with an enter-initrd-restricted signature, no entry matches PCR11 == L, so the forward-lock denies the key")
 }
@@ -486,7 +548,7 @@ func TestPCR15LatchDeniesAtLeaveInitrd(t *testing.T) {
 	// PCR11 at L (forward-locked) and PCR15 still 0: the leave-initrd signature
 	// satisfies the signed half, so the key UNSEALS — the hole the phase lock can't
 	// close.
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
 	require.NoError(t, err, "at PCR11 == L with leave-initrd signed, the signed half is satisfiable")
 	require.Equal(t, []byte(signedTestSecret), out, "the phase lock alone does not deny the key here")
 
@@ -499,7 +561,7 @@ func TestPCR15LatchDeniesAtLeaveInitrd(t *testing.T) {
 		Digests:   tpm2.TPMLDigestValues{Digests: []tpm2.TPMTHA{{HashAlg: tpm2.TPMAlgSHA256, Digest: d[:]}}},
 	}).Execute(r.tpm)
 	require.NoError(t, err)
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", defaultSig, nil)
 	require.Error(t, err,
 		"once PCR15 is dirtied, the literal 15 == 0 clause denies the key even though leave-initrd is signed")
 }
@@ -548,7 +610,7 @@ func TestSignedUnsealWithLiteralPCRComposition(t *testing.T) {
 	sig := r.sigJSON(pcrKernelBoot, approved, r.signPolicy(approved))
 
 	// Combined unseal succeeds: signed PCR 11 matches, literal PCR 15 still zero.
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", sig, nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", sig, nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out, "signed PCR 11 + literal PCR 15 must unseal in one token")
 
@@ -560,7 +622,7 @@ func TestSignedUnsealWithLiteralPCRComposition(t *testing.T) {
 		Digests:   tpm2.TPMLDigestValues{Digests: []tpm2.TPMTHA{{HashAlg: tpm2.TPMAlgSHA256, Digest: d[:]}}},
 	}).Execute(r.tpm)
 	require.NoError(t, err)
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, literalPCRs, "sha256", sig, nil)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", sig, nil)
 	require.Error(t, err, "once the PCR 15 latch extends, the literal binding must block re-unseal")
 }
 
@@ -604,7 +666,7 @@ func TestSignedUnsealLiteralPCR15MustBindZero(t *testing.T) {
 	// Correct recipe — PCR 15 bound to its all-zero reset value (`15:sha256=<zeros>`).
 	zero := sha256.Sum256(make([]byte, 32))
 	pubZero, privZero := sealPCR15(zero[:])
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pubZero, privZero, r.pub(), pubkeyPCRs, literalPCRs, "sha256", sig, nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pubZero, privZero, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", sig, nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out, "a PCR 15 binding to all-zeros must unseal in the initrd")
 
@@ -613,7 +675,7 @@ func TestSignedUnsealLiteralPCR15MustBindZero(t *testing.T) {
 	// presenting PCR 15 = 0, must NOT satisfy it.
 	live := sha256.Sum256(bytes.Repeat([]byte{0x5a}, 32))
 	pubHost, privHost := sealPCR15(live[:])
-	_, err = signedTPM2Unseal(r.tpm, r.srk, pubHost, privHost, r.pub(), pubkeyPCRs, literalPCRs, "sha256", sig, nil)
+	_, err = signedTPM2Unseal(r.tpm, r.srk, pubHost, privHost, r.pub(), "", pubkeyPCRs, literalPCRs, "sha256", sig, nil)
 	require.Error(t, err, "a PCR 15 binding to the live (non-zero) host value must NOT unseal when booster presents PCR 15 = 0")
 }
 
@@ -641,12 +703,12 @@ func TestSignedUnsealAtEnterInitrdBarrier(t *testing.T) {
 	extendPhasePCR11(t, r.tpm, phaseEnterInitrd)
 
 	// The bare-value signature must NOT unseal now: the barrier advanced PCR 11.
-	_, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", bareSig, nil)
+	_, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", bareSig, nil)
 	require.Error(t, err, "a bare-PCR11 signature must not unseal after the enter-initrd barrier")
 
 	// A signature for the post-barrier (enter-initrd) value unseals — the standard case.
 	enter := r.policyPCRDigest(pcrKernelBoot)
-	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), pubkeyPCRs, nil, "sha256", r.sigJSON(pcrKernelBoot, enter, r.signPolicy(enter)), nil)
+	out, err := signedTPM2Unseal(r.tpm, r.srk, pub, priv, r.pub(), "", pubkeyPCRs, nil, "sha256", r.sigJSON(pcrKernelBoot, enter, r.signPolicy(enter)), nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte(signedTestSecret), out, "a signature for the enter-initrd PCR11 value must unseal")
 }

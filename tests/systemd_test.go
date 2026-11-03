@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/anatol/vmtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,6 +77,67 @@ func TestSystemdTPM2(t *testing.T) {
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 
+// TestNvPCRSetupBeforeTPM2Unlock boots with the host's NvPCR definitions, which
+// the generator bundles, on a boot that counts as measured. Booster must
+// initialize them and extend the PCR 9 separator before any TPM user runs, as
+// systemd-tpm2-setup-early and systemd-pcrnvdone do in a systemd initrd: the
+// systemd-tpm2 and clevis unlocks, and resume, whose kernel uses the NvPCRs
+// this boot sets up. The swap disk holds no hibernation image, so the kernel
+// carries on booting after booster hands it the device.
+func TestNvPCRSetupBeforeTPM2Unlock(t *testing.T) {
+	t.Parallel()
+	if !hostBundlesNvPCRs() {
+		t.Skip("host systemd is older than 262")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		disks  []vmtest.QemuDisk
+		args   []string
+		before string // the TPM user that must wait for the setup
+	}{
+		{
+			name:   "systemd-tpm2",
+			disks:  []vmtest.QemuDisk{{Path: "assets/systemd-tpm2.img", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2"},
+			before: "recovered password from systemd-tpm2 token",
+		},
+		{
+			name:   "clevis-tpm2",
+			disks:  []vmtest.QemuDisk{{Path: "assets/luks2.clevis.tpm2.img", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=3756ba2c-1505-4283-8f0b-b1d1bd7b844f", "root=UUID=c3cc0321-fba8-42c3-ad73-d13f8826d8d7"},
+			before: "recovered password from clevis token",
+		},
+		{
+			name:   "resume",
+			disks:  []vmtest.QemuDisk{{Path: "assets/systemd-tpm2.img", Format: "raw"}, {Path: "assets/swap.raw", Format: "raw"}},
+			args:   []string{"rd.luks.uuid=5cbc48ce-0e78-4c6b-ac90-a8a540514b90", "root=UUID=d8673e36-d4a3-4408-a87d-be0cb79f91a2", "resume=UUID=5ec330f5-ac5e-48d2-98b6-87fd3e9b272f"},
+			before: "resuming device",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			swtpm, params, err := startSwtpm(t)
+			require.NoError(t, err)
+			defer swtpm.Kill()
+
+			vm, err := buildVmInstance(t, Opts{
+				disks:      tc.disks,
+				kernelArgs: append(tc.args, "systemd.tpm2_measured_os=1"),
+				params:     params,
+			})
+			require.NoError(t, err)
+			defer vm.Shutdown()
+
+			require.NoError(t, vm.ConsoleExpect("NvPCR(s) initialized"))
+			require.NoError(t, vm.ConsoleExpect(`PCR9: extended "nvpcr-separator"`))
+			require.NoError(t, vm.ConsoleExpect(tc.before))
+			require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+		})
+	}
+}
+
 // TestSystemdTPM2SignedPolicy boots a volume enrolled to a signed (authorized)
 // PCR policy: a real systemd-cryptenroll --tpm2-public-key token bound to PCR 11,
 // unsealed with a real systemd-measure signature for the enter-initrd phase. This
@@ -114,6 +176,93 @@ func TestSystemdTPM2SignedPolicy(t *testing.T) {
 	require.NoError(t, err)
 	defer vm.Shutdown()
 
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestSystemdTPM2SignedPolicyModularTPM pins the signed PCR 11 unlock on a
+// kernel whose TPM driver is a module. Void's kernel has tpm_tis as a module
+// and NVMe built in, so the LUKS device is found before the TPM exists. If
+// booster does not wait for the TPM, the token fails and the boot stops at the
+// passphrase prompt. A virtio-scsi disk does not show this: its driver is a
+// module too and loads at the same time as tpm_tis.
+func TestSystemdTPM2SignedPolicyModularTPM(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, checkAsset("assets/voidlinux.img")) // it will generate vmlinuz-version needed later
+	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
+	require.NoError(t, err)
+
+	swtpm, params, err := startSwtpm(t)
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	sigPath, err := filepath.Abs("assets/systemd-tpm2-signed.pcrsig.json")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		modulesDirectory: "assets/voidlinux/modules",
+		kernelPath:       "assets/voidlinux/vmlinuz",
+		kernelVersion:    string(voidlinuxKernelVersion),
+		modules:          "tpm_tis",
+		disks:            []vmtest.QemuDisk{{Path: "assets/systemd-tpm2-signed.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+		kernelArgs: []string{
+			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
+			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
+			"rd.luks.options=tpm2-signature=" + sigPath,
+		},
+		extraFiles: sigPath,
+		params:     params,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
+}
+
+// TestNvPCRSetupModularTPMPlymouth pins the NvPCR setup on a kernel whose TPM
+// driver is a module, with plymouth enabled. tpm_tis is requested only after
+// plymouth has started, and plymouth waits up to 5 seconds for a GPU this VM
+// never gets. A setup whose 3 second TPM wait started at boot ran out before
+// the driver was requested, gave up, and the boot went on with the NvPCRs
+// never initialized.
+func TestNvPCRSetupModularTPMPlymouth(t *testing.T) {
+	t.Parallel()
+	if !hostBundlesNvPCRs() {
+		t.Skip("host systemd is older than 262")
+	}
+
+	require.NoError(t, checkAsset("assets/voidlinux.img")) // it will generate vmlinuz-version needed later
+	voidlinuxKernelVersion, err := os.ReadFile("assets/voidlinux/vmlinuz-version")
+	require.NoError(t, err)
+
+	swtpm, params, err := startSwtpm(t)
+	require.NoError(t, err)
+	defer swtpm.Kill()
+
+	sigPath, err := filepath.Abs("assets/systemd-tpm2-signed.pcrsig.json")
+	require.NoError(t, err)
+
+	vm, err := buildVmInstance(t, Opts{
+		modulesDirectory: "assets/voidlinux/modules",
+		kernelPath:       "assets/voidlinux/vmlinuz",
+		kernelVersion:    string(voidlinuxKernelVersion),
+		modules:          "tpm_tis",
+		disks:            []vmtest.QemuDisk{{Path: "assets/systemd-tpm2-signed.img", Format: "raw", Controller: "nvme,serial=boostfoo"}},
+		kernelArgs: []string{
+			"rd.luks.uuid=2d6f1b84-9c3a-4e57-bf02-7a1c5e8d4f60",
+			"root=UUID=3e7a2c95-ad48-4f16-9b73-1c0d8e5a6b42",
+			"rd.luks.options=tpm2-signature=" + sigPath,
+			"systemd.tpm2_measured_os=1",
+			"splash",
+		},
+		extraFiles:     sigPath,
+		params:         params,
+		enablePlymouth: true,
+	})
+	require.NoError(t, err)
+	defer vm.Shutdown()
+
+	require.NoError(t, vm.ConsoleExpect("NvPCR(s) initialized"))
 	require.NoError(t, vm.ConsoleExpect("Hello, booster!"))
 }
 

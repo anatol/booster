@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,8 @@ var defaultECCParams = &tpm2.ECCParams{
 
 var enableSwEmulator bool
 
+const tpmDevice = "/dev/tpmrm0"
+
 func openTPM() (io.ReadWriteCloser, error) {
 	var dev io.ReadWriteCloser
 	var err error
@@ -43,7 +46,7 @@ func openTPM() (io.ReadWriteCloser, error) {
 	if enableSwEmulator {
 		dev, err = net.Dial("tcp", ":2321") // swtpm emulator is listening at port 2321
 	} else {
-		dev, err = tpm2.OpenTPM("/dev/tpmrm0")
+		dev, err = tpm2.OpenTPM(tpmDevice)
 	}
 	if err != nil {
 		return nil, err
@@ -68,6 +71,13 @@ func tpmAvailable() bool {
 
 // Waits until a tpm device is available for use. Times out and returns false after 3 seconds.
 func tpmAwaitReady() bool {
+	// A built-in driver registers the device before init starts listening, so
+	// no uevent ever arrives for it.
+	if !enableSwEmulator {
+		if _, err := os.Stat(tpmDevice); err == nil {
+			return true
+		}
+	}
 	timedOut := waitTimeout(&tpmReadyWg, time.Second*3)
 	if timedOut {
 		info("no tpm devices found after 3 seconds.")
@@ -120,8 +130,6 @@ func tpm2AuthFromPIN(input []byte) []byte {
 }
 
 func tpm2Unseal(public, private []byte, pcrs []int, bank tpm2.Algorithm, policyHash, password []byte, srkHandle tpmutil.Handle) ([]byte, error) {
-	tpmAwaitReady()
-
 	dev, err := openTPM()
 	if err != nil {
 		return nil, err
@@ -192,6 +200,9 @@ const pcrSystemIdentity = 15
 // value at unseal must match systemd's — which, in the initrd, is the UKI
 // measurement plus the "enter-initrd" phase word.
 const pcrKernelBoot = 11
+
+// pcrKernelInitrd is PCR 9, where systemd records NvPCR initialization.
+const pcrKernelInitrd = 9
 
 // Boot-phase words measured into PCR 11. enter-initrd is extended before
 // unsealing a PCR11-bound volume so the live PCR matches systemd's signed
@@ -272,6 +283,7 @@ type volumeKeyHMACer interface {
 // bank's own hash algorithm. Extending ALL active banks is required — a policy
 // satisfiable via an un-extended bank would otherwise be bypassable.
 func measureVolumeKeyToPCR15(k volumeKeyHMACer, volumeName, luksUUID string) error {
+	awaitNvPCRSetup()
 	dev, err := openTPM()
 	if err != nil {
 		return err
@@ -317,7 +329,11 @@ func measurePhaseToPCR11(word string) error {
 		return err
 	}
 	defer dev.Close()
+	return extendPCRWord(dev, pcrKernelBoot, word)
+}
 
+// extendPCRWord extends pcr with bankHash(word) in every active bank.
+func extendPCRWord(dev io.ReadWriter, pcr int, word string) error {
 	banks, err := activePCRBanks(dev)
 	if err != nil {
 		return fmt.Errorf("reading active PCR banks: %v", err)
@@ -329,15 +345,15 @@ func measurePhaseToPCR11(word string) error {
 	for _, bank := range banks {
 		h, ok := cryptoHashForPCRBank(bank)
 		if !ok {
-			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcrKernelBoot)
+			return fmt.Errorf("unsupported active PCR bank %v; refusing to leave PCR%d un-extended", bank, pcr)
 		}
 		hh := h.New()
 		hh.Write([]byte(word))
-		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcrKernelBoot), bank, hh.Sum(nil), ""); err != nil {
-			return fmt.Errorf("extending PCR%d in bank %v: %v", pcrKernelBoot, bank, err)
+		if err := tpm2.PCRExtend(dev, tpmutil.Handle(pcr), bank, hh.Sum(nil), ""); err != nil {
+			return fmt.Errorf("extending PCR%d in bank %v: %v", pcr, bank, err)
 		}
 	}
-	debug("PCR%d: extended phase %q across %d active bank(s) %v", pcrKernelBoot, word, len(banks), banks)
+	debug("PCR%d: extended %q across %d active bank(s) %v", pcr, word, len(banks), banks)
 	return nil
 }
 
@@ -369,6 +385,7 @@ func ensureEnterInitrdBarrier() error {
 // through ensureEnterInitrdBarrier (sync.Once), so it is extended at most once
 // per boot. Best-effort: a failed extend warns rather than aborting handoff.
 func applyBootPhaseForwardLock() {
+	awaitNvPCRSetup()
 	if err := ensureEnterInitrdBarrier(); err != nil {
 		// ensureEnterInitrdBarrier failed (no TPM, or the extend errored); skip the
 		// leave-initrd extend.

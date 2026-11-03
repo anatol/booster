@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -40,13 +41,19 @@ func resolveSignature(opt string) (data []byte, enabled bool, err error) {
 		}
 		return data, true, nil
 	default:
-		for _, p := range pcrSignatureSearchPaths {
-			if data, err := os.ReadFile(p); err == nil {
-				return data, true, nil
-			}
-		}
-		return nil, false, nil
+		data := readFirstFile(pcrSignatureSearchPaths)
+		return data, data != nil, nil
 	}
+}
+
+// readFirstFile returns the contents of the first readable path, or nil.
+func readFirstFile(paths []string) []byte {
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			return data
+		}
+	}
+	return nil
 }
 
 // parseSignedToken extracts the signed (authorized) PCR policy fields from a
@@ -57,39 +64,48 @@ func resolveSignature(opt string) (data []byte, enabled bool, err error) {
 // valid signature for the current PCRs is available.
 //
 // ok is false with a nil error when the token has no tpm2_pubkey — i.e. it is a
-// literal-PCR token that the existing unseal path handles.
-func parseSignedToken(payload []byte) (pub *rsa.PublicKey, pubkeyPCRs []int, ok bool, err error) {
+// literal-PCR token that the existing unseal path handles. ref is the policy
+// reference the token was enrolled with (--tpm2-public-key-policyref), usually "".
+func parseSignedToken(payload []byte) (pub *rsa.PublicKey, pubkeyPCRs []int, ref string, ok bool, err error) {
 	var node struct {
 		Pubkey     string `json:"tpm2_pubkey"`
 		PubkeyPCRs []int  `json:"tpm2_pubkey_pcrs"`
+		PubkeyRef  string `json:"tpm2_pubkey_ref"`
 	}
 	if err := json.Unmarshal(payload, &node); err != nil {
-		return nil, nil, false, err
+		return nil, nil, "", false, err
 	}
 	if node.Pubkey == "" {
-		return nil, nil, false, nil
+		return nil, nil, "", false, nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(node.Pubkey)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("tpm2_pubkey: %v", err)
+		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: %v", err)
 	}
-	// systemd-cryptenroll stores the public key PEM-encoded (the token field is
-	// base64 of the PEM text, decoded with PEM_read_PUBKEY); accept a raw DER
-	// body too so callers that pass DER still work.
-	der := raw
-	if block, _ := pem.Decode(raw); block != nil {
+	rsaKey, err := parseRSAPublicKey(raw)
+	if err != nil {
+		return nil, nil, "", false, fmt.Errorf("tpm2_pubkey: %v", err)
+	}
+	return rsaKey, node.PubkeyPCRs, node.PubkeyRef, true, nil
+}
+
+// parseRSAPublicKey parses a PEM or raw DER SubjectPublicKeyInfo. systemd
+// stores PEM (the token field is base64 of the PEM text, decoded with
+// PEM_read_PUBKEY), and its signed-policy verify path is RSA-only.
+func parseRSAPublicKey(data []byte) (*rsa.PublicKey, error) {
+	der := data
+	if block, _ := pem.Decode(data); block != nil {
 		der = block.Bytes
 	}
 	key, err := x509.ParsePKIXPublicKey(der)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("tpm2_pubkey: %v", err)
+		return nil, err
 	}
 	rsaKey, isRSA := key.(*rsa.PublicKey)
 	if !isRSA {
-		// systemd's signed-policy verify path is RSA-only.
-		return nil, nil, false, fmt.Errorf("tpm2_pubkey: unsupported key type %T (only RSA)", key)
+		return nil, fmt.Errorf("unsupported key type %T (only RSA)", key)
 	}
-	return rsaKey, node.PubkeyPCRs, true, nil
+	return rsaKey, nil
 }
 
 // pcrSignature is one entry of systemd's PCR signature JSON (produced by
@@ -100,7 +116,8 @@ type pcrSignature struct {
 	PCRs []int  `json:"pcrs"`
 	Pkfp string `json:"pkfp"` // hex SHA256 of the PKCS#1 DER public key
 	Pol  string `json:"pol"`  // hex of the signed PolicyPCR digest
-	Sig  []byte `json:"sig"`  // RSA (RSASSA, SHA256) signature over Pol
+	Ref  string `json:"ref"`  // policy reference, e.g. "initrd"; empty for none
+	Sig  []byte `json:"sig"`  // RSA (RSASSA, SHA256) signature over Pol and the ref digest
 }
 
 // parseSignatureJSON parses systemd's {bank: [pcrSignature, …]} signature file.
@@ -121,25 +138,36 @@ func rsaPublicKeyFingerprint(pub *rsa.PublicKey) string {
 }
 
 // selectSignature returns the signature entry for bank whose public-key
-// fingerprint matches pub and whose signed policy digest equals polDigest (the
-// PolicyPCR digest computed for the current PCR values).
-func selectSignature(sigs map[string][]pcrSignature, bank string, pub *rsa.PublicKey, polDigest []byte) (pcrSignature, error) {
+// fingerprint matches pub, whose policy reference equals ref, and whose signed
+// policy digest equals polDigest (the PolicyPCR digest computed for the current
+// PCR values). systemd skips entries with another ref (tpm2-util.c find_signature).
+func selectSignature(sigs map[string][]pcrSignature, bank string, pub *rsa.PublicKey, polDigest []byte, ref string) (pcrSignature, error) {
 	fp := rsaPublicKeyFingerprint(pub)
 	want := hex.EncodeToString(polDigest)
 	for _, e := range sigs[bank] {
-		if strings.EqualFold(e.Pkfp, fp) && strings.EqualFold(e.Pol, want) {
+		if strings.EqualFold(e.Pkfp, fp) && e.Ref == ref && strings.EqualFold(e.Pol, want) {
 			return e, nil
 		}
 	}
-	return pcrSignature{}, fmt.Errorf("no PCR signature for bank %q matching key %s and policy %s", bank, fp, want)
+	return pcrSignature{}, fmt.Errorf("no PCR signature for bank %q matching key %s, ref %q and policy %s", bank, fp, ref, want)
+}
+
+// policyRefDigest is systemd's TPM2B policyRef for a reference string: SHA256 of
+// the string, or empty for no reference (tpm2-util.c tpm2_make_policy_ref).
+func policyRefDigest(ref string) []byte {
+	if ref == "" {
+		return nil
+	}
+	h := sha256.Sum256([]byte(ref))
+	return h[:]
 }
 
 // rsaPublicArea builds the TPM public area for an external RSA verification key,
 // matching how systemd loads the signed-policy public key: SHA256 name algorithm,
 // NULL scheme and symmetric, sign+decrypt+userWithAuth. The TPM derives the key
 // Name from these exact fields, and that Name feeds the PolicyAuthorize digest, so
-// it must byte-match systemd's. The RSA exponent is encoded ambiguously across TPM
-// implementations: callers try 0x10001, then 0, because the Name differs between them.
+// it must byte-match systemd's. Unseal callers try exponent 0x10001, then 0,
+// because the Name differs between them.
 func rsaPublicArea(pub *rsa.PublicKey, exponent uint32) tpm2.TPMTPublic {
 	return tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgRSA,
@@ -188,7 +216,7 @@ func flushHandle(t transport.TPM, h tpm2.TPMHandle) {
 // token also binds (tpm2-pcrs, e.g. 7 or the 15 latch): systemd composes them as
 // a PolicyPCR after the PolicyAuthorize, so the volume key can bind both a signed
 // PCR 11 and literal PCRs in one token.
-func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPublic, private tpm2.TPM2BPrivate, verifyKey *rsa.PublicKey, pubkeyPCRs, literalPCRs []int, bankName string, sigJSON []byte, pin []byte) ([]byte, error) {
+func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPublic, private tpm2.TPM2BPrivate, verifyKey *rsa.PublicKey, ref string, pubkeyPCRs, literalPCRs []int, bankName string, sigJSON []byte, pin []byte) ([]byte, error) {
 	if bankName == "" {
 		return nil, fmt.Errorf("systemd-tpm2 token has no PCR bank")
 	}
@@ -204,11 +232,12 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	defer flushHandle(t, loadRsp.ObjectHandle)
 	obj := tpm2.NamedHandle{Handle: loadRsp.ObjectHandle, Name: loadRsp.Name}
 
-	// The RSA exponent is encoded ambiguously across TPM implementations and it
-	// feeds the key Name that PolicyAuthorize checks, so try 0x10001 then 0.
+	// Some systemd versions enrolled the default RSA exponent as 0 (systemd bug
+	// 30546) and it feeds the key Name that PolicyAuthorize checks, so try
+	// 0x10001 then 0, as systemd's unseal does.
 	var lastErr error
 	for _, exp := range []uint32{0x10001, 0} {
-		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, pubkeyPCRs, literalPCRs, pin)
+		out, err := signedUnsealAttempt(t, obj, sigs, bankName, verifyKey, exp, ref, pubkeyPCRs, literalPCRs, pin)
 		if err == nil {
 			return out, nil
 		}
@@ -217,7 +246,7 @@ func signedTPM2Unseal(t transport.TPM, srk tpm2.NamedHandle, public tpm2.TPM2BPu
 	return nil, lastErr
 }
 
-func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, pubkeyPCRs, literalPCRs []int, pin []byte) ([]byte, error) {
+func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, pubkeyPCRs, literalPCRs []int, pin []byte) ([]byte, error) {
 	// With a PIN, the session carries the object's auth value so the trailing
 	// PolicyAuthValue (composed after PolicyAuthorize, matching systemd) is satisfied.
 	var sessOpts []tpm2.AuthOption
@@ -230,53 +259,8 @@ func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string]
 	}
 	defer cleanup()
 
-	pcrsU := make([]uint, len(pubkeyPCRs))
-	for i, p := range pubkeyPCRs {
-		pcrsU[i] = uint(p)
-	}
-	sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
-		Hash:      pcrBankAlgID(bankName),
-		PCRSelect: tpm2.PCClientCompatible.PCRs(pcrsU...),
-	}}}
-	if _, err := (&tpm2.PolicyPCR{PolicySession: sess.Handle(), Pcrs: sel}).Execute(t); err != nil {
-		return nil, fmt.Errorf("PolicyPCR: %v", err)
-	}
-
-	pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess.Handle()}).Execute(t)
-	if err != nil {
+	if err := policyAuthorizeSigned(t, sess.Handle(), sigs, bankName, verifyKey, exp, ref, pubkeyPCRs, nil); err != nil {
 		return nil, err
-	}
-	approved := pgd.PolicyDigest.Buffer
-
-	entry, err := selectSignature(sigs, bankName, verifyKey, approved)
-	if err != nil {
-		return nil, err
-	}
-
-	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(verifyKey, exp)), Hierarchy: tpm2.TPMRHOwner}).Execute(t)
-	if err != nil {
-		return nil, fmt.Errorf("loading verification key: %v", err)
-	}
-	defer flushHandle(t, le.ObjectHandle)
-
-	h := sha256.Sum256(approved)
-	vs, err := (&tpm2.VerifySignature{
-		KeyHandle: le.ObjectHandle,
-		Digest:    tpm2.TPM2BDigest{Buffer: h[:]},
-		Signature: rsassaSHA256Sig(entry.Sig),
-	}).Execute(t)
-	if err != nil {
-		return nil, fmt.Errorf("verifying PCR signature: %v", err)
-	}
-
-	if _, err := (&tpm2.PolicyAuthorize{
-		PolicySession:  sess.Handle(),
-		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: approved},
-		PolicyRef:      tpm2.TPM2BDigest{},
-		KeySign:        le.Name,
-		CheckTicket:    vs.Validation,
-	}).Execute(t); err != nil {
-		return nil, fmt.Errorf("PolicyAuthorize: %v", err)
 	}
 
 	// Literal (unsigned) PCRs are a plain PolicyPCR after the PolicyAuthorize,
@@ -311,6 +295,87 @@ func signedUnsealAttempt(t transport.TPM, obj tpm2.NamedHandle, sigs map[string]
 		return nil, fmt.Errorf("unseal: %v", err)
 	}
 	return unseal.OutData.Buffer, nil
+}
+
+// policyTicket is a VerifySignature result. The TPM keeps no record of a
+// ticket, so PolicyAuthorize accepts it again for the same approved digest.
+type policyTicket struct {
+	approved   []byte
+	keyName    tpm2.TPM2BName
+	validation tpm2.TPMTTKVerified
+}
+
+// policyAuthorizeSigned runs PolicyPCR over pcrs in sess, finds the signature for
+// the resulting digest and ref, and satisfies PolicyAuthorize with it. The signed
+// data is the approved digest followed by the ref digest (TPM 2.0 Part 3,
+// PolicyAuthorize; systemd tpm2_make_policy_authorize_tbs_data). A non-nil
+// cache holding a ticket for the same digest skips the signature check.
+func policyAuthorizeSigned(t transport.TPM, sess tpm2.TPMHandle, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, pcrs []int, cache *policyTicket) error {
+	pcrsU := make([]uint, len(pcrs))
+	for i, p := range pcrs {
+		pcrsU[i] = uint(p)
+	}
+	sel := tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+		Hash:      pcrBankAlgID(bankName),
+		PCRSelect: tpm2.PCClientCompatible.PCRs(pcrsU...),
+	}}}
+	if _, err := (&tpm2.PolicyPCR{PolicySession: sess, Pcrs: sel}).Execute(t); err != nil {
+		return fmt.Errorf("PolicyPCR: %w", err)
+	}
+
+	pgd, err := (&tpm2.PolicyGetDigest{PolicySession: sess}).Execute(t)
+	if err != nil {
+		return err
+	}
+	approved := pgd.PolicyDigest.Buffer
+	refDigest := policyRefDigest(ref)
+
+	if cache == nil || !bytes.Equal(cache.approved, approved) {
+		tk, err := verifyPolicySignature(t, sigs, bankName, verifyKey, exp, ref, approved)
+		if err != nil {
+			return err
+		}
+		if cache == nil {
+			cache = &policyTicket{}
+		}
+		*cache = tk
+	}
+	if _, err := (&tpm2.PolicyAuthorize{
+		PolicySession:  sess,
+		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: approved},
+		PolicyRef:      tpm2.TPM2BDigest{Buffer: refDigest},
+		KeySign:        cache.keyName,
+		CheckTicket:    cache.validation,
+	}).Execute(t); err != nil {
+		return fmt.Errorf("PolicyAuthorize: %w", err)
+	}
+	return nil
+}
+
+// verifyPolicySignature has the TPM check the signature over approved and ref
+// and returns the ticket PolicyAuthorize takes.
+func verifyPolicySignature(t transport.TPM, sigs map[string][]pcrSignature, bankName string, verifyKey *rsa.PublicKey, exp uint32, ref string, approved []byte) (policyTicket, error) {
+	entry, err := selectSignature(sigs, bankName, verifyKey, approved, ref)
+	if err != nil {
+		return policyTicket{}, err
+	}
+
+	le, err := (&tpm2.LoadExternal{InPublic: tpm2.New2B(rsaPublicArea(verifyKey, exp)), Hierarchy: tpm2.TPMRHOwner}).Execute(t)
+	if err != nil {
+		return policyTicket{}, fmt.Errorf("loading verification key: %w", err)
+	}
+	defer flushHandle(t, le.ObjectHandle)
+
+	h := sha256.Sum256(append(append([]byte{}, approved...), policyRefDigest(ref)...))
+	vs, err := (&tpm2.VerifySignature{
+		KeyHandle: le.ObjectHandle,
+		Digest:    tpm2.TPM2BDigest{Buffer: h[:]},
+		Signature: rsassaSHA256Sig(entry.Sig),
+	}).Execute(t)
+	if err != nil {
+		return policyTicket{}, fmt.Errorf("verifying PCR signature: %w", err)
+	}
+	return policyTicket{approved: approved, keyName: le.Name, validation: vs.Validation}, nil
 }
 
 // pcrBankAlgID maps a systemd tpm2-pcr-bank string to its TPM algorithm id,
@@ -352,7 +417,7 @@ func loadSignedSRK(t transport.TPM, srkHandle uint32) (tpm2.NamedHandle, func(),
 // the PIN auth value (nil when the token has no PIN); this builds the new-API
 // types, opens the TPM, and runs the PolicyAuthorize unseal. Returns the raw
 // volume key (the caller base64-encodes, matching the literal path).
-func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubkeyPCRs, literalPCRs []int, verifyKey *rsa.PublicKey, srkHandle uint32, tpm2Signature string, pinAuth []byte) ([]byte, error) {
+func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubkeyPCRs, literalPCRs []int, verifyKey *rsa.PublicKey, ref string, srkHandle uint32, tpm2Signature string, pinAuth []byte) ([]byte, error) {
 	sigJSON, enabled, err := resolveSignature(tpm2Signature)
 	if err != nil {
 		return nil, err
@@ -379,5 +444,5 @@ func recoverSignedTPM2Password(public, private []byte, pcrBankName string, pubke
 	}
 	defer flush()
 
-	return signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, pubkeyPCRs, literalPCRs, pcrBankName, sigJSON, pinAuth)
+	return signedTPM2Unseal(thetpm, srk, tpm2.New2B(*pubArea), tpm2.TPM2BPrivate{Buffer: private}, verifyKey, ref, pubkeyPCRs, literalPCRs, pcrBankName, sigJSON, pinAuth)
 }

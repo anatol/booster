@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
+	"io"
 	"net"
 	"os/exec"
 	"sync"
@@ -59,9 +60,20 @@ func readPCRIndex(t *testing.T, bank tpm2.Algorithm, idx int) []byte {
 	dev, err := openTPM()
 	require.NoError(t, err)
 	defer dev.Close()
+	return readPCRFrom(t, dev, bank, idx)
+}
+
+// readPCRFrom reads over a connection the caller holds; swtpm serves one client
+// at a time.
+func readPCRFrom(t *testing.T, dev io.ReadWriter, bank tpm2.Algorithm, idx int) []byte {
+	t.Helper()
 	pcrs, err := tpm2.ReadPCRs(dev, tpm2.PCRSelection{Hash: bank, PCRs: []int{idx}})
 	require.NoError(t, err)
 	return pcrs[idx]
+}
+
+func readSHA256PCRFrom(t *testing.T, dev io.ReadWriter, idx int) []byte {
+	return readPCRFrom(t, dev, tpm2.AlgSHA256, idx)
 }
 
 // TestMeasurePhaseToPCR11 pins the boot-phase barrier byte format: booster
