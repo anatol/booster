@@ -829,6 +829,28 @@ func compileBinaries(dir string) error {
 		log.Printf("fido2plugin.so build skipped (libfido2 may not be installed): %v", unwrapExitError(err))
 	}
 
+	// Build clevisplugin.so. The test images are universal, so the generator bundles the
+	// plugin when it sits next to init and otherwise disables Clevis; without it the Clevis
+	// tests would boot an image that cannot unlock its device. It needs no system library,
+	// so unlike fido2plugin a failed build is fatal. It shares init's build tags and race
+	// mode, since plugin.Open rejects a plugin built against different package versions.
+	clevisArgs := []string{"build", "-buildmode=plugin", "-o", dir + "/clevisplugin.so", "-tags", "test"}
+	if israce.Enabled {
+		clevisArgs = append(clevisArgs, "-race")
+	}
+	clevisCmd := exec.Command("go", append(clevisArgs, "./clevisplugin")...)
+	if testing.Verbose() {
+		log.Print("Call 'go build' for clevisplugin")
+		clevisCmd.Stdout = os.Stdout
+		clevisCmd.Stderr = os.Stderr
+		err = clevisCmd.Run()
+	} else {
+		_, err = clevisCmd.Output() // fills ExitError.Stderr for unwrapExitError
+	}
+	if err != nil {
+		return fmt.Errorf("Cannot build clevisplugin.so: %v", unwrapExitError(err))
+	}
+
 	// Generate initramfs
 	if err := os.Chdir("../generator"); err != nil {
 		return err

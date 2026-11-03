@@ -48,7 +48,16 @@ CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO
 
 cd ../init
 
-CGO_ENABLED=0 go build -trimpath -mod=vendor
+CGO_ENABLED=1 go build -trimpath -mod=vendor
+for plugin_dir in fido2plugin clevisplugin; do
+  if [ -d "$plugin_dir" ]; then
+    cd "$plugin_dir"
+    CGO_ENABLED=1 CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}" \
+      go build -trimpath -mod=vendor -buildmode=plugin -o "../${plugin_dir}.so" .
+    cd ..
+  fi
+done
+cd ..
 
 %undefine _missing_build_ids_terminate_build # don't fail on missing build ids
 
@@ -60,6 +69,9 @@ touch $RPM_BUILD_ROOT/etc/booster.yaml
 
 %{__install} -Dp -m755 generator/generator "%{buildroot}/usr/bin/booster"
 %{__install} -Dp -m755 init/init "$RPM_BUILD_ROOT/usr/lib/booster/init"
+for p in init/*.so; do
+  [ -f "$p" ] && %{__install} -Dp -m755 "$p" "$RPM_BUILD_ROOT/usr/lib/booster/$(basename "$p")"
+done
 
 %{__mkdir_p} "$RPM_BUILD_ROOT/usr/share/yum-plugins/post-actions/scripts/" || : # create scripts directory in post actions
 %{__install} -Dp -m755 packaging/centos/booster-install "$RPM_BUILD_ROOT/usr/share/yum-plugins/post-actions/scripts/booster-install"
@@ -72,6 +84,7 @@ touch $RPM_BUILD_ROOT/etc/booster.yaml
 /etc/booster.yaml
 /usr/bin/booster
 /usr/lib/booster/init
+/usr/lib/booster/*.so
 /usr/share/yum-plugins/post-actions/scripts/booster-install
 /usr/share/yum-plugins/post-actions/scripts/booster-remove
 /etc/yum/post-actions/booster-post.action
