@@ -269,6 +269,70 @@ func startTangd() (*tang.NativeServer, []string, error) {
 	return tangd, []string{"-nic", fmt.Sprintf("user,id=n1,restrict=on,guestfwd=tcp:10.0.2.100:5697-tcp:localhost:%d", tangd.Port)}, nil
 }
 
+// QEMU's user networking answers only DHCPv6 Information-Requests, so it can
+// never lease an address.  A DHCPv6 test instead puts one guest NIC on passt,
+// which leases the guest an address over DHCPv6 and advertises itself as the
+// router, without root or a tap device.  passt runs IPv6 only and without its
+// DHCPv4 server, so the guest can only configure that NIC over DHCPv6.
+const (
+	dhcp6GuestMAC = "52:54:00:12:34:66"
+	// the address passt leases to the guest, from the documentation prefix
+	// (RFC 3849) so it is a global unicast address that no real network uses
+	dhcp6GuestAddr = "2001:db8:b005::100/64"
+	// the gateway passt advertises; the guest reaches the host's loopback
+	dhcp6HostIP = "2001:db8:b005::1"
+)
+
+// startDhcp6Net starts passt for an IPv6-only guest NIC, stopped when the test
+// ends.  It returns the qemu params adding that NIC, and a host address that
+// passt forwards to the guest's port 2222.  The test is skipped when passt is
+// not installed.
+func startDhcp6Net(t *testing.T) (params []string, sshAddr string) {
+	t.Helper()
+
+	passt, err := exec.LookPath("passt")
+	if err != nil {
+		t.Skip("passt is not installed")
+	}
+
+	sock := filepath.Join(t.TempDir(), "passt.sock")
+	hostPort := strconv.Itoa(pickFreePort(t))
+
+	cmd := exec.Command(passt,
+		"--foreground",
+		"--ipv6-only",
+		"--no-dhcp",
+		"--address", dhcp6GuestAddr,
+		"--gateway", dhcp6HostIP,
+		"--map-host-loopback", dhcp6HostIP,
+		"--tcp-ports", hostPort+":2222",
+		"--socket", sock,
+	)
+	logs := &testLogWriter{t: t}
+	cmd.Stdout = logs
+	cmd.Stderr = logs
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	// qemu fails to start if the socket is not there yet
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		require.False(t, time.Now().After(deadline), "passt did not create %s", sock)
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return []string{
+		"-netdev", "stream,id=n6,server=off,addr.type=unix,addr.path=" + sock,
+		"-device", "e1000,netdev=n6,mac=" + dhcp6GuestMAC,
+	}, "[::1]:" + hostPort
+}
+
 // createFido2LuksImage creates a temporary LUKS2 image with a FIDO2 token
 // enrolled against the currently-connected FIDO2 device.  The image is written
 // to t.TempDir() and cleaned up automatically when the test finishes.

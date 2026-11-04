@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vishvananda/netlink"
 	"github.com/yookoala/realpath"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
@@ -1093,6 +1094,14 @@ func boost() error {
 	}
 
 	rootMounted.Add(1)
+
+	if config.Network != nil {
+		if lo, err := netlink.LinkByName("lo"); err != nil {
+			warning("unable to find loopback: %v", err)
+		} else if err := netlink.LinkSetUp(lo); err != nil {
+			warning("unable to bring up loopback: %v", err)
+		}
+	}
 
 	go func() { check(udevListener()) }()
 
